@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iRacing Tuning Guide — Dual-CCD Ryzen X3D + NVIDIA</title>
+<meta name="description" content="A measurement-driven guide to eliminating iRacing stutters and freezes on dual-CCD Ryzen X3D (9950X3D/7950X3D/9900X3D/7900X3D) systems with NVIDIA GPUs.">
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a3240;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#3ea6ff; --accent2:#22c55e;
+    --warn:#f5b041; --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65;font-size:17px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:900px;margin:0 auto;padding:0 22px}
+  header.hero{background:radial-gradient(1200px 400px at 50% -10%,#12233b 0%,var(--bg) 60%);
+    border-bottom:1px solid var(--border);padding:64px 0 48px;text-align:center}
+  .badge{display:inline-block;background:var(--panel2);border:1px solid var(--border);
+    color:var(--muted);border-radius:999px;padding:5px 13px;font-size:13px;margin:4px}
+  h1{font-size:2.5rem;line-height:1.15;margin:18px 0 10px;letter-spacing:-.5px}
+  h1 .accent{color:var(--accent)}
+  .tag{color:var(--muted);font-size:1.15rem;max-width:640px;margin:0 auto 8px}
+  .promise{color:var(--accent2);font-weight:600;font-size:1.25rem;margin-top:14px}
+  .cta{margin-top:28px}
+  .btn{display:inline-block;background:var(--accent);color:#06121f;font-weight:700;
+    padding:13px 22px;border-radius:9px;margin:6px;border:1px solid transparent}
+  .btn:hover{filter:brightness(1.08);text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:40px 0 6px}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:18px 22px;min-width:150px}
+  .stat .big{font-size:1.9rem;font-weight:800;color:var(--accent2)}
+  .stat .lbl{color:var(--muted);font-size:.9rem}
+  section{padding:30px 0;border-bottom:1px solid var(--border)}
+  h2{font-size:1.6rem;margin:8px 0 6px;letter-spacing:-.3px}
+  h3{font-size:1.2rem;margin:22px 0 4px;color:var(--text)}
+  .lead{color:var(--muted)}
+  ul,ol{padding-left:22px}
+  li{margin:7px 0}
+  code{font-family:var(--mono);background:var(--panel2);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px;font-size:.9em}
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:9px;
+    padding:14px 16px;overflow:auto}
+  pre code{background:none;border:none;padding:0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.96rem}
+  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+  th{background:var(--panel2)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:16px}
+  .callout{background:#12233b;border:1px solid #244; border-left:4px solid var(--accent);
+    border-radius:8px;padding:14px 16px;margin:16px 0}
+  .callout.warn{background:#2a2213;border-left-color:var(--warn)}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+    background:var(--accent);color:#06121f;border-radius:50%;font-weight:800;margin-right:8px;font-size:.95rem}
+  footer{padding:34px 0 60px;color:var(--muted);text-align:center;font-size:.92rem}
+  .muted{color:var(--muted)}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.8rem}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <span class="badge">Ryzen 9950X3D / 7950X3D</span>
+      <span class="badge">9900X3D / 7900X3D</span>
+      <span class="badge">NVIDIA RTX</span>
+      <span class="badge">iRacing DX11</span>
+      <span class="badge">VR &amp; Flatscreen</span>
+    </div>
+    <h1>iRacing Tuning Guide<br><span class="accent">Dual-CCD Ryzen X3D + NVIDIA</span></h1>
+    <p class="tag">A measurement-driven method for eliminating frametime spikes, freezes, and micro-stutters — built by diagnosing a real rig from session-ending freezes down to nothing.</p>
+    <p class="promise">Goal: zero hiccups.</p>
+    <div class="cta">
+      <a class="btn" href="./iracing-x3d-tuning.zip">⬇ Download guide + scripts (.zip)</a>
+      <a class="btn ghost" href="./scripts/">Browse the scripts</a>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="big">Freezes → 0</div><div class="lbl">click-to-recover stalls eliminated</div></div>
+      <div class="stat"><div class="big">~55%</div><div class="lbl">GPU util — headroom for quality</div></div>
+      <div class="stat"><div class="big">Measured</div><div class="lbl">every fix logged, not guessed</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="kicker">Read this first</div>
+  <h2>The one thing to understand: your two CCDs</h2>
+  <p>A dual-CCD X3D chip is two core clusters:</p>
+  <ul>
+    <li><b>CCD0 — the V-Cache die.</b> Huge L3 cache, slightly lower clocks. <b>Games love this die</b> — cache beats MHz in a sim.</li>
+    <li><b>CCD1 — the frequency die.</b> Higher clocks, normal cache.</li>
+  </ul>
+  <p>The whole game: <b>keep the sim on the V-Cache die, keep everything else off it.</b></p>
+  <table>
+    <tr><th>CPU</th><th>V-Cache CCD (sim here)</th><th>Frequency CCD (everything else)</th></tr>
+    <tr><td>9950X3D / 7950X3D (16-core)</td><td>logical cores <b>0–15</b></td><td>logical cores <b>16–31</b></td></tr>
+    <tr><td>9900X3D / 7900X3D (12-core)</td><td>logical cores <b>0–11</b></td><td>logical cores <b>12–23</b></td></tr>
+  </table>
+  <p class="muted">Wherever this guide says “core 16” (the first frequency-CCD core), a 12-core owner uses “core 12.” Every script has this as an editable value at the top.</p>
+</section>
+
+<section>
+  <div class="kicker">Golden rules</div>
+  <h2>Learned the hard way</h2>
+  <div class="grid">
+    <div class="card"><h3>EAC blocks affinity</h3><p>EasyAntiCheat rejects external CPU-affinity changes to iRacing — hard-pinning reverts to all cores seconds after launch. Use a <b>soft CPU Set</b> instead. The mask reading <code>0xFFFFFFFF</code> is <b>normal</b> for CPU Sets, not a failure.</p></div>
+    <div class="card"><h3>Unparked plan, NOT Balanced</h3><p>Single-CCD guides say “Balanced.” On dual-CCD with VR, Balanced’s core parking <b>strands the VR compositor and starves the GPU</b>. Keep <b>all cores unparked</b>.</p></div>
+    <div class="card"><h3>Measure, don’t guess</h3><p>Frametime hiccups rarely show without instrumentation. Log first, change one thing, log again.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Toolkit</div>
+  <h2>Measure first</h2>
+  <ul>
+    <li><b>FullTrace.ps1</b> — main logger. ~1/sec CSV of power plan, per-CCD load, CPU-0 vs frequency-die interrupt/DPC, GPU util/power/throttle, sim &amp; VR CPU, pagefaults. <b>Gaps in the timestamps = a stall caught live.</b></li>
+    <li><b>Preflight-Check.ps1</b> — confirms every fix is live before a session.</li>
+    <li><a href="https://www.resplendence.com/latencymon">LatencyMon</a> — names the driver behind any DPC spike. Essential for the last mile.</li>
+    <li><b>Repair-PerfCounters.ps1</b> — if per-core columns come back empty, your Windows performance counters are broken. Rebuild them.</li>
+  </ul>
+  <p class="lead">Good result = CCD0 busier than CCD1, GPU util steady with no collapses, no time-gaps, hard pagefaults near zero (big bursts during <em>loading</em> are normal).</p>
+</section>
+
+<section>
+  <div class="kicker">The fixes</div>
+  <h2>Highest impact first</h2>
+
+  <p><span class="num">1</span><b>Power plan: all cores unparked (NOT Balanced).</b> Bitsum Highest Performance or Windows High Performance. If using ParkControl: Parking = Off, and <b>disable “Dynamic Boost”</b> — it flips the plan mid-race and causes hard freezes (our worst offender).</p>
+
+  <p><span class="num">2</span><b>Process Lasso: pin the sim to the V-Cache die.</b> Add a <b>CPU Set</b> for <code>iRacingSim64DX11.exe</code> = cores 0–15 (0–11 on 12-core). Put VR/overlays/wheel/browsers on the frequency die (16–31). <b>Exclude iRacing from ProBalance.</b> Optional: High I/O, memory, and CPU priority.</p>
+
+  <p><span class="num">3</span><b>GPU interrupt affinity off CPU 0.</b> The sim thread favors CPU 0 and so do NVIDIA’s GPU interrupts — they collide. <code>Set-GPU-IRQ-Affinity.ps1</code> (admin) steers them to CPU 16 → reboot → verify in LatencyMon that <code>nvlddmkm.sys</code> DPCs left CPU 0.</p>
+
+  <p><span class="num">4</span><b>NIC + USB interrupt affinity.</b> Optional. <code>Set-NIC-USB-IRQ-Affinity.ps1</code> steers network + USB interrupts to frequency-die cores. Worth it only if a hitch remains after the disk fixes — network DPC is usually small.</p>
+
+  <p><span class="num">5</span><b>Repair performance counters</b> if traces show empty per-core data. <code>Repair-PerfCounters.ps1</code> (admin) → reboot.</p>
+
+  <p><span class="num">6</span><b>Quiet background + Defender.</b> <code>Pre-Race-Quiet.ps1</code> disables Windows Update/Orchestrator/Search scans (they fire every ~5–7 min and cause periodic stalls) and optionally Defender real-time for the session (needs Tamper Protection off). <code>Post-Race-Restore.ps1</code> reverts. <code>Add-Defender-Exclusions.ps1</code> excludes iRacing’s folders so Defender stops scanning texture reads mid-race.</p>
+
+  <p><span class="num">7</span><b>HAGS / Game Bar / USB Selective Suspend.</b> <code>Apply-Guide-Extras.ps1</code> turns off USB Selective Suspend (stops wheel/VR USB power-cycling) and Game Mode/Bar/DVR. Test HAGS both ways — it’s a toss-up on newer cards.</p>
+
+  <p><span class="num">8</span><b>iRacing in-game settings</b> (edit with the sim CLOSED): <code>LoadTexturesWhenDriving=0</code> (preload instead of streaming mid-lap), <code>CacheSwap3HighResCars=0</code>, <code>spoolingEnabled=0</code> in app.ini (no continuous replay-to-disk), <code>CrowdDetail=0</code>.</p>
+
+  <p><span class="num">9</span><b>NVIDIA Control Panel</b> (per-app <code>iRacingSim64DX11.exe</code>): Low Latency = <b>On</b> (not Ultra), Power = Prefer Max Performance, V-Sync Off, Threaded Optimization On, Shader Cache Unlimited, Anisotropic 16x. Disable the in-game overlay.</p>
+
+  <p><span class="num">10</span><b>Remove monitoring overlays.</b> RTSS / MSI Afterburner are notorious DPC + hard-pagefault sources. Close them, especially while diagnosing.</p>
+</section>
+
+<section>
+  <div class="kicker">VR</div>
+  <h2>Clarity without hiccups</h2>
+  <ul>
+    <li><b>Supersampling beats MSAA for clarity.</b> MSAA only smooths polygon edges; it does nothing for fences, distant lines, and specular shimmer. Resolution anti-aliases <em>everything</em>. Keep <b>MSAA 4x</b> (8x often crashes iRacing in VR) and spend headroom on resolution.</li>
+    <li><b>Set resolution in ONE place.</b> Runtime panel <em>or</em> in-sim slider — not both (they multiply and you’ll miss frame deadlines).</li>
+    <li><b>Quad-views / foveated</b> is a big free win — sharp center, low-res periphery. When the runtime provides it (e.g. Pimax’s Advanced Quad-View), the <b>runtime panel is authoritative</b>; the sim just renders into it.</li>
+    <li><b>Sharpening amplifies shimmer</b> — lower it and let resolution do the work.</li>
+    <li><b>Keep ~15% GPU headroom</b> (util peaks under ~85%). VR punishes any missed frame with reprojection judder.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="kicker">Why this differs</div>
+  <h2>Adapted from a single-CCD guide — two things flip</h2>
+  <p>This method builds on an excellent single-CCD guide (<a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93.github.io/iracing-stutter-fix</a>). Most transfers, but on dual-CCD:</p>
+  <ol>
+    <li><b>Power plan:</b> single-CCD says Balanced; dual-CCD with VR needs <b>all cores unparked</b> (Balanced parks cores and starves the VR compositor).</li>
+    <li><b>CCD pinning matters</b> — single-CCD has nothing to pin. Getting the sim onto the V-Cache die and everything else off it is half the battle.</li>
+  </ol>
+</section>
+
+<section>
+  <div class="callout warn">
+    <b>Before you run anything:</b> these scripts change Windows / registry / power settings. Every one is reversible (an Undo script or a documented toggle), but review before running — it’s your PC, at your own risk.
+  </div>
+  <div class="cta" style="text-align:center">
+    <a class="btn" href="./iracing-x3d-tuning.zip">⬇ Download guide + scripts (.zip)</a>
+    <a class="btn ghost" href="./scripts/">Browse the scripts</a>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    Community guide · MIT licensed · Built collaboratively and measured end-to-end.<br>
+    Adapted for dual-CCD Ryzen X3D from the single-CCD guide by <a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93</a>.
+  </div>
+</footer>
+
+</body>
+</html>
