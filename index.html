@@ -55,6 +55,10 @@
     font-size:.92rem;font-weight:600;padding:8px 16px;border-radius:999px;cursor:pointer}
   .cpu-toggle button.on{background:var(--accent);color:#06121f}
   .cpu-note{font-size:.85rem;color:var(--muted);margin-top:8px}
+  .toggles{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:18px}
+  .toggles .cpu-toggle{margin:0}
+  body.disp-flat [data-disp="vr"]{display:none !important}
+  body.disp-vr [data-disp="flat"]{display:none !important}
 
   /* steps */
   .progress-wrap{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.95);
@@ -115,11 +119,17 @@
     <h1>Stutter-free iRacing<br><span class="accent">on dual-CCD Ryzen X3D</span></h1>
     <p class="tag">Six steps. About 30 minutes plus a reboot. Every fix was measured on a real rig, and every one is reversible.</p>
 
-    <div class="cpu-toggle" id="cpuToggle" role="group" aria-label="Select your CPU">
-      <button data-pick="16" class="on">9950X3D / 7950X3D</button>
-      <button data-pick="12">9900X3D / 7900X3D</button>
+    <div class="toggles">
+      <div class="cpu-toggle" id="cpuToggle" role="group" aria-label="Select your CPU">
+        <button data-pick="16" class="on">9950X3D / 7950X3D</button>
+        <button data-pick="12">9900X3D / 7900X3D</button>
+      </div>
+      <div class="cpu-toggle" id="dispToggle" role="group" aria-label="How do you race?">
+        <button data-disp-pick="flat" class="on">🖥️ Flatscreen</button>
+        <button data-disp-pick="vr">🥽 VR</button>
+      </div>
     </div>
-    <div class="cpu-note">Pick your chip — every core number below adjusts automatically.</div>
+    <div class="cpu-note">Pick your chip and how you race — the page adjusts to show exactly what applies to you.</div>
 
     <div style="margin-top:22px">
       <a class="btn" href="#do-it">Start the steps ↓</a>
@@ -318,12 +328,13 @@
         <summary>iRacing settings (edit with the sim fully closed)</summary>
         <div class="inner">
           <p>iRacing rewrites these files on exit, so <b>close the sim first</b>. Files are in <span class="file">Documents\iRacing</span>.</p>
+          <p data-disp="vr">🥽 <b>Your renderer file</b> depends on your headset runtime: <code>rendererDX11OpenXR.ini</code> for most modern headsets, <code>rendererDX11Oculus.ini</code> for the Oculus/Meta runtime, <code>rendererDX11OpenVR.ini</code> for SteamVR. <b>Not sure? Sort the folder by date modified after a VR session — the one iRacing just touched is yours.</b></p>
           <table>
             <tr><th>File</th><th>Set</th><th>Why</th></tr>
-            <tr><td><code>rendererDX11*.ini</code></td><td><code>LoadTexturesWhenDriving=0</code></td><td>Preload textures instead of streaming off disk mid-lap</td></tr>
-            <tr><td><code>rendererDX11*.ini</code></td><td><code>CacheSwap3HighResCars=0</code></td><td>No mid-race texture swapping</td></tr>
+            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(or your runtime's — see above)</span></span></td><td><code>LoadTexturesWhenDriving=0</code></td><td>Preload textures instead of streaming off disk mid-lap</td></tr>
+            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(same file)</span></span></td><td><code>CacheSwap3HighResCars=0</code></td><td>No mid-race texture swapping</td></tr>
             <tr><td><code>app.ini</code></td><td><code>spoolingEnabled=0</code></td><td>Stops continuous replay-to-disk writes</td></tr>
-            <tr><td>Graphics options</td><td><code>CrowdDetail=0</code></td><td>Fewer draw calls, near-zero visual impact</td></tr>
+            <tr><td>Graphics options <span class="muted">(in-sim)</span></td><td><code>CrowdDetail=0</code></td><td>Fewer draw calls, near-zero visual impact</td></tr>
           </table>
         </div>
       </details>
@@ -342,7 +353,7 @@
           <p>Also <b>disable the GeForce/NVIDIA App in-game overlay</b> — DirectX hooks and DPC load for no benefit. Same goes for RTSS / MSI Afterburner: notorious stutter sources, close them unless you truly need them.</p>
         </div>
       </details>
-      <details>
+      <details data-disp="vr">
         <summary>VR: clarity without hiccups</summary>
         <div class="inner">
           <ul>
@@ -476,6 +487,23 @@
     if(b) setCpu(b.getAttribute('data-pick'));
   });
   try { setCpu(localStorage.getItem(LS + 'cpu') || '16'); } catch(e){ setCpu('16'); }
+
+  // ---------- VR / Flatscreen toggle ----------
+  var dispToggle = document.getElementById('dispToggle');
+  function setDisp(d){
+    if(d !== 'vr' && d !== 'flat') d = 'flat';
+    document.body.classList.remove('disp-vr','disp-flat');
+    document.body.classList.add('disp-' + d);
+    dispToggle.querySelectorAll('button').forEach(function(b){
+      b.classList.toggle('on', b.getAttribute('data-disp-pick') === d);
+    });
+    try { localStorage.setItem(LS + 'disp', d); } catch(e){}
+  }
+  dispToggle.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-disp-pick]');
+    if(b) setDisp(b.getAttribute('data-disp-pick'));
+  });
+  try { setDisp(localStorage.getItem(LS + 'disp') || 'flat'); } catch(e){ setDisp('flat'); }
 
   // ---------- persistent checkboxes + progress ----------
   var boxes = Array.prototype.slice.call(document.querySelectorAll('input.save'));
