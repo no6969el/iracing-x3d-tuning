@@ -27,8 +27,9 @@ Preflight-Check.ps1      Pre-session sanity check. NOTE: this one is a TEMPLATE
                          tuned to the example rig (checks Bitsum plan, CPU-16
                          IRQ, a Process Lasso config path). Adapt the expected
                          values to your setup.                            (no admin*)
-Scan-Stutter-Events.ps1  Lists scheduled tasks + system events around a stutter.
-                         EDIT the window/timestamps at the top first.     (no admin)
+Scan-Stutter-Events.ps1  Auto-reads your latest FullTrace CSV from the Desktop,
+                         finds the stutters, and lists tasks/events around each.
+                         No editing needed. (Enable-DiagnosticLogs first.) (no admin)
 
 --- FIXES (change settings) ---
 Repair-PerfCounters.ps1        Rebuild broken perf counters. Reboot after.   (ADMIN)
