@@ -127,31 +127,29 @@ function Tip { Write-C "   Not sure what something does? Type ? then its number 
 function Show-Welcome {
     Clear-Host; Bar; Write-C "        iRacing  X3D  Tuning        Guided Menu" $H; Bar
     Write-Host ""
-    Write-C "   This makes iRacing stutter-free on your dual-CCD X3D." $T
+    Write-C "   Let's make iRacing stutter-free on your dual-CCD X3D." $T
     Write-Host ""
-    Write-C "     *  Nothing runs until YOU pick it - browsing is safe." $Go
-    Write-C "     *  Each fix opens in its own window for you to approve." $Go
     Write-C "     *  Every change is reversible." $Go
     Write-Host ""
-    Write-C "   >> Curious what any option does? Type  ?  then its number." $H
-    Write-C "      e.g.  ?1  explains step 1: what it does, when/why, and" $H
-    Write-C "      what comes before and next." $H
+    Write-C "   >> Type  ?  then its number to see more information." $H
+    Write-C "      e.g.  ?1  explains step 1: what it does, when/why and" $H
+    Write-C "      what comes next." $H
     Write-Host ""
-    Write-C "   New here? Pick  1) OPTIMIZE MY iRACING  - it walks you" $Go
-    Write-C "   through the proven fixes, one step at a time." $Go
+    Write-C "   1) OPTIMIZE MY iRACING  - it walks you" $Go
+    Write-C "   through the proven fixes." $Go
     Write-Host ""
     Rule
     [void](Read-Host "   Press Enter to open the menu")
 }
 function Show-Help { param($cfg)
-    Clear-Host; Bar; Write-C "   HELP - how this works" $H; Bar
-    Write-C "   LEARN ANY STEP:  type ? then a number (e.g. ?2). You'll see" $T
-    Write-C "   what it does, when/why, and what comes before and next." $T
+    Clear-Host; Bar; Write-C "   HELP - How all this works" $H; Bar
+    Write-C "   To Learn about any step type ? then a number (e.g. ?2). You'll see" $T
+    Write-C "   what it does and why along with what should be next" $T
     Write-Host ""
     Write-C "   TWO PATHS:" $H
     Write-C "     1) OPTIMIZE    - apply the proven baseline (most people)" $T
     Write-C "     2) TROUBLESHOOT- record & pinpoint your own stutter" $T
-    Write-C "     3) EACH-RACE   - quick before/after routine" $T
+    Write-C "     3) DO EACH-RACE   - quick before/after routine" $T
     Write-Host ""
     Write-C "   FREE APP YOU'LL NEED (press W for details):" $Warn
     Write-C "     Process Lasso  (free, from bitsum.com)" $T
@@ -455,11 +453,10 @@ function Main-Menu { param($cfg)
         Write-C "   What would you like to do?" $T
         Write-Host ""
         Write-Host "   1) " -ForegroundColor $H -NoNewline; Write-Host "OPTIMIZE MY iRACING" -ForegroundColor $Go -NoNewline; Write-Host "   (recommended)" -ForegroundColor $Go
-        Write-C "        Apply the proven baseline fixes, guided. Best for" $T
-        Write-C "        almost everyone - no log-reading needed." $T
+        Write-C "        Apply the proven baseline fixes, guided. Good starting point." $T
         Write-Host ""
         Write-Host "   2) " -ForegroundColor $H -NoNewline; Write-Host "TROUBLESHOOT A STUTTER" -ForegroundColor $T
-        Write-C "        Record & pinpoint a specific issue with the tools." $T
+        Write-C "        Record & pinpoint a specific issue with guided tools." $T
         Write-Host ""
         Write-Host "   3) " -ForegroundColor $H -NoNewline; Write-Host "EACH-RACE ROUTINE" -ForegroundColor $T
         Write-C "        Run before and after every session." $T
