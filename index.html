@@ -125,8 +125,8 @@
         <button data-pick="12">9900X3D / 7900X3D</button>
       </div>
       <div class="cpu-toggle" id="dispToggle" role="group" aria-label="How do you race?">
-        <button data-disp-pick="flat" class="on">🖥️ Flatscreen</button>
-        <button data-disp-pick="vr">🥽 VR</button>
+        <button data-disp-pick="vr" class="on">🥽 VR</button>
+        <button data-disp-pick="flat">🖥️ Flatscreen</button>
       </div>
     </div>
     <div class="cpu-note">Pick your chip and how you race — the page adjusts to show exactly what applies to you.</div>
@@ -491,7 +491,7 @@
   // ---------- VR / Flatscreen toggle ----------
   var dispToggle = document.getElementById('dispToggle');
   function setDisp(d){
-    if(d !== 'vr' && d !== 'flat') d = 'flat';
+    if(d !== 'vr' && d !== 'flat') d = 'vr';
     document.body.classList.remove('disp-vr','disp-flat');
     document.body.classList.add('disp-' + d);
     dispToggle.querySelectorAll('button').forEach(function(b){
@@ -503,7 +503,7 @@
     var b = e.target.closest('button[data-disp-pick]');
     if(b) setDisp(b.getAttribute('data-disp-pick'));
   });
-  try { setDisp(localStorage.getItem(LS + 'disp') || 'flat'); } catch(e){ setDisp('flat'); }
+  try { setDisp(localStorage.getItem(LS + 'disp') || 'vr'); } catch(e){ setDisp('vr'); }
 
   // ---------- persistent checkboxes + progress ----------
   var boxes = Array.prototype.slice.call(document.querySelectorAll('input.save'));
