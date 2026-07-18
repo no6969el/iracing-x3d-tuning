@@ -10,7 +10,9 @@
     Reversible with Undo-GPU-IRQ-Affinity.ps1.
 #>
 
-$TargetCore = 16     # CCD1 core to receive GPU interrupts (0-15 = V-cache; 16-31 = frequency die)
+# First frequency-CCD core: 16 for 9950X3D/7950X3D, 12 for 9900X3D/7900X3D.
+# The Tuning-Menu sets this automatically; for standalone use, change the 16 below if you're 12-core.
+$TargetCore = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else { 16 }
 
 # --- require admin ---
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

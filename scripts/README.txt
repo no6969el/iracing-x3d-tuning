@@ -1,16 +1,20 @@
 SCRIPTS — iRacing Tuning Guide (Dual-CCD Ryzen X3D + NVIDIA)
 ============================================================
-All PowerShell. Read the main guide first. Run a script with:
+EASIEST: double-click "Start-Tuning-Menu.bat" (one folder up) for an
+interactive menu that runs all of these for you and handles core numbers
+automatically. Everything below is for running them by hand.
+
+Run a script by hand with:
    powershell -ExecutionPolicy Bypass -File "<path to .ps1>"
 Or run Create-Launchers.ps1 once to get a double-click .lnk next to each.
 
->>> IMPORTANT: ADJUST FOR YOUR CPU'S CORE COUNT <<<
-These scripts assume a 16-core X3D (9950X3D / 7950X3D), where the
-frequency CCD starts at logical core 16. If you have a 12-core X3D
-(9900X3D / 7900X3D), the frequency CCD starts at core 12 - so edit the
-number at the top of these two scripts before running:
-   Set-GPU-IRQ-Affinity.ps1      ->  $TargetCore  = 12   (was 16)
-   Set-NIC-USB-IRQ-Affinity.ps1  ->  $TargetCores = @(13,14,15)  (was 17,18,19)
+>>> CORE COUNT (handled for you by the menu) <<<
+These scripts default to a 16-core X3D (9950X3D / 7950X3D), frequency CCD
+starting at logical core 16. The Tuning-Menu sets the right core for you.
+If you run them BY HAND on a 12-core X3D (9900X3D / 7900X3D), open these
+two and change the 16 to 12 (the last number on the highlighted line):
+   Set-GPU-IRQ-Affinity.ps1      ->  ...else { 16 }   change 16 to 12
+   Set-NIC-USB-IRQ-Affinity.ps1  ->  ...else { 16 }   change 16 to 12
 And in your Process Lasso CPU Set, pin the sim to 0-11 (not 0-15).
 
 ADMIN? Scripts that change system settings must be run from an

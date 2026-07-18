@@ -4,6 +4,9 @@
 
 If you're already comfortable, the [full guide (README)](README.md) has all the detail and reasoning. This page is the "just tell me what to click" version.
 
+> ## 🖱️ Easiest of all: use the interactive menu
+> After you unzip the kit, just **double-click `Start-Tuning-Menu.bat`**. It opens a clean menu that runs every step *for you* in its own window, detects your CPU/GPU on first launch (and remembers it), sets the right core numbers automatically, and shows you what's happening the whole time. **If you use the menu, you can skip the manual instructions below** — they're here for reference and for anyone who prefers doing it by hand.
+
 > ⚠️ **These scripts change Windows settings** (power, registry, services, Defender). Every one is reversible (there's an *Undo* for anything that changes something). Nothing here is dangerous if you follow the order, but go slowly and don't skip the reboots.
 
 ---

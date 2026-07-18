@@ -11,7 +11,10 @@
     Reversible with Undo-NIC-USB-IRQ-Affinity.ps1.
 #>
 
-$TargetCores = @(17, 18, 19)   # CCD1 cores; avoid 0 (sim), 16 (GPU), 20-27 (VR)
+# First frequency-CCD core: 16 for 9950X3D/7950X3D, 12 for 9900X3D/7900X3D.
+# The Tuning-Menu sets this automatically; for standalone use, change the 16 below if you're 12-core.
+$FreqFirst   = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else { 16 }
+$TargetCores = @($FreqFirst + 1, $FreqFirst + 2, $FreqFirst + 3)   # off CPU0(sim), off the GPU core, off VR
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Host "ERROR: right-click PowerShell -> Run as Administrator, then re-run." -ForegroundColor Red; return }
