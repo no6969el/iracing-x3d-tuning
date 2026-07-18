@@ -18,7 +18,8 @@ $logs = @(
 
 foreach ($log in $logs) {
     try {
-        & wevtutil sl "$log" /enabled:true
+        # /q:true auto-confirms the "analytic/debug logs will be cleared" prompt
+        & wevtutil sl "$log" /enabled:true /q:true
         Write-Host "Enabled: $log" -ForegroundColor Green
     } catch {
         Write-Host "Could not enable $log : $_" -ForegroundColor Yellow

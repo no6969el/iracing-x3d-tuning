@@ -4,17 +4,22 @@
 
 Built by diagnosing a real rig (9950X3D + RTX 5090, Pimax VR) from session-ending freezes down to zero perceptible hiccups. Every fix here was *measured*, not guessed.
 
+> ### ⚡ In a hurry? → **[Quick Baseline](https://no6969el.github.io/iracing-x3d-tuning/quick-baseline.html)**
+> Install Process Lasso (free), click four things, then double-click **`Apply-Baseline.bat`** — every script fix applied in one go, one admin prompt, reboot, done. Graphics polish comes later.
+
 ## Pick your path
 
 | You are… | Go here |
 |---|---|
+| ⚡ **Just want the fixes, fast** | **[Quick Baseline](https://no6969el.github.io/iracing-x3d-tuning/quick-baseline.html)** — Process Lasso setup + `Apply-Baseline.bat` one-shot optimizer. |
 | 🖱️ **Anyone** (easiest) | Unzip and double-click **`Start-Tuning-Menu.bat`** — an interactive menu that detects your system, sets the right core numbers, and runs every step for you. |
 | 🧭 **New to PowerShell / want hand-holding** | **[Guided Walkthrough](https://no6969el.github.io/iracing-x3d-tuning/start-here.html)** — step-by-step, no experience needed. |
 | 🔧 **Comfortable, want the why** | **[Full guide](https://no6969el.github.io/iracing-x3d-tuning/)** — every fix with the reasoning and how to verify it. |
 
 ## What's in the repo
 
-- **`Start-Tuning-Menu.bat`** + **`Tuning-Menu.ps1`** — the interactive menu (recommended way to run everything)
+- **`Apply-Baseline.bat`** + **`Apply-Baseline.ps1`** — the one-shot optimizer: all script fixes in one go (see [Quick Baseline](https://no6969el.github.io/iracing-x3d-tuning/quick-baseline.html))
+- **`Start-Tuning-Menu.bat`** + **`Tuning-Menu.ps1`** — the interactive menu (guided version with troubleshooting and undo)
 - **`scripts/`** — the individual PowerShell tools: diagnostics (FullTrace logger, Preflight-Check, stutter scanner, timer watcher) and fixes (IRQ steering, timer resolution, Defender exclusions, pre/post-race routines), each with an undo. See [`scripts/README.txt`](scripts/README.txt) for the full inventory.
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). Everything is reversible and nothing runs without you choosing it — but review before running, at your own risk.

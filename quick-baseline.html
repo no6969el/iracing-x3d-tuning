@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Baseline — the fast path | iRacing X3D Tuning</title>
+<meta name="description" content="The fastest path to a stutter-free iRacing on dual-CCD Ryzen X3D: install Process Lasso, click four things, run one file, reboot.">
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a3240;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#3ea6ff; --accent2:#22c55e;
+    --warn:#f5b041; --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65;font-size:17px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 22px}
+  header.hero{background:radial-gradient(1200px 400px at 50% -10%,#12233b 0%,var(--bg) 60%);
+    border-bottom:1px solid var(--border);padding:52px 0 36px;text-align:center}
+  .badge{display:inline-block;background:var(--panel2);border:1px solid var(--border);
+    color:var(--muted);border-radius:999px;padding:5px 13px;font-size:13px;margin:4px}
+  h1{font-size:2.2rem;line-height:1.15;margin:14px 0 8px;letter-spacing:-.5px}
+  h1 .accent{color:var(--accent)}
+  .tag{color:var(--muted);font-size:1.1rem;max-width:620px;margin:0 auto}
+  .cta{margin-top:22px}
+  .btn{display:inline-block;background:var(--accent);color:#06121f;font-weight:700;
+    padding:11px 18px;border-radius:9px;margin:5px;border:1px solid transparent;font-size:.98rem}
+  .btn:hover{filter:brightness(1.08);text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
+  section{padding:26px 0;border-bottom:1px solid var(--border)}
+  h2{font-size:1.5rem;margin:6px 0 6px;letter-spacing:-.3px}
+  h3{font-size:1.15rem;margin:20px 0 4px}
+  .lead{color:var(--muted)}
+  ul,ol{padding-left:22px}
+  li{margin:7px 0}
+  code{font-family:var(--mono);background:var(--panel2);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px;font-size:.9em}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.96rem}
+  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+  th{background:var(--panel2)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin:14px 0}
+  .callout{background:#12233b;border:1px solid #244;border-left:4px solid var(--accent);
+    border-radius:8px;padding:14px 16px;margin:16px 0}
+  .callout.warn{background:#2a2213;border-left-color:var(--warn)}
+  .step{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:6px 20px 14px;margin:16px 0}
+  .step h3{color:var(--accent2)}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+    background:var(--accent);color:#06121f;border-radius:50%;font-weight:800;margin-right:8px;font-size:.95rem}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.8rem}
+  footer{padding:30px 0 60px;color:var(--muted);text-align:center;font-size:.92rem}
+  .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge">⚡ Fastest path</span>
+    <h1>Quick Baseline — <span class="accent">just the fixes</span></h1>
+    <p class="tag">Install one free app, click four things, run one file, reboot. This is the whole baseline — no reading required. Graphics polish comes later, once you're smooth.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">⬇ Download the kit (.zip)</a>
+      <a class="btn ghost" href="./index.html">Full guide (the “why”)</a>
+      <a class="btn ghost" href="./start-here.html">Guided walkthrough</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="callout warn">
+    ⚠️ The one-shot optimizer changes Windows settings (registry, power, Defender). Everything is reversible (undo scripts in the kit), and nothing runs without an admin prompt you approve. Unzip the kit to a permanent folder first — e.g. <code>C:\iRacingTuning\</code>.
+  </div>
+</section>
+
+<section>
+  <div class="step">
+    <h3><span class="num">1</span>Install Process Lasso (free)</h3>
+    <p>Get it from <a href="https://bitsum.com">bitsum.com</a> and install. The <b>free version does everything we need</b> — no trial, no purchase.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">2</span>Set it up — the only clicking you'll do</h3>
+    <ol>
+      <li><b>Power plan:</b> Process Lasso <b>Main menu → Power → activate “Bitsum Highest Performance.”</b> (Keeps all cores unparked — what a dual-CCD chip needs.)</li>
+      <li><b>Launch iRacing and enter a race</b> (any test or AI session works) so <code>iRacingSim64DX11.exe</code> appears in Process Lasso's process list. You can exit the session after — the process just has to have been seen once.</li>
+      <li><b>Pin the sim:</b> right-click <code>iRacingSim64DX11.exe</code> → <b>CPU Sets</b> (⚠️ <em>not</em> CPU Affinity) → select your V-Cache cores:
+        <table>
+          <tr><th>Your CPU</th><th>Select cores</th></tr>
+          <tr><td>9950X3D / 7950X3D</td><td><b>0–15</b></td></tr>
+          <tr><td>9900X3D / 7900X3D</td><td><b>0–11</b></td></tr>
+        </table>
+      </li>
+      <li><b>Protect it:</b> right-click <code>iRacingSim64DX11.exe</code> → <b>ProBalance → exclude</b> it (so it's never throttled).</li>
+    </ol>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">3</span>Run the one-shot optimizer</h3>
+    <p>Double-click <b><code>Apply-Baseline.bat</code></b> in the kit folder. It confirms your CPU (16- or 12-core), shows a short advisory, then applies all five script fixes in one window with <b>one admin prompt</b> — no typing:</p>
+    <ul>
+      <li>Defender exclusions (stops mid-race file scans)</li>
+      <li>USB Selective Suspend + Game Bar off</li>
+      <li>Diagnostic log on (for the stutter scanner)</li>
+      <li>Timer fix — the VR “stutters until I click” problem</li>
+      <li>GPU interrupts off the sim's core</li>
+    </ul>
+    <p><b>Then reboot.</b> The GPU-interrupt and timer fixes only take effect after a restart.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="num">4</span>Prove it worked (optional, 10 min)</h3>
+    <p>After the reboot, run <code>Apply-Baseline.bat</code> again and press <b>T</b> to launch <b>FullTrace</b> (or run <code>scripts\FullTrace.ps1</code> directly). Race ~10 minutes, press <b>Ctrl+C</b>, and open the CSV it saves to your Desktop: <b>no skipped seconds in the timestamp column = no stalls.</b></p>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Later</div>
+  <h2>Graphics last — once you're smooth</h2>
+  <p>When the baseline feels good, do the visual pass: iRacing's ini tweaks and the NVIDIA Control Panel values (<a href="./index.html">full guide</a>, fixes #9–#10), and the <a href="./index.html">VR clarity section</a> if you race in a headset. Doing graphics <em>after</em> the baseline means any new stutter has an obvious cause.</p>
+  <div class="callout">
+    Want each step explained, or something didn't work? The <a href="./start-here.html">guided walkthrough</a> holds your hand, and <code>Start-Tuning-Menu.bat</code> includes troubleshooting tools and undo options for everything.
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">Community guide · MIT licensed · <a href="./index.html">Full guide</a> · <a href="./start-here.html">Walkthrough</a> 🏁</div>
+</footer>
+
+</body>
+</html>

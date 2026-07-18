@@ -2,7 +2,9 @@ SCRIPTS — iRacing Tuning Guide (Dual-CCD Ryzen X3D + NVIDIA)
 ============================================================
 EASIEST: double-click "Start-Tuning-Menu.bat" (one folder up) for an
 interactive menu that runs all of these for you and handles core numbers
-automatically. Everything below is for running them by hand.
+automatically. In a hurry? "Apply-Baseline.bat" (also one folder up)
+applies every fix below in one go with a single admin prompt.
+Everything below is for running them by hand.
 
 Run a script by hand with:
    powershell -ExecutionPolicy Bypass -File "<path to .ps1>"

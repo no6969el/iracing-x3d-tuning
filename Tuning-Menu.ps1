@@ -164,9 +164,9 @@ function Show-Requirements { param($cfg)
 # ---------------------------------------------------------------- step info
 $Info = @{
  'Optimize'=[pscustomobject]@{ Title='Optimize my iRacing - the proven baseline'
-   What='Walks you through every known-good fix in order. Some run automatically (a window opens, works, and closes itself); a couple you do in Process Lasso with exact instructions.'
-   Why='The path for almost everyone. No log-reading needed - just follow along and you end up optimized.'
-   After='Install the free apps first (press W).'; Next='Reboot once, then use the Each-Race routine. Still stutter? Troubleshoot.' }
+   What='Three parts. Part 1: after one advisory screen, ALL the script fixes are applied for you automatically in a single admin window - no typing, it closes itself. Parts 2-3: short hands-on checklists for Process Lasso and the iRacing/NVIDIA settings, with exact instructions.'
+   Why='The path for almost everyone. No log-reading needed - agree once, watch it work, then a few clicks.'
+   After='Install Process Lasso first if you can (press W) - or do that part later.'; Next='Reboot once, then use the Each-Race routine. Still stutter? Troubleshoot.' }
  'Troubleshoot'=[pscustomobject]@{ Title='Troubleshoot a stutter - the diagnostic tools'
    What='Record a race, then let the tools find what caused a hitch (a background task, a driver, etc.).'
    Why='For if you STILL stutter after optimizing, or you like to pinpoint your own issue without changing settings blindly.'
@@ -277,57 +277,113 @@ function Launch-Script { param($cfg,[string]$FileName,[switch]$Admin,[switch]$Au
 
 # ---------------------------------------------------------------- OPTIMIZE wizard
 function Optimize-Wizard { param($cfg)
-    Clear-Host; Bar; Write-C "   OPTIMIZE MY iRACING - guided, end to end" $H; Bar
-    Write-C "   I'll walk you through the whole thing, one step at a time." $T
-    Write-C "   Auto steps: a window opens, does its job, and closes itself." $T
-    Write-C "   Hand steps: you click a few things in Process Lasso, and I" $T
-    Write-C "   tell you exactly what." $T
-    Write-Host ""
-    Write-C "   At any step:  [Enter] do it    [S] skip    [Q] stop" $Warn
-    Write-Host ""
-    Write-C "   Don't have the free apps yet? Press Q, then W on the menu." $Go
-    Write-Host ""
-    if((Read-Host "   Press Enter to begin (or Q to quit)") -match '^[Qq]'){ return $cfg }
-
-    $steps = @(
-        @{ type='manual'; title='Power plan  (in Process Lasso)'; lines=@(
-            'Open Process Lasso.',
-            'Main menu -> Power -> activate  Bitsum Highest Performance.',
-            'This keeps all cores unparked - what the sim needs.') },
-        @{ type='manual'; title='Pin the sim  (in Process Lasso)'; lines=@(
-            'Run iRacing once so iRacingSim64DX11.exe shows in the list.',
-            ("Right-click it  ->  CPU Sets  ->  choose cores {0}." -f $cfg.VCache),
-            'Right-click it  ->  ProBalance  ->  exclude it.') },
-        @{ type='auto'; title='Defender exclusions'; script='Add-Defender-Exclusions.ps1' },
-        @{ type='auto'; title='USB Suspend + Game Bar off'; script='Apply-Guide-Extras.ps1' },
-        @{ type='auto'; title='Turn on the diagnostic log'; script='Enable-DiagnosticLogs.ps1' },
-        @{ type='auto'; title='Timer fix (VR focus stutter)'; script='Enable-GlobalTimerResolution.ps1' },
-        @{ type='auto'; title='GPU interrupts off the sim core'; script='Set-GPU-IRQ-Affinity.ps1' },
-        @{ type='manual'; title='iRacing + NVIDIA settings'; lines=@(
-            'These have no script - set them yourself:',
-            'Open the web guide (main menu -> G) and apply the iRacing',
-            'in-game options and the NVIDIA Control Panel values it lists.') }
+    $auto = @(
+        @{ title='Defender exclusions - stop mid-race file scans';  script='Add-Defender-Exclusions.ps1' },
+        @{ title='USB Selective Suspend + Game Bar off';            script='Apply-Guide-Extras.ps1' },
+        @{ title='Diagnostic log on (for the stutter scanner)';     script='Enable-DiagnosticLogs.ps1' },
+        @{ title='Timer fix - the VR focus stutter';                script='Enable-GlobalTimerResolution.ps1' },
+        @{ title='GPU interrupts off the sim core';                 script='Set-GPU-IRQ-Affinity.ps1' }
     )
-    $total=$steps.Count; $n=0; $stopped=$false
-    foreach($s in $steps){
-        $n++
-        Clear-Host; Bar
-        $kind = if($s.type -eq 'auto'){'runs automatically'}else{'you do this by hand'}
-        Write-C ("   Step {0} of {1}   ({2})" -f $n,$total,$kind) $H
-        Write-C ("   " + $s.title) $H
-        Rule
-        if($s.type -eq 'manual'){ foreach($l in $s.lines){ Write-C ("   " + $l) $T } }
-        else { Write-C "   A window will open, ask for admin, do its job, and close." $T }
-        Write-Host ""
-        $prompt = if($s.type -eq 'auto'){'run it'}else{"I've done it"}
-        $a = Read-Host "   [Enter] $prompt    [S] skip    [Q] stop"
-        if($a -match '^[Qq]'){ $stopped=$true; break }
-        if($a -match '^[Ss]'){ continue }
-        if($s.type -eq 'auto'){ $cfg = Launch-Script $cfg $s.script -Admin -AutoClose }
+
+    # ---- advisory ----
+    Clear-Host; Bar; Write-C "   OPTIMIZE MY iRACING - guided, end to end" $H; Bar
+    Write-C "   Three short parts:" $T
+    Write-Host ""
+    Write-C "   PART 1   AUTO FIXES - applied for you, hands off:" $Go
+    foreach($a in $auto){ Write-C ("       * " + $a.title) $Dim }
+    Write-C "   PART 2   PROCESS LASSO - a few clicks, exact steps shown" $T
+    Write-C "   PART 3   iRACING + NVIDIA SETTINGS - quick checklist" $T
+    Write-Host ""
+    Write-C "   Before you agree:" $Warn
+    Write-C "     * Part 1 changes Windows settings (registry, power, Defender)." $T
+    Write-C "     * Every change is reversible (Advanced menu -> Undo)." $T
+    Write-C "     * ONE blue admin prompt will appear - choose Yes." $T
+    Write-C "     * A window shows each fix as it runs, then closes itself." $T
+    Write-C "     * Reboot at the end to make everything live." $T
+    Write-Host ""
+    Rule
+    if((Read-Host "   [Enter] agree & apply    [Q] back to menu") -match '^[Qq]'){ return $cfg }
+
+    # ---- part 1: all auto fixes, one elevated window, no typing ----
+    Clear-Host; Bar; Write-C "   PART 1 of 3   -   APPLYING THE AUTO FIXES" $H; Bar
+    $items = @()
+    foreach($a in $auto){
+        $p = Join-Path $ScriptsDir $a.script
+        if(Test-Path $p){ $items += [pscustomobject]@{ Title=$a.title; Path=$p; File=$a.script } }
+        else { Write-C ("   ! missing: {0} (skipped)" -f $a.script) $Warn }
     }
+    if(-not $items){
+        Write-C "   No scripts found - keep Tuning-Menu.ps1 next to the 'scripts' folder." $Bad
+        Start-Sleep 3; return $cfg
+    }
+    Write-C "   Approve the admin prompt, then just watch - the fix window" $T
+    Write-C "   runs everything and closes itself. Nothing needs typing." $T
+    Write-Host ""
+    Spin "Preparing..." 700
+    $sb = ("`$env:X3D_FREQ_FIRST_CORE='{0}'; `$Host.UI.RawUI.WindowTitle='iRacing X3D Tuning - applying fixes';" -f $cfg.FreqFirst)
+    $n = 0
+    foreach($it in $items){
+        $n++
+        $ttl = $it.Title -replace "'","''"    # NB: don't name this $t - it would clobber the $T color variable (PS vars are case-insensitive)
+        $pth = $it.Path  -replace "'","''"
+        $sb += (" Write-Host ''; Write-Host ('=' * 60) -ForegroundColor DarkCyan; Write-Host '[{0}/{1}]  {2}' -ForegroundColor Cyan; & '{3}';" -f $n,$items.Count,$ttl,$pth)
+    }
+    $sb += " Write-Host ''; Write-Host 'ALL FIXES APPLIED - this window closes in 5 seconds...' -ForegroundColor Green; Start-Sleep 5"
+    $ok = $true
+    try {
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($sb))
+        Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $enc"
+    } catch { $ok = $false }
+    if($ok){
+        foreach($it in $items){ if($cfg.Launched -notcontains $it.File){ $cfg.Launched += $it.File } }
+        Save-Config $cfg
+        Write-C "   [OK] All auto fixes applied." $Go
+        Start-Sleep 1
+    } else {
+        Write-C "   Admin prompt was cancelled - no changes were made." $Warn
+        Write-C "   Re-run Optimize any time." $Dim
+        Start-Sleep -Milliseconds 2500
+        return $cfg
+    }
+
+    # ---- part 2: third-party app (Process Lasso), by hand ----
+    Clear-Host; Bar; Write-C "   PART 2 of 3   -   PROCESS LASSO   (free app, by hand)" $H; Bar
+    Write-C "   Two fixes live inside Process Lasso (free, bitsum.com) -" $T
+    Write-C "   the menu can't click them for you:" $T
+    Write-Host ""
+    Write-C "   A) Power plan - all cores unparked" $H
+    Write-C "      Open Process Lasso -> Main menu -> Power ->" $T
+    Write-C "      activate  Bitsum Highest Performance." $T
+    Write-Host ""
+    Write-C "   B) Pin the sim to the V-Cache die" $H
+    Write-C "      Run iRacing once so iRacingSim64DX11.exe shows in the list." $T
+    Write-C ("      Right-click it  ->  CPU Sets  ->  choose cores {0}." -f $cfg.VCache) $T
+    Write-C "      Right-click it  ->  ProBalance  ->  exclude it." $T
+    Write-Host ""
+    Write-C "   Don't have Process Lasso yet? Press Enter and do this part" $Dim
+    Write-C "   later - the same steps are under W on the main menu." $Dim
+    Write-Host ""
+    Rule
+    if((Read-Host "   [Enter] done (or doing it later)    [Q] stop") -match '^[Qq]'){ return $cfg }
+
+    # ---- part 3: in-game + driver settings, by hand ----
+    Clear-Host; Bar; Write-C "   PART 3 of 3   -   iRACING + NVIDIA SETTINGS" $H; Bar
+    Write-C "   No script can set these - about 5 minutes by hand:" $T
+    Write-Host ""
+    Write-C "     * iRacing ini tweaks (with the sim fully CLOSED):" $T
+    Write-C "       texture preload on, replay spooling off, crowds off." $T
+    Write-C "     * NVIDIA Control Panel per-app settings for the sim." $T
+    Write-Host ""
+    Write-C "   The web guide lists every exact value (fixes #9 and #10)." $T
+    Write-Host ""
+    Rule
+    if((Read-Host "   [Enter] open the web guide now    [S] skip") -notmatch '^[SsQq]'){
+        Spin "Opening the web guide..." 700; Start-Process $SiteUrl
+    }
+
+    # ---- summary ----
     Clear-Host; Bar
-    if($stopped){ Write-C "   Stopped - resume anytime from Optimize." $Warn }
-    else { Write-C "   ALL DONE - your baseline is applied." $Go }
+    Write-C "   ALL DONE - your baseline is applied." $Go
     Write-Host ""
     Write-C "   Two last things:" $H
     Write-C "     1) REBOOT once - the GPU interrupt + timer fixes need it." $T
