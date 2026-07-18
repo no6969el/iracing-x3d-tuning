@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>iRacing Tuning Guide — Dual-CCD Ryzen X3D + NVIDIA</title>
-<meta name="description" content="A measurement-driven guide to eliminating iRacing stutters and freezes on dual-CCD Ryzen X3D (9950X3D/7950X3D/9900X3D/7900X3D) systems with NVIDIA GPUs.">
+<title>iRacing Tuning — Dual-CCD Ryzen X3D + NVIDIA</title>
+<meta name="description" content="Zero hiccups in iRacing on dual-CCD Ryzen X3D (9950X3D/7950X3D/9900X3D/7900X3D) + NVIDIA. Six steps, measured and reversible.">
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a3240;
@@ -12,54 +12,93 @@
     --warn:#f5b041; --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
   }
   *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
   body{margin:0;background:var(--bg);color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    line-height:1.65;font-size:17px}
+    line-height:1.6;font-size:17px}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
-  .wrap{max-width:900px;margin:0 auto;padding:0 22px}
+  .wrap{max-width:820px;margin:0 auto;padding:0 20px}
   header.hero{background:radial-gradient(1200px 400px at 50% -10%,#12233b 0%,var(--bg) 60%);
-    border-bottom:1px solid var(--border);padding:64px 0 48px;text-align:center}
+    border-bottom:1px solid var(--border);padding:52px 0 36px;text-align:center}
   .badge{display:inline-block;background:var(--panel2);border:1px solid var(--border);
-    color:var(--muted);border-radius:999px;padding:5px 13px;font-size:13px;margin:4px}
-  h1{font-size:2.5rem;line-height:1.15;margin:18px 0 10px;letter-spacing:-.5px}
+    color:var(--muted);border-radius:999px;padding:4px 12px;font-size:12.5px;margin:3px}
+  h1{font-size:2.3rem;line-height:1.15;margin:16px 0 8px;letter-spacing:-.5px}
   h1 .accent{color:var(--accent)}
-  .tag{color:var(--muted);font-size:1.15rem;max-width:640px;margin:0 auto 8px}
-  .promise{color:var(--accent2);font-weight:600;font-size:1.25rem;margin-top:14px}
-  .cta{margin-top:28px}
+  .tag{color:var(--muted);font-size:1.08rem;max-width:600px;margin:0 auto}
   .btn{display:inline-block;background:var(--accent);color:#06121f;font-weight:700;
-    padding:13px 22px;border-radius:9px;margin:6px;border:1px solid transparent}
+    padding:12px 22px;border-radius:9px;margin:6px 4px;border:1px solid transparent}
   .btn:hover{filter:brightness(1.08);text-decoration:none}
   .btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
-  .stats{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin:40px 0 6px}
-  .stat{background:var(--panel);border:1px solid var(--border);border-radius:12px;
-    padding:18px 22px;min-width:150px}
-  .stat .big{font-size:1.9rem;font-weight:800;color:var(--accent2)}
-  .stat .lbl{color:var(--muted);font-size:.9rem}
-  section{padding:30px 0;border-bottom:1px solid var(--border)}
-  h2{font-size:1.6rem;margin:8px 0 6px;letter-spacing:-.3px}
-  h3{font-size:1.2rem;margin:22px 0 4px;color:var(--text)}
-  .lead{color:var(--muted)}
+  section{padding:34px 0;border-bottom:1px solid var(--border)}
+  h2{font-size:1.55rem;margin:0 0 4px;letter-spacing:-.3px}
+  h3{font-size:1.12rem;margin:18px 0 4px}
+  .lead{color:var(--muted);margin-top:2px}
   ul,ol{padding-left:22px}
-  li{margin:7px 0}
+  li{margin:6px 0}
   code{font-family:var(--mono);background:var(--panel2);border:1px solid var(--border);
-    border-radius:5px;padding:1px 6px;font-size:.9em}
-  pre{background:var(--panel);border:1px solid var(--border);border-radius:9px;
-    padding:14px 16px;overflow:auto}
-  pre code{background:none;border:none;padding:0}
-  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.96rem}
-  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+    border-radius:5px;padding:1px 6px;font-size:.88em}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:.95rem}
+  th,td{border:1px solid var(--border);padding:8px 12px;text-align:left}
   th{background:var(--panel2)}
-  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:14px 0}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:16px}
-  .callout{background:#12233b;border:1px solid #244; border-left:4px solid var(--accent);
-    border-radius:8px;padding:14px 16px;margin:16px 0}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.78rem}
+  .callout{background:#12233b;border:1px solid #244;border-left:4px solid var(--accent);
+    border-radius:8px;padding:12px 16px;margin:14px 0;font-size:.97rem}
   .callout.warn{background:#2a2213;border-left-color:var(--warn)}
-  .num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
-    background:var(--accent);color:#06121f;border-radius:50%;font-weight:800;margin-right:8px;font-size:.95rem}
-  footer{padding:34px 0 60px;color:var(--muted);text-align:center;font-size:.92rem}
   .muted{color:var(--muted)}
-  .kicker{color:var(--accent);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.8rem}
+  footer{padding:32px 0 60px;color:var(--muted);text-align:center;font-size:.9rem}
+
+  /* CPU toggle */
+  .cpu-toggle{display:inline-flex;background:var(--panel);border:1px solid var(--border);
+    border-radius:999px;padding:4px;margin:18px auto 0;gap:4px}
+  .cpu-toggle button{background:transparent;border:none;color:var(--muted);font:inherit;
+    font-size:.92rem;font-weight:600;padding:8px 16px;border-radius:999px;cursor:pointer}
+  .cpu-toggle button.on{background:var(--accent);color:#06121f}
+  .cpu-note{font-size:.85rem;color:var(--muted);margin-top:8px}
+
+  /* steps */
+  .progress-wrap{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.95);
+    backdrop-filter:blur(4px);border-bottom:1px solid var(--border);padding:10px 0}
+  .progress-inner{display:flex;align-items:center;gap:12px;max-width:820px;margin:0 auto;padding:0 20px}
+  .pbar{flex:1;height:8px;background:var(--panel2);border-radius:99px;overflow:hidden}
+  .pbar i{display:block;height:100%;width:0;background:var(--accent2);border-radius:99px;transition:width .3s}
+  .plabel{font-size:.85rem;color:var(--muted);white-space:nowrap}
+  .plabel b{color:var(--accent2)}
+  .preset{font-size:.8rem;color:var(--muted);cursor:pointer;text-decoration:underline;background:none;border:none;font-family:inherit;padding:0}
+
+  .step{background:var(--panel);border:1px solid var(--border);border-radius:14px;
+    padding:18px 22px;margin:18px 0;transition:opacity .3s}
+  .step.done{opacity:.55}
+  .step-head{display:flex;align-items:flex-start;gap:14px}
+  .step-head input{width:22px;height:22px;margin-top:5px;flex:0 0 auto;accent-color:var(--accent2);cursor:pointer}
+  .step-num{color:var(--accent);font-weight:800;font-size:.85rem;letter-spacing:.5px;text-transform:uppercase}
+  .step-title{font-size:1.25rem;font-weight:700;margin:1px 0 2px}
+  .step-body{margin-top:10px}
+  .step-body > :first-child{margin-top:0}
+  .mini{list-style:none;padding:0;margin:8px 0}
+  .mini li{display:flex;gap:10px;align-items:flex-start;margin:9px 0}
+  .mini input{width:17px;height:17px;margin-top:4px;flex:0 0 auto;accent-color:var(--accent2);cursor:pointer}
+  .file{font-family:var(--mono);background:var(--panel2);border:1px solid var(--border);
+    border-radius:6px;padding:2px 8px;font-size:.86em;white-space:nowrap}
+
+  /* details / depth */
+  details{background:var(--panel2);border:1px solid var(--border);border-radius:9px;
+    margin:12px 0;padding:0}
+  details summary{cursor:pointer;padding:10px 14px;font-weight:600;color:var(--accent);
+    font-size:.95rem;list-style:none;user-select:none}
+  details summary::before{content:"▸ ";transition:transform .15s}
+  details[open] summary::before{content:"▾ "}
+  details .inner{padding:2px 16px 14px;font-size:.96rem}
+  details .inner > :first-child{margin-top:0}
+  details details{background:var(--panel);margin:10px 0}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:640px){.two{grid-template-columns:1fr}}
+  .pathcard{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .pathcard h4{margin:0 0 6px;font-size:1.02rem}
+  .pathcard .tagline{color:var(--muted);font-size:.9rem;margin:0 0 8px}
+  kbd{font-family:var(--mono);background:#000;border:1px solid var(--border);border-bottom-width:2px;
+    border-radius:5px;padding:1px 6px;font-size:.85em}
 </style>
 </head>
 <body>
@@ -67,144 +106,410 @@
 <header class="hero">
   <div class="wrap">
     <div>
-      <span class="badge">Ryzen 9950X3D / 7950X3D</span>
+      <span class="badge">9950X3D / 7950X3D</span>
       <span class="badge">9900X3D / 7900X3D</span>
       <span class="badge">NVIDIA RTX</span>
-      <span class="badge">iRacing DX11</span>
       <span class="badge">VR &amp; Flatscreen</span>
+      <span class="badge">Windows 11</span>
     </div>
-    <h1>iRacing Tuning Guide<br><span class="accent">Dual-CCD Ryzen X3D + NVIDIA</span></h1>
-    <p class="tag">A measurement-driven method for eliminating frametime spikes, freezes, and micro-stutters — built by diagnosing a real rig from session-ending freezes down to nothing.</p>
-    <p class="promise">Goal: zero hiccups.</p>
-    <div class="cta">
-      <a class="btn" href="./quick-baseline.html">⚡ Quick Baseline — just the fixes</a>
-      <a class="btn ghost" href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">⬇ Download guide + scripts (.zip)</a>
-      <a class="btn ghost" href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">Browse the scripts</a>
+    <h1>Stutter-free iRacing<br><span class="accent">on dual-CCD Ryzen X3D</span></h1>
+    <p class="tag">Six steps. About 30 minutes plus a reboot. Every fix was measured on a real rig, and every one is reversible.</p>
+
+    <div class="cpu-toggle" id="cpuToggle" role="group" aria-label="Select your CPU">
+      <button data-pick="16" class="on">9950X3D / 7950X3D</button>
+      <button data-pick="12">9900X3D / 7900X3D</button>
     </div>
-    <p style="margin-top:16px">
-      ⚡ <b>In a hurry?</b> The <a href="./quick-baseline.html"><b>Quick Baseline</b></a> page: Process Lasso + one double-click applies every fix.<br>
-      🧭 <b>New to this, or never run a PowerShell script?</b>
-      Start with the <a href="./start-here.html"><b>Guided Walkthrough</b></a> — step-by-step, no experience needed.
+    <div class="cpu-note">Pick your chip — every core number below adjusts automatically.</div>
+
+    <div style="margin-top:22px">
+      <a class="btn" href="#do-it">Start the steps ↓</a>
+      <a class="btn ghost" href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">⬇ Download the kit</a>
+    </div>
+    <p class="muted" style="font-size:.9rem;margin-top:14px">
+      Curious how it works? <a href="#idea">The idea</a> · Deep detail? <a href="#reference">Reference</a> · Problems? <a href="#troubleshoot">Troubleshooting</a>
     </p>
-    <div class="stats">
-      <div class="stat"><div class="big">Freezes → 0</div><div class="lbl">click-to-recover stalls eliminated</div></div>
-      <div class="stat"><div class="big">~55%</div><div class="lbl">GPU util — headroom for quality</div></div>
-      <div class="stat"><div class="big">Measured</div><div class="lbl">every fix logged, not guessed</div></div>
-    </div>
   </div>
 </header>
 
+<div class="progress-wrap">
+  <div class="progress-inner">
+    <span class="plabel">Your progress</span>
+    <div class="pbar"><i id="pfill"></i></div>
+    <span class="plabel"><b id="pcount">0</b>/<span id="ptotal">0</span></span>
+    <button class="preset" id="preset" title="Untick everything">reset</button>
+  </div>
+</div>
+
 <div class="wrap">
 
-<section>
-  <div class="kicker">Read this first</div>
-  <h2>The one thing to understand: your two CCDs</h2>
-  <p>A dual-CCD X3D chip is two core clusters:</p>
-  <ul>
-    <li><b>CCD0 — the V-Cache die.</b> Huge L3 cache, slightly lower clocks. <b>Games love this die</b> — cache beats MHz in a sim.</li>
-    <li><b>CCD1 — the frequency die.</b> Higher clocks, normal cache.</li>
-  </ul>
-  <p>The whole game: <b>keep the sim on the V-Cache die, keep everything else off it.</b></p>
-  <table>
-    <tr><th>CPU</th><th>V-Cache CCD (sim here)</th><th>Frequency CCD (everything else)</th></tr>
-    <tr><td>9950X3D / 7950X3D (16-core)</td><td>logical cores <b>0–15</b></td><td>logical cores <b>16–31</b></td></tr>
-    <tr><td>9900X3D / 7900X3D (12-core)</td><td>logical cores <b>0–11</b></td><td>logical cores <b>12–23</b></td></tr>
-  </table>
-  <p class="muted">Wherever this guide says “core 16” (the first frequency-CCD core), a 12-core owner uses “core 12.” Every script has this as an editable value at the top.</p>
+<!-- ============ THE IDEA ============ -->
+<section id="idea">
+  <div class="kicker">30 seconds of background</div>
+  <h2>The idea</h2>
+  <p>Your CPU has two halves: a <b>V-Cache die</b> (games love it) and a <b>frequency die</b>. Stutters happen when Windows lets background work — GPU interrupts, antivirus scans, update tasks — fight the sim for the V-Cache die. The fix: <b>put the sim there, move everything else off, and stop Windows from interrupting.</b> That's all six steps do.</p>
+
+  <details>
+    <summary>The full story — your two dies, and four rules this guide lives by</summary>
+    <div class="inner">
+      <table>
+        <tr><th>CPU</th><th>V-Cache die (sim goes here)</th><th>Frequency die (everything else)</th></tr>
+        <tr><td>9950X3D / 7950X3D</td><td>logical cores <b>0–15</b></td><td>logical cores <b>16–31</b></td></tr>
+        <tr><td>9900X3D / 7900X3D</td><td>logical cores <b>0–11</b></td><td>logical cores <b>12–23</b></td></tr>
+      </table>
+      <p><b>Rule 1 — EasyAntiCheat blocks hard CPU affinity.</b> Pinning iRacing the forceful way gets reverted seconds after launch. We use <b>CPU Sets</b> (a scheduler hint EAC can't block). The affinity mask still reading <code>0xFFFFFFFF</code> afterward is <em>normal</em>, not a failure.</p>
+      <p><b>Rule 2 — All cores unparked, NOT the Balanced plan.</b> Single-CCD guides recommend Balanced; on a dual-CCD chip with VR, Balanced's core parking strands the VR compositor on a parked die and starves the GPU (measured: ~55% GPU util → 11%, unplayable).</p>
+      <p><b>Rule 3 — The Windows 11 focus/timer trap.</b> Windows only honors a game's 1&nbsp;ms timer while it owns window focus — and the VR compositor steals focus constantly, dropping the timer to 15.6&nbsp;ms mid-race. Signature: <b>stutters that stop the moment you click the sim window.</b> Step 3 fixes it permanently.</p>
+      <p><b>Rule 4 — Measure, don't guess.</b> Change one thing, log a race, compare. The kit's tools do the logging for you.</p>
+      <p class="muted">Adapted for dual-CCD from the single-CCD guide by <a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93</a> — see <a href="#why-differs">what flips and why</a>.</p>
+    </div>
+  </details>
 </section>
 
-<section>
-  <div class="kicker">Golden rules</div>
-  <h2>Learned the hard way</h2>
-  <div class="grid">
-    <div class="card"><h3>EAC blocks affinity</h3><p>EasyAntiCheat rejects external CPU-affinity changes to iRacing — hard-pinning reverts to all cores seconds after launch. Use a <b>soft CPU Set</b> instead. The mask reading <code>0xFFFFFFFF</code> is <b>normal</b> for CPU Sets, not a failure.</p></div>
-    <div class="card"><h3>Unparked plan, NOT Balanced</h3><p>Single-CCD guides say “Balanced.” On dual-CCD with VR, Balanced’s core parking <b>strands the VR compositor and starves the GPU</b>. Keep <b>all cores unparked</b>.</p></div>
-    <div class="card"><h3>Measure, don’t guess</h3><p>Frametime hiccups rarely show without instrumentation. Log first, change one thing, log again.</p></div>
-    <div class="card"><h3>The VR focus/timer trap</h3><p>Windows 11 only honors a game’s high-res timer while it owns <b>foreground focus</b> — and in VR, the compositor steals focus constantly. If your stutter <b>stops when you click the sim window</b>, that’s the signature. Fix #3 ends it.</p></div>
+<!-- ============ THE STEPS ============ -->
+<section id="do-it">
+  <div class="kicker">Do it</div>
+  <h2>The six steps</h2>
+  <p class="lead">In order. Boxes remember themselves, so you can leave and come back — there's a reboot in the middle anyway.</p>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <div class="step-head">
+      <input type="checkbox" class="save big" id="s1">
+      <div>
+        <div class="step-num">Step 1 · 2 min</div>
+        <div class="step-title">Download the kit &amp; unzip it somewhere permanent</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <p><a href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">Download the .zip</a> and unzip to a folder you'll keep — e.g. <span class="file">C:\iRacingTuning\</span>. Not Downloads, not the desktop clutter — things reference this folder later.</p>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <div class="step-head">
+      <input type="checkbox" class="save big" id="s2">
+      <div>
+        <div class="step-num">Step 2 · 10 min</div>
+        <div class="step-title">Process Lasso — the only app setup</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <p>One free app does the two fixes no script can: <a href="https://bitsum.com">Process Lasso</a> (the free version does everything needed).</p>
+      <ul class="mini">
+        <li><input type="checkbox" class="save" id="s2a"><span><b>Install it</b> from bitsum.com.</span></li>
+        <li><input type="checkbox" class="save" id="s2b"><span><b>Power plan:</b> Main&nbsp;menu → Power → activate <b>Bitsum Highest Performance</b>. (Keeps every core awake.)</span></li>
+        <li><input type="checkbox" class="save" id="s2c"><span><b>Launch iRacing and enter any race</b> (a test or AI session is fine) so <code>iRacingSim64DX11.exe</code> shows up in Process Lasso's list. Then you can exit.</span></li>
+        <li><input type="checkbox" class="save" id="s2d"><span><b>Pin the sim:</b> right-click <code>iRacingSim64DX11.exe</code> → <b>CPU Sets</b> (⚠ not CPU <em>Affinity</em>) → select cores <b data-cpu="vc">0–15</b>.</span></li>
+        <li><input type="checkbox" class="save" id="s2e"><span><b>Protect it:</b> right-click it again → <b>ProBalance</b> → exclude.</span></li>
+      </ul>
+      <details>
+        <summary>Why CPU Sets and not Affinity? And what about my wheel/overlay apps?</summary>
+        <div class="inner">
+          <p>EasyAntiCheat rejects hard affinity — the sim reverts to all cores seconds after launch. CPU Sets are a scheduler <em>hint</em> EAC can't block, and they work just as well.</p>
+          <p>Optional extras in Process Lasso: put background apps (VR runtime, SimHub, overlays, wheel software, browsers) on the frequency die (cores <b data-cpu="freq">16–31</b>), and give iRacing High CPU/I/O/memory priority. Nice-to-haves, not required.</p>
+          <p>If you use <b>ParkControl</b> (same developer): set Parking = Off and <b>untick “Dynamic Boost”</b> — it flips the power plan mid-race and caused our worst hard freezes.</p>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <div class="step-head">
+      <input type="checkbox" class="save big" id="s3">
+      <div>
+        <div class="step-num">Step 3 · 3 min</div>
+        <div class="step-title">Run the optimizer — one double-click</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <p>In the kit folder, double-click <span class="file">Apply-Baseline.bat</span>. It confirms your CPU, shows a short advisory, then applies all five script fixes in one window with <b>one admin prompt</b>. Nothing to type.</p>
+      <div class="two">
+        <div class="pathcard">
+          <h4>⚡ Apply-Baseline.bat</h4>
+          <p class="tagline">The fast path — everything in one go.</p>
+        </div>
+        <div class="pathcard">
+          <h4>🖱️ Start-Tuning-Menu.bat</h4>
+          <p class="tagline">Prefer one step at a time, with each explained? The guided menu does the same fixes plus troubleshooting tools and undos.</p>
+        </div>
+      </div>
+      <details>
+        <summary>What the five fixes actually change</summary>
+        <div class="inner">
+          <ol>
+            <li><b>Defender exclusions</b> — stops Windows Defender scanning every iRacing texture read mid-race (a constant micro-stutter source). Defender stays fully active everywhere else.</li>
+            <li><b>USB Selective Suspend + Game Bar off</b> — stops wheel/VR USB power-cycling and removes Game Bar/DVR hooks.</li>
+            <li><b>Diagnostic log on</b> — enables the Task Scheduler log so the troubleshooting tools can name culprits later. Changes nothing else.</li>
+            <li><b>Timer fix</b> — registry key so Windows honors the 1&nbsp;ms timer even when the sim loses window focus. Kills the “stutters until I click” problem (Rule 3).</li>
+            <li><b>GPU interrupts off the sim's core</b> — NVIDIA's interrupts default to CPU 0, exactly where the sim's main thread runs. This steers them to core <b data-cpu="first">16</b> on the frequency die.</li>
+          </ol>
+          <p>Every fix has an undo: <span class="file">Start-Tuning-Menu.bat</span> → Advanced. Registry, power, and Defender changes only — no drivers, no overclocking.</p>
+        </div>
+      </details>
+      <details>
+        <summary>Rather run the scripts by hand?</summary>
+        <div class="inner">
+          <p>Each fix is a readable <code>.ps1</code> in <span class="file">scripts\</span> (<a href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">browse them</a>, and see <span class="file">scripts\README.txt</span>). Run one with:</p>
+          <p><code>powershell -ExecutionPolicy Bypass -File "path\to\script.ps1"</code></p>
+          <p>Setting-changers need an elevated PowerShell (Start → type PowerShell → right-click → Run as administrator). Or run <span class="file">Create-Launchers.ps1</span> once to get double-click shortcuts that self-elevate. 12-core chips: the launchers and menu set your core numbers automatically; only pure-manual runs need the one-line edit described in <span class="file">scripts\README.txt</span>.</p>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <div class="step-head">
+      <input type="checkbox" class="save big" id="s4">
+      <div>
+        <div class="step-num">Step 4 · 1 reboot</div>
+        <div class="step-title">Reboot</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <p>The GPU-interrupt and timer fixes only take effect after a restart. Do it now — the boxes will still be ticked when you're back.</p>
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step">
+    <div class="step-head">
+      <input type="checkbox" class="save big" id="s5">
+      <div>
+        <div class="step-num">Step 5 · one race</div>
+        <div class="step-title">Prove it worked</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <ul class="mini">
+        <li><input type="checkbox" class="save" id="s5a"><span><b>Quick check:</b> <span class="file">Start-Tuning-Menu.bat</span> → Troubleshoot → <b>Preflight-Check</b>. Green <b>READY</b> = every fix is live.</span></li>
+        <li><input type="checkbox" class="save" id="s5b"><span><b>Real proof:</b> run <b>FullTrace</b> (menu → Troubleshoot, or press <kbd>T</kbd> at the end of Apply-Baseline). Race ~10 minutes, press <kbd>Ctrl+C</kbd>, open the CSV from your Desktop.</span></li>
+      </ul>
+      <p><b>What good looks like:</b> no skipped seconds in the timestamp column. A jump like <code>12:04:40 → 12:04:42</code> is a stall — none means zero system-wide hiccups.</p>
+      <details>
+        <summary>Reading the rest of the CSV (for the curious)</summary>
+        <div class="inner">
+          <ul>
+            <li><code>power_plan</code> — should stay on your unparked plan the whole session (a mid-race flip = ParkControl Dynamic Boost, see Step 2).</li>
+            <li><code>ccd0_cpu</code> vs <code>ccd1_cpu</code> — CCD0 busier = the sim is on the V-Cache die where it belongs.</li>
+            <li><code>cpu0_int</code> low, <code>freqcore_int</code> higher — GPU interrupts moved off the sim's core.</li>
+            <li><code>gpu_util</code> — steady, no collapses to single digits.</li>
+            <li><code>hardfaults_s</code> — near zero while racing (bursts during <em>loading</em> are normal).</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="step">
+    <div class="step-head">
+      <input type="checkbox" class="save big" id="s6">
+      <div>
+        <div class="step-num">Step 6 · when you're smooth</div>
+        <div class="step-title">The graphics pass — last on purpose</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <p>Do this only after Step 5 looks clean — that way, if a new stutter appears, you know exactly what caused it.</p>
+      <details>
+        <summary>iRacing settings (edit with the sim fully closed)</summary>
+        <div class="inner">
+          <p>iRacing rewrites these files on exit, so <b>close the sim first</b>. Files are in <span class="file">Documents\iRacing</span>.</p>
+          <table>
+            <tr><th>File</th><th>Set</th><th>Why</th></tr>
+            <tr><td><code>rendererDX11*.ini</code></td><td><code>LoadTexturesWhenDriving=0</code></td><td>Preload textures instead of streaming off disk mid-lap</td></tr>
+            <tr><td><code>rendererDX11*.ini</code></td><td><code>CacheSwap3HighResCars=0</code></td><td>No mid-race texture swapping</td></tr>
+            <tr><td><code>app.ini</code></td><td><code>spoolingEnabled=0</code></td><td>Stops continuous replay-to-disk writes</td></tr>
+            <tr><td>Graphics options</td><td><code>CrowdDetail=0</code></td><td>Fewer draw calls, near-zero visual impact</td></tr>
+          </table>
+        </div>
+      </details>
+      <details>
+        <summary>NVIDIA Control Panel (per-app: iRacingSim64DX11.exe)</summary>
+        <div class="inner">
+          <table>
+            <tr><th>Setting</th><th>Value</th></tr>
+            <tr><td>Low Latency Mode</td><td><b>On</b> — not Ultra (Ultra caused present-queue stalls)</td></tr>
+            <tr><td>Power Management</td><td>Prefer Maximum Performance</td></tr>
+            <tr><td>Vertical Sync</td><td>Off</td></tr>
+            <tr><td>Threaded Optimization</td><td>On</td></tr>
+            <tr><td>Shader Cache Size</td><td>Unlimited</td></tr>
+            <tr><td>Anisotropic Filtering</td><td>16x</td></tr>
+          </table>
+          <p>Also <b>disable the GeForce/NVIDIA App in-game overlay</b> — DirectX hooks and DPC load for no benefit. Same goes for RTSS / MSI Afterburner: notorious stutter sources, close them unless you truly need them.</p>
+        </div>
+      </details>
+      <details>
+        <summary>VR: clarity without hiccups</summary>
+        <div class="inner">
+          <ul>
+            <li><b>Supersampling beats MSAA.</b> MSAA only smooths polygon edges; resolution anti-aliases everything (fences, distant lines, shimmer). Keep MSAA at <b>4x</b> (8x often crashes iRacing in VR) and spend GPU headroom on resolution.</li>
+            <li><b>Set resolution in ONE place</b> — the headset runtime's panel <em>or</em> the sim, never both (they multiply).</li>
+            <li><b>Quad-views / foveated rendering</b> (e.g. Pimax Advanced Quad-View) is a big free win — sharp center, cheap periphery. The runtime's panel is authoritative; tune center resolution for crispness, peripheral for savings.</li>
+            <li><b>Sharpening amplifies shimmer</b> — turn it down and let resolution do the work.</li>
+            <li><b>Keep ~15% GPU headroom</b> (peaks under ~85%). A missed VR frame means reprojection judder, which looks worse than slightly lower settings.</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="callout">
+    <b>Every race from now on:</b> the menu's <b>Each-Race routine</b> quiets Windows Update/Search (and optionally Defender) before you drive and restores everything after. Optional, but it removes the last periodic stall source. <span class="muted">(Pre-Race-Quiet / Post-Race-Restore — don't skip the restore.)</span>
   </div>
 </section>
 
-<section>
-  <div class="kicker">Toolkit</div>
-  <h2>Measure first</h2>
-  <ul>
-    <li><b>FullTrace.ps1</b> — main logger. ~1/sec CSV of power plan, per-CCD load, CPU-0 vs frequency-die interrupt/DPC, GPU util/power/throttle, sim &amp; VR CPU, pagefaults. <b>Gaps in the timestamps = a stall caught live.</b></li>
-    <li><b>Preflight-Check.ps1</b> — confirms every fix is live before a session.</li>
-    <li><a href="https://www.resplendence.com/latencymon">LatencyMon</a> — names the driver behind any DPC spike. Essential for the last mile.</li>
-    <li><b>Repair-PerfCounters.ps1</b> — if per-core columns come back empty, your Windows performance counters are broken. Rebuild them.</li>
-    <li><b>Watch-TimerResolution.ps1</b> — live view of the system timer resolution + which window has focus. Catches the “stutters until I click” focus/timer problem in the act (see fix #3).</li>
-  </ul>
-  <p class="lead">Good result = CCD0 busier than CCD1, GPU util steady with no collapses, no time-gaps, hard pagefaults near zero (big bursts during <em>loading</em> are normal).</p>
+<!-- ============ TROUBLESHOOT ============ -->
+<section id="troubleshoot">
+  <div class="kicker">If it's still not perfect</div>
+  <h2>Troubleshooting — name the culprit, don't guess</h2>
+  <p class="lead">Match your symptom. Every tool below is in <span class="file">Start-Tuning-Menu.bat</span> → Troubleshoot.</p>
+
+  <details>
+    <summary>Stutters that stop when I click the sim window</summary>
+    <div class="inner">
+      <p>The focus/timer trap. Run <b>Watch-TimerResolution</b>: if the timer jumps from ~1&nbsp;ms to ~15.6&nbsp;ms when the sim loses focus, the timer fix isn't active — re-run it from the menu (Advanced) and reboot.</p>
+    </div>
+  </details>
+  <details>
+    <summary>A stutter every few minutes, like clockwork</summary>
+    <div class="inner">
+      <p>Scheduled-task cadence (Windows Update scans fire every ~5–7 min). Run <b>FullTrace</b> during a race, then <b>Scan-Stutter-Events</b> — it finds each stall in your trace and lists which task fired at that moment. The Each-Race routine silences the usual offenders.</p>
+    </div>
+  </details>
+  <details>
+    <summary>Random hitches, no pattern</summary>
+    <div class="inner">
+      <p>Usually a driver's DPC latency. Run <a href="https://www.resplendence.com/latencymon">LatencyMon</a> (free) while racing — it names the driver behind the spike. <code>nvlddmkm.sys</code> on CPU 0 means the GPU-interrupt fix reverted (an MSI-mode quirk) — re-run it from the menu and reboot. Also close RTSS/Afterburner while diagnosing.</p>
+      <p>Still stuck? <b>Set-NIC-USB-IRQ-Affinity</b> (menu → Advanced) steers network + USB interrupts off CPU 0 too — the same trick as the GPU fix, worth trying when something remains.</p>
+    </div>
+  </details>
+  <details>
+    <summary>FullTrace's per-core columns are empty</summary>
+    <div class="inner">
+      <p>Your Windows performance counters are corrupt (surprisingly common). Menu → Advanced → <b>Repair-PerfCounters</b>, reboot, re-trace.</p>
+    </div>
+  </details>
+  <details>
+    <summary>Something feels wrong — undo everything</summary>
+    <div class="inner">
+      <p>Menu → <b>Advanced</b> has an undo for every fix (GPU IRQ, NIC/USB, timer, guide extras). Power plan and Process Lasso changes are reverted in their own apps. Post-Race-Restore turns Update/Search/Defender back on. Reboot after undoing IRQ or timer changes.</p>
+    </div>
+  </details>
 </section>
 
-<section>
-  <div class="kicker">The fixes</div>
-  <h2>Highest impact first</h2>
+<!-- ============ REFERENCE ============ -->
+<section id="reference">
+  <div class="kicker">For the tech-minded</div>
+  <h2>Reference</h2>
 
-  <p><span class="num">1</span><b>Power plan: all cores unparked (NOT Balanced).</b> Bitsum Highest Performance or Windows High Performance. If using ParkControl: Parking = Off, and <b>disable “Dynamic Boost”</b> — it flips the plan mid-race and causes hard freezes (our worst offender).</p>
+  <details>
+    <summary>Every script in the kit — what it touches</summary>
+    <div class="inner">
+      <p><b>Diagnostics (read-only):</b> FullTrace (1&nbsp;Hz CSV: per-CCD load, CPU0 vs frequency-core interrupt/DPC, GPU util/power/clocks/throttle, sim &amp; VR CPU, pagefaults, power plan — timestamp gaps = stalls caught live), Preflight-Check, Scan-Stutter-Events, Watch-TimerResolution.</p>
+      <p><b>Fixes (each reversible):</b> Enable-GlobalTimerResolution (<code>GlobalTimerResolutionRequests=1</code> under <code>HKLM\...\Session Manager\kernel</code>), Set-GPU-IRQ-Affinity (DevicePolicy=4 + AssignmentSetOverride on the NVIDIA device), Set-NIC-USB-IRQ-Affinity (same, PCI NICs + USB hosts, spread over cores <b data-cpu="nic">17–19</b>), Add-Defender-Exclusions, Apply-Guide-Extras (USB suspend, Game Bar/DVR), Pre-Race-Quiet / Post-Race-Restore (Update/Search tasks + services, optional Defender realtime — needs Tamper Protection off), Repair-PerfCounters (lodctr /R both arches + WMIADAP), Enable-DiagnosticLogs.</p>
+      <p><b>HAGS</b> (Hardware-Accelerated GPU Scheduling) is deliberately not scripted — it's a genuine toss-up on newer cards. Test both ways.</p>
+      <p>Full inventory with admin flags: <span class="file">scripts\README.txt</span> · <a href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">browse the source</a>.</p>
+    </div>
+  </details>
 
-  <p><span class="num">2</span><b>Process Lasso: pin the sim to the V-Cache die.</b> Add a <b>CPU Set</b> for <code>iRacingSim64DX11.exe</code> = cores 0–15 (0–11 on 12-core). Put VR/overlays/wheel/browsers on the frequency die (16–31). <b>Exclude iRacing from ProBalance.</b> Optional: High I/O, memory, and CPU priority.</p>
+  <details id="why-differs">
+    <summary>Why this differs from single-CCD X3D guides</summary>
+    <div class="inner">
+      <p>Adapted from <a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93's excellent single-CCD guide</a>. Most of it transfers; two things flip on dual-CCD:</p>
+      <ol>
+        <li><b>Power plan.</b> Single-CCD: Balanced (keeps V-Cache firmware prioritization active). Dual-CCD + VR: Balanced's core parking starves the compositor — use all-cores-unparked instead.</li>
+        <li><b>CCD pinning matters.</b> Single-CCD has nothing to pin — every core has V-Cache. On dual-CCD, getting the sim onto the cache die and everything else off it is half the battle.</li>
+      </ol>
+      <p>Single-CCD owners (7800X3D/9800X3D): Steps 3–6 still help; skip the CPU Sets pinning and use your platform's recommended plan.</p>
+    </div>
+  </details>
 
-  <p><span class="num">3</span><b>Global timer resolution — the “stutters until I click” fix (Windows 11, big for VR).</b> Windows 11 drops the system timer from ~1 ms to 15.625 ms whenever the sim window loses foreground focus — which the VR compositor causes constantly — producing periodic frame-pacing hitches that <b>stop the moment you click the sim window</b>. Confirm it with <code>Watch-TimerResolution.ps1</code>, then run <code>Enable-GlobalTimerResolution.ps1</code> (admin) → reboot. It restores the pre-Win11 behavior: high-res timer requests honored globally, focus or not. Reversible with <code>Undo-GlobalTimerResolution.ps1</code>.</p>
-
-  <p><span class="num">4</span><b>GPU interrupt affinity off CPU 0.</b> The sim thread favors CPU 0 and so do NVIDIA’s GPU interrupts — they collide. <code>Set-GPU-IRQ-Affinity.ps1</code> (admin) steers them to the first frequency-die core (CPU 16, or 12 on a 12-core) → reboot → verify in LatencyMon that <code>nvlddmkm.sys</code> DPCs left CPU 0.</p>
-
-  <p><span class="num">5</span><b>NIC + USB interrupt affinity.</b> Optional. <code>Set-NIC-USB-IRQ-Affinity.ps1</code> steers network + USB interrupts to frequency-die cores. Worth it only if a hitch remains after the fixes above — network DPC is usually small.</p>
-
-  <p><span class="num">6</span><b>Repair performance counters</b> if traces show empty per-core data. <code>Repair-PerfCounters.ps1</code> (admin) → reboot.</p>
-
-  <p><span class="num">7</span><b>Quiet background + Defender.</b> <code>Pre-Race-Quiet.ps1</code> disables Windows Update/Orchestrator/Search scans (they fire every ~5–7 min and cause periodic stalls) and optionally Defender real-time for the session (needs Tamper Protection off). <code>Post-Race-Restore.ps1</code> reverts. <code>Add-Defender-Exclusions.ps1</code> excludes iRacing’s folders so Defender stops scanning texture reads mid-race.</p>
-
-  <p><span class="num">8</span><b>HAGS / Game Bar / USB Selective Suspend.</b> <code>Apply-Guide-Extras.ps1</code> turns off USB Selective Suspend (stops wheel/VR USB power-cycling) and Game Mode/Bar/DVR. Test HAGS both ways — it’s a toss-up on newer cards.</p>
-
-  <p><span class="num">9</span><b>iRacing in-game settings</b> (edit with the sim CLOSED): <code>LoadTexturesWhenDriving=0</code> (preload instead of streaming mid-lap), <code>CacheSwap3HighResCars=0</code>, <code>spoolingEnabled=0</code> in app.ini (no continuous replay-to-disk), <code>CrowdDetail=0</code>.</p>
-
-  <p><span class="num">10</span><b>NVIDIA Control Panel</b> (per-app <code>iRacingSim64DX11.exe</code>): Low Latency = <b>On</b> (not Ultra), Power = Prefer Max Performance, V-Sync Off, Threaded Optimization On, Shader Cache Unlimited, Anisotropic 16x. Disable the in-game overlay.</p>
-
-  <p><span class="num">11</span><b>Remove monitoring overlays.</b> RTSS / MSI Afterburner are notorious DPC + hard-pagefault sources. Close them, especially while diagnosing.</p>
-</section>
-
-<section>
-  <div class="kicker">VR</div>
-  <h2>Clarity without hiccups</h2>
-  <ul>
-    <li><b>Supersampling beats MSAA for clarity.</b> MSAA only smooths polygon edges; it does nothing for fences, distant lines, and specular shimmer. Resolution anti-aliases <em>everything</em>. Keep <b>MSAA 4x</b> (8x often crashes iRacing in VR) and spend headroom on resolution.</li>
-    <li><b>Set resolution in ONE place.</b> Runtime panel <em>or</em> in-sim slider — not both (they multiply and you’ll miss frame deadlines).</li>
-    <li><b>Quad-views / foveated</b> is a big free win — sharp center, low-res periphery. When the runtime provides it (e.g. Pimax’s Advanced Quad-View), the <b>runtime panel is authoritative</b>; the sim just renders into it.</li>
-    <li><b>Sharpening amplifies shimmer</b> — lower it and let resolution do the work.</li>
-    <li><b>Keep ~15% GPU headroom</b> (util peaks under ~85%). VR punishes any missed frame with reprojection judder.</li>
-    <li><b>Stutter that stops when you click the sim window?</b> That’s the focus/timer problem — see fix #3. It hits VR hardest because the compositor keeps taking foreground focus from the sim.</li>
-  </ul>
-</section>
-
-<section id="why-differs">
-  <div class="kicker">Why this differs</div>
-  <h2>Adapted from a single-CCD guide — two things flip</h2>
-  <p>This method builds on an excellent single-CCD guide (<a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93.github.io/iracing-stutter-fix</a>). Most transfers, but on dual-CCD:</p>
-  <ol>
-    <li><b>Power plan:</b> single-CCD says Balanced; dual-CCD with VR needs <b>all cores unparked</b> (Balanced parks cores and starves the VR compositor).</li>
-    <li><b>CCD pinning matters</b> — single-CCD has nothing to pin. Getting the sim onto the V-Cache die and everything else off it is half the battle.</li>
-  </ol>
-</section>
-
-<section>
-  <div class="callout warn">
-    <b>Before you run anything:</b> these scripts change Windows / registry / power settings. Every one is reversible (an Undo script or a documented toggle), but review before running — it’s your PC, at your own risk.
-  </div>
-  <div class="cta" style="text-align:center">
-    <a class="btn" href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">⬇ Download guide + scripts (.zip)</a>
-    <a class="btn ghost" href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">Browse the scripts</a>
-  </div>
+  <details>
+    <summary>Glossary</summary>
+    <div class="inner">
+      <ul>
+        <li><b>CCD</b> — one of the CPU's two core clusters; one has stacked V-Cache, the other clocks higher.</li>
+        <li><b>CPU Set</b> — a soft “please run here” scheduler hint. Used because EAC blocks hard affinity.</li>
+        <li><b>DPC / interrupt</b> — kernel-level work the CPU does for hardware. Piled onto the sim's core, it becomes micro-stutter.</li>
+        <li><b>Timer resolution</b> — how finely Windows slices time. Games want ~1&nbsp;ms; Windows 11 falls back to 15.6&nbsp;ms when the game loses focus.</li>
+        <li><b>Hard pagefault</b> — the PC stopping to read from disk. Fine while loading, not while racing.</li>
+        <li><b>HAGS</b> — Hardware-Accelerated GPU Scheduling. Toss-up; test both ways.</li>
+      </ul>
+    </div>
+  </details>
 </section>
 
 </div>
 
 <footer>
   <div class="wrap">
-    Community guide · MIT licensed · Built collaboratively and measured end-to-end.<br>
-    Adapted for dual-CCD Ryzen X3D from the single-CCD guide by <a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93</a>.
+    Community guide · MIT licensed · measured end-to-end on a 9950X3D + RTX 5090 + Pimax rig · share freely<br>
+    Built on the single-CCD work of <a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93</a> · <a href="https://github.com/no6969el/iracing-x3d-tuning">source on GitHub</a>
   </div>
 </footer>
+
+<script>
+(function(){
+  var LS = 'x3d-';
+  // ---------- CPU toggle ----------
+  var cpu = {
+    '16': { vc:'0–15', freq:'16–31', first:'16', nic:'17–19' },
+    '12': { vc:'0–11', freq:'12–23', first:'12', nic:'13–15' }
+  };
+  var toggle = document.getElementById('cpuToggle');
+  function setCpu(p){
+    if(!cpu[p]) p = '16';
+    document.querySelectorAll('[data-cpu]').forEach(function(el){
+      el.textContent = cpu[p][el.getAttribute('data-cpu')] || el.textContent;
+    });
+    toggle.querySelectorAll('button').forEach(function(b){
+      b.classList.toggle('on', b.getAttribute('data-pick') === p);
+    });
+    try { localStorage.setItem(LS + 'cpu', p); } catch(e){}
+  }
+  toggle.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-pick]');
+    if(b) setCpu(b.getAttribute('data-pick'));
+  });
+  try { setCpu(localStorage.getItem(LS + 'cpu') || '16'); } catch(e){ setCpu('16'); }
+
+  // ---------- persistent checkboxes + progress ----------
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('input.save'));
+  var fill = document.getElementById('pfill'),
+      pc = document.getElementById('pcount'),
+      pt = document.getElementById('ptotal');
+  pt.textContent = boxes.length;
+  function refresh(){
+    var done = boxes.filter(function(b){ return b.checked; }).length;
+    pc.textContent = done;
+    fill.style.width = (boxes.length ? (done / boxes.length * 100) : 0) + '%';
+    document.querySelectorAll('.step').forEach(function(card){
+      var main = card.querySelector('.step-head input.save');
+      if(main) card.classList.toggle('done', main.checked);
+    });
+  }
+  boxes.forEach(function(b){
+    try { b.checked = localStorage.getItem(LS + b.id) === '1'; } catch(e){}
+    b.addEventListener('change', function(){
+      try { localStorage.setItem(LS + b.id, b.checked ? '1' : '0'); } catch(e){}
+      refresh();
+    });
+  });
+  document.getElementById('preset').addEventListener('click', function(){
+    if(!confirm('Untick all progress?')) return;
+    boxes.forEach(function(b){
+      b.checked = false;
+      try { localStorage.setItem(LS + b.id, '0'); } catch(e){}
+    });
+    refresh();
+  });
+  refresh();
+})();
+</script>
 
 </body>
 </html>

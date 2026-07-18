@@ -1,11 +1,9 @@
 # Start Here 🧭
 
-The guided, hand-holding walkthrough lives on the guide site:
+Everything is now on one page:
 
-## → **[Start Here: Guided Walkthrough](https://no6969el.github.io/iracing-x3d-tuning/start-here.html)**
+## → **[Open the guide](https://no6969el.github.io/iracing-x3d-tuning/)**
 
-It assumes you've never run a PowerShell script and walks you through everything step by step.
+Six steps in order, with a progress tracker and expandable explanations — no PowerShell experience needed.
 
-**Even easier:** unzip this kit and **double-click `Start-Tuning-Menu.bat`** — an interactive menu that detects your system, sets the right core numbers automatically, and runs every step for you.
-
-Comfortable already? The **[full guide](https://no6969el.github.io/iracing-x3d-tuning/)** has every fix with the reasoning behind it.
+**Even easier:** unzip this kit and double-click **`Apply-Baseline.bat`** (one-shot, after the Process Lasso setup in Step 2) or **`Start-Tuning-Menu.bat`** (guided menu that explains each step and includes undo for everything).

@@ -15,7 +15,7 @@ $Root       = $PSScriptRoot
 $ScriptsDir = Join-Path $Root 'scripts'
 $ConfigDir  = Join-Path $env:APPDATA 'iRacingX3DTuning'
 $ConfigFile = Join-Path $ConfigDir 'config.json'
-$SiteUrl    = 'https://no6969el.github.io/iracing-x3d-tuning/start-here.html'
+$SiteUrl    = 'https://no6969el.github.io/iracing-x3d-tuning/'
 
 # ---- semantic colours (high contrast on dark consoles) ----
 $H='Cyan'; $T='White'; $Go='Green'; $Warn='Yellow'; $Bad='Red'; $Dim='DarkGray'
@@ -374,7 +374,7 @@ function Optimize-Wizard { param($cfg)
     Write-C "       texture preload on, replay spooling off, crowds off." $T
     Write-C "     * NVIDIA Control Panel per-app settings for the sim." $T
     Write-Host ""
-    Write-C "   The web guide lists every exact value (fixes #9 and #10)." $T
+    Write-C "   The web guide lists every exact value (Step 6, 'graphics pass')." $T
     Write-Host ""
     Rule
     if((Read-Host "   [Enter] open the web guide now    [S] skip") -notmatch '^[SsQq]'){

@@ -5,7 +5,7 @@
     steps FIRST (they're on the Quick Baseline page), then run this:
     it applies every script fix in one go with a single admin prompt.
 
-      https://no6969el.github.io/iracing-x3d-tuning/quick-baseline.html
+      https://no6969el.github.io/iracing-x3d-tuning/
 
     Run Apply-Baseline.bat, or right-click this > Run with PowerShell.
     Prefer step-by-step with explanations? Use Start-Tuning-Menu.bat.
@@ -59,8 +59,7 @@ Write-C "    * Power plan: activate  Bitsum Highest Performance" $T
 Write-C ("    * Pin iRacing to V-Cache cores {0} (CPU Sets) + exclude" -f $VCache) $T
 Write-C "      it from ProBalance. (Launch iRacing into a race once so" $T
 Write-C "      iRacingSim64DX11.exe shows in Process Lasso's list.)" $T
-Write-C "    Exact clicks: the Quick Baseline page (link in the header" $Dim
-Write-C "    of this script / the repo front page)." $Dim
+Write-C "    Exact clicks: Step 2 on the web guide (repo front page)." $Dim
 Write-Host ""
 Write-C "  Good to know:" $H
 Write-C "    * These change Windows settings (registry, power, Defender)." $T
@@ -107,8 +106,8 @@ Write-C "  2) After the reboot, prove it worked (optional): run this" $T
 Write-C "     again and press T, or use Start-Tuning-Menu > Troubleshoot." $T
 Write-C "     FullTrace logs your race to a CSV - no skipped seconds in" $T
 Write-C "     the timestamps = no stalls." $T
-Write-C "  3) Once it's smooth, do the graphics pass last: iRacing +" $T
-Write-C "     NVIDIA settings from the full guide (fixes #9-#10, VR tips)." $T
+Write-C "  3) Once it's smooth, do the graphics pass last: Step 6 on" $T
+Write-C "     the web guide (iRacing + NVIDIA settings, VR tips)." $T
 Write-Host ""
 Rule
 $a = Read-Host "  [Enter] finish    [T] launch FullTrace now (race, then Ctrl+C)"
