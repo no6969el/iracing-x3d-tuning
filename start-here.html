@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Start Here — Guided Walkthrough | iRacing X3D Tuning</title>
+<meta name="description" content="Step-by-step, hand-holding walkthrough for tuning iRacing on dual-CCD Ryzen X3D — including how to run the PowerShell scripts. No experience needed.">
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a3240;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#3ea6ff; --accent2:#22c55e;
+    --warn:#f5b041; --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65;font-size:17px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 22px}
+  header.hero{background:radial-gradient(1200px 400px at 50% -10%,#12233b 0%,var(--bg) 60%);
+    border-bottom:1px solid var(--border);padding:52px 0 36px;text-align:center}
+  .badge{display:inline-block;background:var(--panel2);border:1px solid var(--border);
+    color:var(--muted);border-radius:999px;padding:5px 13px;font-size:13px;margin:4px}
+  h1{font-size:2.2rem;line-height:1.15;margin:14px 0 8px;letter-spacing:-.5px}
+  h1 .accent{color:var(--accent)}
+  .tag{color:var(--muted);font-size:1.1rem;max-width:620px;margin:0 auto}
+  .cta{margin-top:22px}
+  .btn{display:inline-block;background:var(--accent);color:#06121f;font-weight:700;
+    padding:11px 18px;border-radius:9px;margin:5px;border:1px solid transparent;font-size:.98rem}
+  .btn:hover{filter:brightness(1.08);text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
+  section{padding:26px 0;border-bottom:1px solid var(--border)}
+  h2{font-size:1.5rem;margin:6px 0 6px;letter-spacing:-.3px}
+  h3{font-size:1.15rem;margin:20px 0 4px}
+  .lead{color:var(--muted)}
+  ul,ol{padding-left:22px}
+  li{margin:7px 0}
+  code{font-family:var(--mono);background:var(--panel2);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px;font-size:.9em}
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:9px;
+    padding:14px 16px;overflow:auto}
+  pre code{background:none;border:none;padding:0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.96rem}
+  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left}
+  th{background:var(--panel2)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin:14px 0}
+  .callout{background:#12233b;border:1px solid #244;border-left:4px solid var(--accent);
+    border-radius:8px;padding:14px 16px;margin:16px 0}
+  .callout.warn{background:#2a2213;border-left-color:var(--warn)}
+  .phase{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:6px 20px 14px;margin:16px 0}
+  .phase h3{color:var(--accent2)}
+  .check{list-style:none;padding-left:0}
+  .check li{display:flex;gap:10px;align-items:flex-start;margin:10px 0}
+  .check input{margin-top:6px;width:16px;height:16px;flex:0 0 auto}
+  .admin{display:inline-block;background:#3a2213;border:1px solid #6a4a1a;color:var(--warn);
+    border-radius:5px;padding:0 6px;font-size:.75rem;font-weight:700;margin-right:4px;vertical-align:middle}
+  .kicker{color:var(--accent);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.8rem}
+  footer{padding:30px 0 60px;color:var(--muted);text-align:center;font-size:.92rem}
+  .muted{color:var(--muted)}
+  .nav{margin-bottom:14px;font-size:.95rem}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge">🧭 Hand-holding version</span>
+    <h1>Start Here — <span class="accent">Guided Walkthrough</span></h1>
+    <p class="tag">A step-by-step version that walks you through the whole process, assuming you've never run a PowerShell script. No technical knowledge needed — just follow the steps in order.</p>
+    <div class="cta">
+      <a class="btn ghost" href="./index.html">← Full guide (the “why” behind each step)</a>
+      <a class="btn" href="./iracing-x3d-tuning.zip">⬇ Download the kit (.zip)</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="callout warn">
+    ⚠️ <b>These scripts change Windows settings</b> (power, registry, services, Defender). Every one is reversible — there's an <b>Undo</b> for anything that changes a setting. Nothing here is dangerous if you follow the order. Go slowly and don't skip the reboots.
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Setup</div>
+  <h2>Before you start (3 minutes)</h2>
+  <ol>
+    <li><b>Download the kit</b> — the <a href="./iracing-x3d-tuning.zip">.zip</a>, or the green <b>Code ▸ Download ZIP</b> on the repo.</li>
+    <li><b>Unzip it to a permanent folder</b> — e.g. <code>C:\iRacingTuning\</code>. <b>Not</b> your Downloads or a temp folder, or the shortcuts break later.</li>
+    <li><b>Know your CPU's core split</b> (you'll use it once):
+      <table>
+        <tr><th>Your CPU</th><th>V-Cache cores (sim here)</th><th>Frequency cores (everything else)</th></tr>
+        <tr><td>9950X3D / 7950X3D</td><td><b>0–15</b></td><td><b>16–31</b></td></tr>
+        <tr><td>9900X3D / 7900X3D</td><td><b>0–11</b></td><td><b>12–23</b></td></tr>
+      </table>
+      12-core owners change <b>one number</b> in one script — the checklist tells you when.
+    </li>
+    <li><b>Install Process Lasso</b> (free version is fine, from bitsum.com) — a third-party app used for one step.</li>
+  </ol>
+</section>
+
+<section>
+  <div class="kicker">Read once</div>
+  <h2>Part 1 — How to run these scripts</h2>
+  <p>A PowerShell script is a <code>.ps1</code> file. <b>Double-clicking one does NOT run it</b> — Windows opens it in an editor. So we run them one of two ways.</p>
+
+  <h3>✅ The easy way: make double-click shortcuts (do this first!)</h3>
+  <p>The kit includes a helper, <b><code>Create-Launchers.ps1</code></b>. Its only job is to create a <b>clickable shortcut next to every script</b>, so from then on you just double-click. The shortcuts are pre-configured — the ones needing admin rights ask permission automatically, and the logging ones stay open so you can read results.</p>
+  <div class="card">
+    <b>Run it once:</b>
+    <ol>
+      <li>Open your <code>scripts</code> folder.</li>
+      <li><b>Right-click <code>Create-Launchers.ps1</code></b> → <b>“Run with PowerShell.”</b></li>
+      <li>If asked about an execution policy, type <b><code>Y</code></b> and press Enter.</li>
+      <li>Done — a <code>.lnk</code> shortcut now sits next to each script. <b>From now on, just double-click the shortcut you want.</b></li>
+    </ol>
+  </div>
+
+  <h3>The manual way (backup method)</h3>
+  <ol>
+    <li>Click <b>Start</b>, type <b>PowerShell</b>.</li>
+    <li>Normal script: click <b>Windows PowerShell</b>. Admin script: <b>right-click → “Run as administrator”</b> → Yes. (The title bar says <em>Administrator</em> — that's how you know.)</li>
+    <li>Type this, then drag the <code>.ps1</code> onto the window (it pastes the path), and press Enter:
+      <pre><code>powershell -ExecutionPolicy Bypass -File "PASTE THE FILE PATH HERE"</code></pre>
+      <span class="muted">(<code>-ExecutionPolicy Bypass</code> just lets this one script run; it changes no Windows setting.)</span>
+    </li>
+  </ol>
+  <p class="lead"><b>Which scripts need admin?</b> Any that <em>change</em> a setting — marked <span class="admin">ADMIN</span> below. The double-click shortcuts handle this for you.</p>
+</section>
+
+<section>
+  <div class="kicker">The checklist</div>
+  <h2>Part 2 — Step by step, in order</h2>
+  <p class="lead">Tick each box as you go. Don't rush the reboots — some changes only apply after a restart.</p>
+
+  <div class="phase">
+    <h3>Phase 1 — Set up &amp; get a “before” picture</h3>
+    <ul class="check">
+      <li><input type="checkbox"> Unzip the kit to a permanent folder (e.g. <code>C:\iRacingTuning\</code>).</li>
+      <li><input type="checkbox"> Run <b>Create-Launchers.ps1</b> once (Part 1) so everything becomes double-click.</li>
+      <li><input type="checkbox"> Double-click <b>FullTrace</b>, race ~10 min, press <b>Ctrl+C</b>. Saves a CSV to your Desktop — your <b>“before” measurement</b>. (Optional but recommended.)</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2 — Fix the foundation</h3>
+    <ul class="check">
+      <li><input type="checkbox"> <span class="admin">ADMIN</span> Run <b>Repair-PerfCounters</b> <em>only if</em> FullTrace's per-core columns were blank. Then <b>reboot</b>.</li>
+      <li><input type="checkbox"> Set the power plan to <b>all cores unparked</b> — Bitsum Highest Performance or Windows High Performance. If using ParkControl: Parking = Off, <b>uncheck “Dynamic Boost.”</b></li>
+      <li><input type="checkbox"> In Process Lasso, right-click <code>iRacingSim64DX11.exe</code> → <b>CPU Sets</b> → your V-Cache cores (0–15, or 0–11). Also exclude it from <b>ProBalance</b>.</li>
+      <li><input type="checkbox"> <b>12-core owners only:</b> open <b>Set-GPU-IRQ-Affinity.ps1</b> in Notepad, change <code>$TargetCore = 16</code> to <code>= 12</code>, save.</li>
+      <li><input type="checkbox"> <span class="admin">ADMIN</span> Run <b>Set-GPU-IRQ-Affinity</b>. Then <b>reboot</b>.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3 — Quiet the system (each once)</h3>
+    <ul class="check">
+      <li><input type="checkbox"> <span class="admin">ADMIN</span> Run <b>Add-Defender-Exclusions</b>.</li>
+      <li><input type="checkbox"> <span class="admin">ADMIN</span> Run <b>Apply-Guide-Extras</b>.</li>
+      <li><input type="checkbox"> Adjust iRacing's in-game settings (with iRacing <b>fully closed</b>): texture preload on, replay spooling off, crowds off.</li>
+      <li><input type="checkbox"> Set the NVIDIA Control Panel options for iRacing (see <a href="./index.html">full guide</a>, fix #9).</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 4 — Every race</h3>
+    <ul class="check">
+      <li><input type="checkbox"> <span class="admin">ADMIN</span> Run <b>Pre-Race-Quiet</b> <em>before</em> racing.</li>
+      <li><input type="checkbox"> Race. 🏁</li>
+      <li><input type="checkbox"> <span class="admin">ADMIN</span> Run <b>Post-Race-Restore</b> <em>after</em> — turns Windows Update, Search &amp; Defender back on. <b>Don't skip it.</b></li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 5 — Prove it worked</h3>
+    <ul class="check">
+      <li><input type="checkbox"> Run <b>Preflight-Check</b> — prints a green <b>READY</b> if everything's set.</li>
+      <li><input type="checkbox"> Run <b>FullTrace</b> for a race, Ctrl+C, and compare the CSV to your “before.”</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Verify</div>
+  <h2>Part 3 — How to tell it worked</h2>
+  <p>Open the FullTrace CSV (Excel or Notepad). You want:</p>
+  <ul>
+    <li><b>No skipped seconds</b> in the timestamp column — a jump like <code>12:04:40 → 12:04:42</code> means a stall. Fewer/none = better.</li>
+    <li>The <b>power_plan</b> column stayed on your unparked plan the whole time.</li>
+    <li>The <b>gpu_util</b> column stays steady while racing (no sudden drops to single digits).</li>
+  </ul>
+  <p>Smooth on track + no timestamp gaps = you're done. 🎉</p>
+</section>
+
+<section>
+  <div class="kicker">Safety net</div>
+  <h2>Part 4 — Undo anything</h2>
+  <p>Nothing is permanent. To reverse a change, run its <b>Undo</b> <span class="admin">ADMIN</span>, then reboot:</p>
+  <ul>
+    <li><code>Undo-GPU-IRQ-Affinity</code> · <code>Undo-NIC-USB-IRQ-Affinity</code> · <code>Undo-Guide-Extras</code></li>
+    <li><code>Post-Race-Restore</code> — turns Windows Update/Search/Defender back on</li>
+    <li>Power plan / Process Lasso / iRacing settings — just set them back in their apps</li>
+  </ul>
+</section>
+
+<section>
+  <div class="kicker">Plain English</div>
+  <h2>Part 5 — Glossary</h2>
+  <ul>
+    <li><b>CCD</b> — one of the two core clusters on your CPU. One has extra cache (V-Cache), one clocks higher.</li>
+    <li><b>CPU Set</b> — a gentle “please run here” hint that steers a program onto certain cores.</li>
+    <li><b>DPC / interrupt</b> — tiny background jobs the CPU handles for your hardware. Too many on the sim's core = micro-stutters.</li>
+    <li><b>Hard pagefault</b> — the PC pausing to read from disk. Normal during loading, not while racing.</li>
+    <li><b>Reboot</b> — restart the PC. A few changes only apply after one.</li>
+  </ul>
+  <p class="nav" style="margin-top:20px"><a href="./index.html">← Back to the full guide</a></p>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">Community guide · MIT licensed · Take it slow, do the steps in order — you'll get there. 🏁</div>
+</footer>
+
+</body>
+</html>

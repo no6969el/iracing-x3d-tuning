@@ -1,5 +1,8 @@
 # iRacing Tuning Guide — Dual-CCD Ryzen X3D + NVIDIA
 
+> ### 🧭 New to this, or never run a PowerShell script? → **[Start Here: Guided Walkthrough](START-HERE.md)**
+> A step-by-step, hand-holding version that walks you through the whole process — including exactly how to run the scripts and how to make one-click shortcuts. No experience needed, just follow the steps in order.
+
 **Goal: zero hiccups.** A measurement-driven method for eliminating frametime spikes, freezes, and micro-stutters in iRacing on **dual-CCD Ryzen X3D** systems (9950X3D, 7950X3D, 9900X3D, 7900X3D) with **NVIDIA** GPUs — flatscreen or VR.
 
 > This guide was built by diagnosing a real rig (Ryzen 9 **9950X3D** + RTX **5090**, Pimax VR) from session-ending freezes down to zero perceptible hiccups, using live logging and LatencyMon at every step. Every fix here was *measured*, not guessed.
