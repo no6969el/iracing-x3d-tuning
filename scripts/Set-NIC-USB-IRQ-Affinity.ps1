@@ -18,7 +18,7 @@ $FreqFirst = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } els
     $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
     $ff = 0
     if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
-    if ($ff -lt 1) { $ff = 16 }
+    if ($ff -lt 1) { $ff = [int]([Environment]::ProcessorCount / 2) }   # 8-core single-CCD -> 8, never a nonexistent core
     $ff
 }
 $TargetCores = @($FreqFirst + 1, $FreqFirst + 2, $FreqFirst + 3)   # off CPU0(sim), off the GPU core, off VR

@@ -66,21 +66,24 @@ function Run-FirstTimeSetup {
     Write-C ("  Detected GPU  : {0}" -f $d.GpuName) $Go
     Write-C ("  Physical cores: {0}" -f $d.Cores) $Go
     Write-Host ""
-    $prof = switch ($d.Cores) { 16 {'16'} 12 {'12'} default {''} }
-    if($prof -eq ''){ Write-C "  Which dual-CCD X3D do you have?" $Warn }
-    else { Write-C ("  That looks like a {0}-core X3D - confirm below:" -f $prof) $H }
-    Write-C "    [1] 16-core  (9950X3D / 7950X3D)  ->  V-Cache 0-15, Frequency 16-31" $T
-    Write-C "    [2] 12-core  (9900X3D / 7900X3D)  ->  V-Cache 0-11, Frequency 12-23" $T
-    do { $sel = Read-Host "  Choose 1 or 2" } while ($sel -notin '1','2')
-    if($sel -eq '1'){ $cores=16; $vcache='0-15'; $freqFirst=16; $freqRange='16-31' }
-    else            { $cores=12; $vcache='0-11'; $freqFirst=12; $freqRange='12-23' }
+    $guess = switch ($d.Cores) { 16 {'1'} 12 {'2'} 8 {'3'} default {''} }
+    if($guess -eq ''){ Write-C "  Which X3D chip do you have?" $Warn }
+    else { Write-C ("  That looks like a {0}-core X3D - confirm below:" -f $d.Cores) $H }
+    Write-C "    [1] 16-core dual-CCD  (9950X3D / 7950X3D)  ->  V-Cache 0-15" $T
+    Write-C "    [2] 12-core dual-CCD  (9900X3D / 7900X3D)  ->  V-Cache 0-11" $T
+    Write-C "    [3] 8-core  single-CCD (7800X3D / 9800X3D / 5800X3D)  ->  all cores V-Cache" $T
+    do { $sel = Read-Host "  Choose 1, 2, or 3" } while ($sel -notin '1','2','3')
+    if($sel -eq '1'){ $topo='dual';   $cores=16; $vcache='0-15'; $freqFirst=16; $freqRange='16-31' }
+    elseif($sel -eq '2'){ $topo='dual'; $cores=12; $vcache='0-11'; $freqFirst=12; $freqRange='12-23' }
+    else            { $topo='single'; $cores=8;  $vcache='all';  $freqFirst=8;  $freqRange='n/a' }
     Write-Host ""
     Write-C "  Do you race in VR or on a monitor (flatscreen)?" $H
     Write-C "    [1] VR    [2] Flatscreen" $T
     do { $ds = Read-Host "  Choose 1 or 2" } while ($ds -notin '1','2')
     $display = if($ds -eq '1'){'VR'}else{'Flatscreen'}
+    $profLabel = if($topo -eq 'single'){"$cores-core single-CCD"}else{"$cores-core dual-CCD"}
     $cfg = [pscustomobject]@{
-        CpuName=$d.CpuName; GpuName=$d.GpuName; Cores=$cores; Profile="$cores-core"
+        CpuName=$d.CpuName; GpuName=$d.GpuName; Cores=$cores; Topology=$topo; Profile=$profLabel
         VCache=$vcache; FreqFirst=$freqFirst; FreqRange=$freqRange; Display=$display
         Launched=@(); SetupDate=(Get-Date).ToString('u') }
     Save-Config $cfg
@@ -91,10 +94,15 @@ function Run-FirstTimeSetup {
 }
 
 # ---------------------------------------------------------------- UI bits
+function Is-Single { param($cfg) return ($cfg.Topology -eq 'single') }
 function Draw-Header { param($cfg)
     Clear-Host; Bar; Write-C "        iRacing  X3D  Tuning        Guided Menu" $H; Bar
     Write-C ("   {0}  ({1})   |   {2}   |   {3}" -f $cfg.CpuName,$cfg.Profile,$cfg.GpuName,$cfg.Display) $Dim
-    Write-C ("   Sim -> V-Cache cores {0}     background -> {1}" -f $cfg.VCache,$cfg.FreqRange) $Dim
+    if(Is-Single $cfg){
+        Write-C ("   Single-CCD: all {0} cores are V-Cache - no core pinning needed" -f $cfg.Cores) $Dim
+    } else {
+        Write-C ("   Sim -> V-Cache cores {0}     background -> {1}" -f $cfg.VCache,$cfg.FreqRange) $Dim
+    }
     Rule
 }
 function Mark { param($cfg,$file) if($cfg.Launched -contains $file){ '[done]' } else { '' } }
@@ -110,7 +118,7 @@ function Tip { Write-C "   Not sure what something does? Type ? then its number 
 function Show-Welcome {
     Clear-Host; Bar; Write-C "        iRacing  X3D  Tuning        Guided Menu" $H; Bar
     Write-Host ""
-    Write-C "   This makes iRacing stutter-free on your dual-CCD X3D." $T
+    Write-C "   This makes iRacing stutter-free on your Ryzen X3D." $T
     Write-Host ""
     Write-C "     *  Nothing runs until YOU pick it - browsing is safe." $Go
     Write-C "     *  Each fix opens in its own window for you to approve." $Go
@@ -145,18 +153,29 @@ function Show-Help { param($cfg)
     [void](Read-Host "   Press Enter to go back")
 }
 function Show-Requirements { param($cfg)
-    Clear-Host; Bar; Write-C "   WHAT YOU NEED FIRST   (all free)" $H; Bar
-    Write-C "   ONE free app does everything - install it before OPTIMIZE:" $T
-    Write-Host ""
-    Write-C "   Process Lasso     (free, from bitsum.com)" $H
-    Write-C "        - Pins iRacing to your V-Cache cores (CPU Sets)" $T
-    Write-C "        - Excludes it from ProBalance" $T
-    Write-C "        - Activates the 'Bitsum Highest Performance' power plan" $T
-    Write-C "          (all cores unparked)  via  Main menu -> Power" $T
-    Write-C "        - The free version does all of this." $Go
-    Write-Host ""
-    Write-C ("   For your {0}, the sim goes on cores {1}." -f $cfg.Profile,$cfg.VCache) $T
-    Write-C "   The web guide (main menu -> G) shows the exact clicks." $T
+    Clear-Host; Bar; Write-C "   WHAT YOU NEED FIRST" $H; Bar
+    if(Is-Single $cfg){
+        Write-C "   Good news - your single-CCD chip needs NO extra apps." $Go
+        Write-Host ""
+        Write-C "   Everything for you is in the automatic fixes (Optimize)." $T
+        Write-C "   There's no core to pin (all cores have the V-Cache) and" $T
+        Write-C "   you keep your normal Balanced power plan." $T
+        Write-Host ""
+        Write-C "   Optional only: Process Lasso (free, bitsum.com) if you'd" $Dim
+        Write-C "   like to exclude iRacing from ProBalance. Not required." $Dim
+    } else {
+        Write-C "   ONE free app does the two manual fixes - get it first:" $T
+        Write-Host ""
+        Write-C "   Process Lasso     (free, from bitsum.com)" $H
+        Write-C "        - Pins iRacing to your V-Cache cores (CPU Sets)" $T
+        Write-C "        - Excludes it from ProBalance" $T
+        Write-C "        - Activates the 'Bitsum Highest Performance' power plan" $T
+        Write-C "          (all cores unparked)  via  Main menu -> Power" $T
+        Write-C "        - The free version does all of this." $Go
+        Write-Host ""
+        Write-C ("   For your {0}, the sim goes on cores {1}." -f $cfg.Profile,$cfg.VCache) $T
+        Write-C "   The web guide (main menu -> G) shows the exact clicks." $T
+    }
     Bar
     [void](Read-Host "   Press Enter to go back")
 }
@@ -347,24 +366,43 @@ function Optimize-Wizard { param($cfg)
     }
 
     # ---- part 2: third-party app (Process Lasso), by hand ----
-    Clear-Host; Bar; Write-C "   PART 2 of 3   -   PROCESS LASSO   (free app, by hand)" $H; Bar
-    Write-C "   Two fixes live inside Process Lasso (free, bitsum.com) -" $T
-    Write-C "   the menu can't click them for you:" $T
-    Write-Host ""
-    Write-C "   A) Power plan - all cores unparked" $H
-    Write-C "      Open Process Lasso -> Main menu -> Power ->" $T
-    Write-C "      activate  Bitsum Highest Performance." $T
-    Write-Host ""
-    Write-C "   B) Pin the sim to the V-Cache die" $H
-    Write-C "      Run iRacing once so iRacingSim64DX11.exe shows in the list." $T
-    Write-C ("      Right-click it  ->  CPU Sets  ->  choose cores {0}." -f $cfg.VCache) $T
-    Write-C "      Right-click it  ->  ProBalance  ->  exclude it." $T
-    Write-Host ""
-    Write-C "   Don't have Process Lasso yet? Press Enter and do this part" $Dim
-    Write-C "   later - the same steps are under W on the main menu." $Dim
-    Write-Host ""
-    Rule
-    if((Read-Host "   [Enter] done (or doing it later)    [Q] stop") -match '^[Qq]'){ return $cfg }
+    if(Is-Single $cfg){
+        Clear-Host; Bar; Write-C "   PART 2 of 3   -   POWER PLAN   (single-CCD)" $H; Bar
+        Write-C "   Your chip has ONE die - every core already has the" $T
+        Write-C "   V-Cache, so there's nothing to pin. Two easy things:" $T
+        Write-Host ""
+        Write-C "   A) Power plan - leave it on Balanced" $H
+        Write-C "      Single-CCD X3D runs best on the standard Balanced plan" $T
+        Write-C "      (it keeps AMD's V-Cache core preference working). Do NOT" $T
+        Write-C "      force all-cores-unparked - that's a dual-CCD-only fix." $T
+        Write-Host ""
+        Write-C "   B) Optional: exclude iRacing from ProBalance" $H
+        Write-C "      If you already run Process Lasso (free, bitsum.com):" $T
+        Write-C "      right-click iRacingSim64DX11.exe -> ProBalance -> exclude." $T
+        Write-C "      Not installed? You can skip this entirely." $Dim
+        Write-Host ""
+        Rule
+        if((Read-Host "   [Enter] got it    [Q] stop") -match '^[Qq]'){ return $cfg }
+    } else {
+        Clear-Host; Bar; Write-C "   PART 2 of 3   -   PROCESS LASSO   (free app, by hand)" $H; Bar
+        Write-C "   Two fixes live inside Process Lasso (free, bitsum.com) -" $T
+        Write-C "   the menu can't click them for you:" $T
+        Write-Host ""
+        Write-C "   A) Power plan - all cores unparked" $H
+        Write-C "      Open Process Lasso -> Main menu -> Power ->" $T
+        Write-C "      activate  Bitsum Highest Performance." $T
+        Write-Host ""
+        Write-C "   B) Pin the sim to the V-Cache die" $H
+        Write-C "      Run iRacing once so iRacingSim64DX11.exe shows in the list." $T
+        Write-C ("      Right-click it  ->  CPU Sets  ->  choose cores {0}." -f $cfg.VCache) $T
+        Write-C "      Right-click it  ->  ProBalance  ->  exclude it." $T
+        Write-Host ""
+        Write-C "   Don't have Process Lasso yet? Press Enter and do this part" $Dim
+        Write-C "   later - the same steps are under W on the main menu." $Dim
+        Write-Host ""
+        Rule
+        if((Read-Host "   [Enter] done (or doing it later)    [Q] stop") -match '^[Qq]'){ return $cfg }
+    }
 
     # ---- part 3: in-game + driver settings, by hand ----
     Clear-Host; Bar; Write-C "   PART 3 of 3   -   iRACING + NVIDIA SETTINGS" $H; Bar

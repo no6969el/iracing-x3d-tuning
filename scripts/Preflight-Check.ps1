@@ -18,24 +18,35 @@ function Show-INFO { param($m) Write-Host "  [ .. ] $m" -ForegroundColor Gray }
 $issues = 0
 $ncpu = [Environment]::ProcessorCount
 
-# --- resolve the first frequency-CCD core ---
+# --- resolve topology + the first frequency-CCD core ---
+$Topology = ''
+$cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
+if (Test-Path $cfgPath) { try { $Topology = [string](Get-Content $cfgPath -Raw | ConvertFrom-Json).Topology } catch {} }
 $FreqFirst = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else {
-    $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
     $ff = 0
     if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
-    if ($ff -lt 1) { $ff = switch ($ncpu) { 32 {16} 24 {12} default {16} } }
+    if ($ff -lt 1) { $ff = switch ($ncpu) { 32 {16} 24 {12} 16 {8} default {[int]($ncpu/2)} } }
     $ff
 }
+# infer single-CCD when we have no saved topology but the chip is an 8-core (16-thread) class
+if (-not $Topology) { $Topology = if ($ncpu -le 16) { 'single' } else { 'dual' } }
+$IsSingle = ($Topology -eq 'single')
 $VCacheRange = "0-$($FreqFirst - 1)"
 
 Write-Host ""
 Write-Host "=================  iRACING PREFLIGHT  =================" -ForegroundColor Cyan
-Write-Host ("  expecting: sim on V-Cache cores {0}, GPU IRQ on CPU {1}" -f $VCacheRange, $FreqFirst) -ForegroundColor DarkGray
+if ($IsSingle) {
+    Write-Host ("  single-CCD: all cores V-Cache, GPU IRQ steered to CPU {0}" -f $FreqFirst) -ForegroundColor DarkGray
+} else {
+    Write-Host ("  dual-CCD: sim on V-Cache cores {0}, GPU IRQ on CPU {1}" -f $VCacheRange, $FreqFirst) -ForegroundColor DarkGray
+}
 
-# 1. Both CCDs active (the frequency-die IRQ target must exist)
+# 1. CPU visible to Windows
 Write-Host ""
 Write-Host "1. CPU topology"
-if ($ncpu -eq 2 * $FreqFirst) {
+if ($IsSingle) {
+    Show-OK "$ncpu logical processors - single-CCD (all cores share the V-Cache)"
+} elseif ($ncpu -eq 2 * $FreqFirst) {
     Show-OK "$ncpu logical processors - both CCDs active"
 } elseif ($ncpu -eq $FreqFirst) {
     Show-WARN "only $ncpu logical processors - msconfig may be limiting cores; CPU $FreqFirst won't exist. Uncheck 'Number of processors' in msconfig > Boot > Advanced + reboot."
@@ -45,13 +56,16 @@ if ($ncpu -eq 2 * $FreqFirst) {
     $issues++
 }
 
-# 2. Active power plan (want: all cores unparked - NOT Balanced)
+# 2. Active power plan
 Write-Host ""
 Write-Host "2. Power plan"
 $scheme = (powercfg /getactivescheme) -join ' '
 $planName = '?'
 if ($scheme -match '\(([^)]+)\)') { $planName = $Matches[1] }
-if ($scheme.ToLower().Contains('a4342cf1') -or $planName -like '*Bitsum*') {
+if ($IsSingle) {
+    # single-CCD: any plan is fine; Balanced is actually AMD's recommendation
+    Show-OK "active plan = $planName (single-CCD - power plan isn't critical; Balanced is fine)"
+} elseif ($scheme.ToLower().Contains('a4342cf1') -or $planName -like '*Bitsum*') {
     Show-OK "active plan = $planName (all cores unparked)"
 } elseif ($scheme.ToLower().Contains('8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c')) {
     Show-OK "active plan = $planName (High Performance - cores unparked)"
@@ -118,28 +132,32 @@ if ($tv -eq 1) {
     Show-INFO "not set - if you get hitches that stop when you CLICK the sim window (common in VR), run Enable-GlobalTimerResolution (admin) + reboot"
 }
 
-# 5. Process Lasso config + engine
+# 5. Process Lasso config + engine (dual-CCD only - single-CCD has nothing to pin)
 Write-Host ""
-Write-Host "5. Process Lasso"
-if (Get-Process ProcessGovernor -ErrorAction SilentlyContinue) {
-    Show-OK "governor running (ProcessGovernor.exe)"
+Write-Host "5. Process Lasso (core pinning)"
+if ($IsSingle) {
+    Show-OK "single-CCD - no core pinning needed (all cores are V-Cache)"
 } else {
-    Show-WARN "ProcessGovernor.exe not running - Process Lasso rules won't apply"
-    $issues++
-}
-$cfg = 'C:\ProgramData\ProcessLasso\config\prolasso.ini'
-if (Test-Path $cfg) {
-    try {
-        $t = [System.IO.File]::ReadAllText($cfg, [System.Text.Encoding]::Unicode).ToLower()
-        if ($t.Contains("iracingsim64dx11.exe,($VCacheRange)")) { Show-OK "iRacing soft CPU Set $VCacheRange present" }
-        else { Show-WARN "iRacing CPU Set $VCacheRange missing - add it (CPU Sets, not affinity)"; $issues++ }
-        if (-not $t.Contains("iracingsim64dx11.exe,0,$VCacheRange")) { Show-OK "no hard-affinity rule (EAC would reject it)" }
-        else { Show-WARN "hard-affinity rule still present - remove it (EAC reverts it and it fights the CPU Set)"; $issues++ }
-    } catch {
-        Show-WARN "could not parse prolasso.ini"
+    if (Get-Process ProcessGovernor -ErrorAction SilentlyContinue) {
+        Show-OK "governor running (ProcessGovernor.exe)"
+    } else {
+        Show-WARN "ProcessGovernor.exe not running - Process Lasso rules won't apply"
+        $issues++
     }
-} else {
-    Show-INFO "prolasso.ini not found at default path (check your install location)"
+    $cfg = 'C:\ProgramData\ProcessLasso\config\prolasso.ini'
+    if (Test-Path $cfg) {
+        try {
+            $t = [System.IO.File]::ReadAllText($cfg, [System.Text.Encoding]::Unicode).ToLower()
+            if ($t.Contains("iracingsim64dx11.exe,($VCacheRange)")) { Show-OK "iRacing soft CPU Set $VCacheRange present" }
+            else { Show-WARN "iRacing CPU Set $VCacheRange missing - add it (CPU Sets, not affinity)"; $issues++ }
+            if (-not $t.Contains("iracingsim64dx11.exe,0,$VCacheRange")) { Show-OK "no hard-affinity rule (EAC would reject it)" }
+            else { Show-WARN "hard-affinity rule still present - remove it (EAC reverts it and it fights the CPU Set)"; $issues++ }
+        } catch {
+            Show-WARN "could not parse prolasso.ini"
+        }
+    } else {
+        Show-INFO "prolasso.ini not found at default path (check your install location)"
+    }
 }
 
 # 6. ParkControl (Dynamic Boost can't be read programmatically - remind)

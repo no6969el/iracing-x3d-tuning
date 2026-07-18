@@ -59,6 +59,8 @@
   .toggles .cpu-toggle{margin:0}
   body.disp-flat [data-disp="vr"]{display:none !important}
   body.disp-vr [data-disp="flat"]{display:none !important}
+  body.topo-single [data-topo="dual"]{display:none !important}
+  body.topo-dual [data-topo="single"]{display:none !important}
 
   /* steps */
   .progress-wrap{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.95);
@@ -112,24 +114,26 @@
     <div>
       <span class="badge">9950X3D / 7950X3D</span>
       <span class="badge">9900X3D / 7900X3D</span>
+      <span class="badge">7800X3D / 9800X3D</span>
       <span class="badge">NVIDIA RTX</span>
       <span class="badge">VR &amp; Flatscreen</span>
       <span class="badge">Windows 11</span>
     </div>
-    <h1>Stutter-free iRacing<br><span class="accent">on dual-CCD Ryzen X3D</span></h1>
+    <h1>Stutter-free iRacing<br><span class="accent">on Ryzen X3D</span></h1>
     <p class="tag">Six steps. About 30 minutes plus a reboot. Every fix was measured on a real rig, and every one is reversible.</p>
 
     <div class="toggles">
       <div class="cpu-toggle" id="cpuToggle" role="group" aria-label="Select your CPU">
         <button data-pick="16" class="on">9950X3D / 7950X3D</button>
         <button data-pick="12">9900X3D / 7900X3D</button>
+        <button data-pick="8">7800X3D / 9800X3D</button>
       </div>
       <div class="cpu-toggle" id="dispToggle" role="group" aria-label="How do you race?">
         <button data-disp-pick="vr" class="on">🥽 VR</button>
         <button data-disp-pick="flat">🖥️ Flatscreen</button>
       </div>
     </div>
-    <div class="cpu-note">Pick your chip and how you race — the page adjusts to show exactly what applies to you.</div>
+    <div class="cpu-note">Pick your chip and how you race — the page adjusts to show exactly what applies to you. <span data-topo="single">(5800X3D owners: pick 7800X3D — same 8-core layout.)</span></div>
 
     <div style="margin-top:22px">
       <a class="btn" href="#do-it">Start the steps ↓</a>
@@ -156,18 +160,20 @@
 <section id="idea">
   <div class="kicker">30 seconds of background</div>
   <h2>The idea</h2>
-  <p>Your CPU has two halves: a <b>V-Cache die</b> (games love it) and a <b>frequency die</b>. Stutters happen when Windows lets background work — GPU interrupts, antivirus scans, update tasks — fight the sim for the V-Cache die. The fix: <b>put the sim there, move everything else off, and stop Windows from interrupting.</b> That's all six steps do.</p>
+  <p data-topo="dual">Your CPU has two halves: a <b>V-Cache die</b> (games love it) and a <b>frequency die</b>. Stutters happen when Windows lets background work — GPU interrupts, antivirus scans, update tasks — fight the sim for the V-Cache die. The fix: <b>put the sim there, move everything else off, and stop Windows from interrupting.</b> That's all six steps do.</p>
+  <p data-topo="single">Your whole CPU is one V-Cache die — nothing to pin, which makes this simpler for you. Your stutters come from Windows letting background work — GPU interrupts, antivirus scans, update tasks, a Windows 11 timer quirk — pile onto the cores the sim is using. The fix: <b>stop Windows from interrupting.</b> The steps below skip the core-pinning parts automatically for your chip.</p>
 
   <details>
-    <summary>The full story — your two dies, and four rules this guide lives by</summary>
+    <summary>The full story — the dies, and four rules this guide lives by</summary>
     <div class="inner">
-      <table>
+      <table data-topo="dual">
         <tr><th>CPU</th><th>V-Cache die (sim goes here)</th><th>Frequency die (everything else)</th></tr>
         <tr><td>9950X3D / 7950X3D</td><td>logical cores <b>0–15</b></td><td>logical cores <b>16–31</b></td></tr>
         <tr><td>9900X3D / 7900X3D</td><td>logical cores <b>0–11</b></td><td>logical cores <b>12–23</b></td></tr>
       </table>
-      <p><b>Rule 1 — EasyAntiCheat blocks hard CPU affinity.</b> Pinning iRacing the forceful way gets reverted seconds after launch. We use <b>CPU Sets</b> (a scheduler hint EAC can't block). The affinity mask still reading <code>0xFFFFFFFF</code> afterward is <em>normal</em>, not a failure.</p>
-      <p><b>Rule 2 — All cores unparked, NOT the Balanced plan.</b> Single-CCD guides recommend Balanced; on a dual-CCD chip with VR, Balanced's core parking strands the VR compositor on a parked die and starves the GPU (measured: ~55% GPU util → 11%, unplayable).</p>
+      <p data-topo="single"><b>Your chip (7800X3D / 9800X3D / 5800X3D)</b> is a single 8-core die — all 16 threads share the V-Cache, so Rules 1 and 2 below don't apply to you (nothing to pin, no die to keep clear). Rules 3 and 4, and every automatic fix, still do.</p>
+      <p data-topo="dual"><b>Rule 1 — EasyAntiCheat blocks hard CPU affinity.</b> Pinning iRacing the forceful way gets reverted seconds after launch. We use <b>CPU Sets</b> (a scheduler hint EAC can't block). The affinity mask still reading <code>0xFFFFFFFF</code> afterward is <em>normal</em>, not a failure.</p>
+      <p data-topo="dual"><b>Rule 2 — All cores unparked, NOT the Balanced plan.</b> Single-CCD guides recommend Balanced; on a dual-CCD chip with VR, Balanced's core parking strands the VR compositor on a parked die and starves the GPU (measured: ~55% GPU util → 11%, unplayable). <em>Single-CCD chips are the opposite — keep Balanced.</em></p>
       <p><b>Rule 3 — The Windows 11 focus/timer trap.</b> Windows only honors a game's 1&nbsp;ms timer while it owns window focus — and the VR compositor steals focus constantly, dropping the timer to 15.6&nbsp;ms mid-race. Signature: <b>stutters that stop the moment you click the sim window.</b> Step 3 fixes it permanently.</p>
       <p><b>Rule 4 — Measure, don't guess.</b> Change one thing, log a race, compare. The kit's tools do the logging for you.</p>
       <p class="muted">Adapted for dual-CCD from the single-CCD guide by <a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93</a> — see <a href="#why-differs">what flips and why</a>.</p>
@@ -200,11 +206,15 @@
     <div class="step-head">
       <input type="checkbox" class="save big" id="s2">
       <div>
-        <div class="step-num">Step 2 · 10 min</div>
-        <div class="step-title">Process Lasso — the only app setup</div>
+        <div class="step-num" data-topo="dual">Step 2 · 10 min</div>
+        <div class="step-num" data-topo="single">Step 2 · 2 min</div>
+        <div class="step-title" data-topo="dual">Process Lasso — the only app setup</div>
+        <div class="step-title" data-topo="single">Power plan — nothing to install</div>
       </div>
     </div>
-    <div class="step-body">
+
+    <!-- dual-CCD: Process Lasso pinning -->
+    <div class="step-body" data-topo="dual">
       <p>One free app does the two fixes no script can: <a href="https://bitsum.com">Process Lasso</a> (the free version does everything needed).</p>
       <ul class="mini">
         <li><input type="checkbox" class="save" id="s2a"><span><b>Install it</b> from bitsum.com.</span></li>
@@ -219,6 +229,21 @@
           <p>EasyAntiCheat rejects hard affinity — the sim reverts to all cores seconds after launch. CPU Sets are a scheduler <em>hint</em> EAC can't block, and they work just as well.</p>
           <p>Optional extras in Process Lasso: put background apps (VR runtime, SimHub, overlays, wheel software, browsers) on the frequency die (cores <b data-cpu="freq">16–31</b>), and give iRacing High CPU/I/O/memory priority. Nice-to-haves, not required.</p>
           <p>If you use <b>ParkControl</b> (same developer): set Parking = Off and <b>untick “Dynamic Boost”</b> — it flips the power plan mid-race and caused our worst hard freezes.</p>
+        </div>
+      </details>
+    </div>
+
+    <!-- single-CCD: nothing to pin -->
+    <div class="step-body" data-topo="single">
+      <div class="callout">Your chip has <b>one die</b>, so every core already has the V-Cache — there's nothing to pin and no app to install. This step is basically "leave your power plan alone."</div>
+      <ul>
+        <li><b>Keep your normal Balanced power plan.</b> Single-CCD X3D runs best on it (it keeps AMD's V-Cache core preference working). <b>Do not</b> force an all-cores-unparked plan — that's a dual-CCD-only fix and does nothing good here.</li>
+        <li><b>That's it.</b> Skip straight to Step 3.</li>
+      </ul>
+      <details>
+        <summary>Optional: Process Lasso for ProBalance (not required)</summary>
+        <div class="inner">
+          <p>If you already run <a href="https://bitsum.com">Process Lasso</a>, one nice-to-have: right-click <code>iRacingSim64DX11.exe</code> → <b>ProBalance → exclude</b>, so it's never throttled. No CPU Sets, no power-plan change. If you don't have it, don't bother installing it just for this.</p>
         </div>
       </details>
     </div>
@@ -253,7 +278,7 @@
             <li><b>USB Selective Suspend + Game Bar off</b> — stops wheel/VR USB power-cycling and removes Game Bar/DVR hooks.</li>
             <li><b>Diagnostic log on</b> — enables the Task Scheduler log so the troubleshooting tools can name culprits later. Changes nothing else.</li>
             <li><b>Timer fix</b> — registry key so Windows honors the 1&nbsp;ms timer even when the sim loses window focus. Kills the “stutters until I click” problem (Rule 3).</li>
-            <li><b>GPU interrupts off the sim's core</b> — NVIDIA's interrupts default to CPU 0, exactly where the sim's main thread runs. This steers them to core <b data-cpu="first">16</b> on the frequency die.</li>
+            <li><b>GPU interrupts off the sim's core</b> — NVIDIA's interrupts default to CPU 0, exactly where the sim's main thread runs. This steers them to core <b data-cpu="first">16</b>, well clear of CPU 0. <span data-topo="dual">(That core is on the frequency die.)</span><span data-topo="single">(Picked automatically for your chip — a valid core, never one that doesn't exist.)</span></li>
           </ol>
           <p>Every fix has an undo: <span class="file">Start-Tuning-Menu.bat</span> → Advanced. Registry, power, and Defender changes only — no drivers, no overclocking.</p>
         </div>
@@ -435,7 +460,7 @@
         <li><b>Power plan.</b> Single-CCD: Balanced (keeps V-Cache firmware prioritization active). Dual-CCD + VR: Balanced's core parking starves the compositor — use all-cores-unparked instead.</li>
         <li><b>CCD pinning matters.</b> Single-CCD has nothing to pin — every core has V-Cache. On dual-CCD, getting the sim onto the cache die and everything else off it is half the battle.</li>
       </ol>
-      <p>Single-CCD owners (7800X3D/9800X3D): Steps 3–6 still help; skip the CPU Sets pinning and use your platform's recommended plan.</p>
+      <p>This guide <b>supports single-CCD chips too</b> — pick 7800X3D / 9800X3D at the top and it hides the pinning steps, keeps you on Balanced, and still applies the timer, GPU-interrupt, Defender and background fixes.</p>
     </div>
   </details>
 
@@ -468,8 +493,9 @@
   var LS = 'x3d-';
   // ---------- CPU toggle ----------
   var cpu = {
-    '16': { vc:'0–15', freq:'16–31', first:'16', nic:'17–19' },
-    '12': { vc:'0–11', freq:'12–23', first:'12', nic:'13–15' }
+    '16': { topo:'dual',   vc:'0–15', freq:'16–31', first:'16', nic:'17–19' },
+    '12': { topo:'dual',   vc:'0–11', freq:'12–23', first:'12', nic:'13–15' },
+    '8':  { topo:'single', vc:'all',  freq:'n/a',   first:'8',  nic:'9–11' }
   };
   var toggle = document.getElementById('cpuToggle');
   function setCpu(p){
@@ -480,13 +506,15 @@
     toggle.querySelectorAll('button').forEach(function(b){
       b.classList.toggle('on', b.getAttribute('data-pick') === p);
     });
+    document.body.classList.remove('topo-dual','topo-single');
+    document.body.classList.add('topo-' + cpu[p].topo);
     try { localStorage.setItem(LS + 'cpu', p); } catch(e){}
+    if(typeof refresh === 'function') refresh();   // step count can change when rows hide
   }
   toggle.addEventListener('click', function(e){
     var b = e.target.closest('button[data-pick]');
     if(b) setCpu(b.getAttribute('data-pick'));
   });
-  try { setCpu(localStorage.getItem(LS + 'cpu') || '16'); } catch(e){ setCpu('16'); }
 
   // ---------- VR / Flatscreen toggle ----------
   var dispToggle = document.getElementById('dispToggle');
@@ -510,11 +538,13 @@
   var fill = document.getElementById('pfill'),
       pc = document.getElementById('pcount'),
       pt = document.getElementById('ptotal');
-  pt.textContent = boxes.length;
   function refresh(){
-    var done = boxes.filter(function(b){ return b.checked; }).length;
+    // only count boxes that are actually visible (single-CCD hides some Step 2 rows)
+    var vis = boxes.filter(function(b){ return b.offsetParent !== null; });
+    var done = vis.filter(function(b){ return b.checked; }).length;
     pc.textContent = done;
-    fill.style.width = (boxes.length ? (done / boxes.length * 100) : 0) + '%';
+    pt.textContent = vis.length;
+    fill.style.width = (vis.length ? (done / vis.length * 100) : 0) + '%';
     document.querySelectorAll('.step').forEach(function(card){
       var main = card.querySelector('.step-head input.save');
       if(main) card.classList.toggle('done', main.checked);
@@ -535,6 +565,9 @@
     });
     refresh();
   });
+
+  // init CPU choice now that refresh() exists (setCpu triggers a recount)
+  try { setCpu(localStorage.getItem(LS + 'cpu') || '16'); } catch(e){ setCpu('16'); }
   refresh();
 })();
 </script>

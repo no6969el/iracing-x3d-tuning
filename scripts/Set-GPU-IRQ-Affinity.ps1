@@ -1,10 +1,14 @@
 <#
     Steer NVIDIA GPU interrupts to a CCD1 core (default CPU 16)
     ---------------------------------------------------------------
-    On a dual-CCD X3D, iRacing's sim thread lives on CCD0 (the V-Cache
-    die) and favors CPU 0. GPU interrupts (nvlddmkm) also default toward
-    CPU 0 and collide with it. This moves the GPU's interrupt handling
-    onto the first frequency-die (CCD1) core, off the V-Cache die entirely.
+    iRacing's sim thread favors CPU 0, and NVIDIA's GPU interrupts
+    (nvlddmkm) also default toward CPU 0 - they collide and cause DPC
+    spikes. This steers the GPU's interrupt handling to another core.
+      * Dual-CCD: the first frequency-die core (16 or 12), off the V-Cache die.
+      * Single-CCD: a high core (half the thread count), off CPU 0.
+    The Tuning-Menu / Apply-Baseline pick the right target for your chip;
+    standalone it falls back to half your logical processor count, which
+    is always a valid, distinct core (never a nonexistent one).
 
     MUST run as Administrator. Reboot afterward, then verify with LatencyMon.
     Reversible with Undo-GPU-IRQ-Affinity.ps1.
@@ -17,7 +21,7 @@ $TargetCore = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } el
     $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
     $ff = 0
     if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
-    if ($ff -lt 1) { $ff = 16 }
+    if ($ff -lt 1) { $ff = [int]([Environment]::ProcessorCount / 2) }   # 8-core single-CCD -> 8, never a nonexistent core
     $ff
 }
 

@@ -10,14 +10,22 @@ Run a script by hand with:
    powershell -ExecutionPolicy Bypass -File "<path to .ps1>"
 Or run Create-Launchers.ps1 once to get a double-click .lnk next to each.
 
->>> CORE COUNT (handled for you by the menu) <<<
-These scripts default to a 16-core X3D (9950X3D / 7950X3D), frequency CCD
-starting at logical core 16. The Tuning-Menu sets the right core for you.
-If you run them BY HAND on a 12-core X3D (9900X3D / 7900X3D), open these
-two and change the 16 to 12 (the last number on the highlighted line):
-   Set-GPU-IRQ-Affinity.ps1      ->  ...else { 16 }   change 16 to 12
-   Set-NIC-USB-IRQ-Affinity.ps1  ->  ...else { 16 }   change 16 to 12
-And in your Process Lasso CPU Set, pin the sim to 0-11 (not 0-15).
+>>> CHIP TYPE + CORE COUNT (handled for you by the menu) <<<
+Supported: dual-CCD (9950X3D/7950X3D = 16-core, 9900X3D/7900X3D = 12-core)
+AND single-CCD (7800X3D/9800X3D/5800X3D = 8-core). The Tuning-Menu and
+Apply-Baseline detect your chip and set the right IRQ target core for you.
+
+Run BY HAND with no saved config? The IRQ scripts fall back to HALF your
+logical processor count - a valid, safe target for every X3D:
+   16-core dual  (32 threads)  -> IRQ core 16
+   12-core dual  (24 threads)  -> IRQ core 12
+   8-core single (16 threads)  -> IRQ core 8
+So you normally don't need to edit anything. (To override, set the env var
+X3D_FREQ_FIRST_CORE, or edit the "...else { ... }" line near the top.)
+
+DUAL-CCD only: also pin the sim in Process Lasso (CPU Set) to your V-Cache
+cores - 0-15 on 16-core, 0-11 on 12-core. SINGLE-CCD chips have nothing to
+pin (all cores are V-Cache) and should stay on the Balanced power plan.
 
 ADMIN? Scripts that change system settings must be run from an
 elevated PowerShell (right-click > Run as administrator). Marked below.

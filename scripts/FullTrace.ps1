@@ -29,7 +29,7 @@ $FreqFirst = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } els
     $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
     $ff = 0
     if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
-    if ($ff -lt 1) { $ff = 16 }
+    if ($ff -lt 1) { $ff = [int]($ncpu / 2) }
     $ff
 }
 if ($FreqFirst -ge $ncpu) { $FreqFirst = [int]($ncpu / 2) }

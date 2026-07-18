@@ -36,16 +36,21 @@ if(-not (Test-Path $ScriptsDir)){
 }
 
 # ---- core profile: saved config if the menu has run, else ask once ----
-$FreqFirst = 0
-if(Test-Path $ConfigFile){ try { $FreqFirst = [int](Get-Content $ConfigFile -Raw | ConvertFrom-Json).FreqFirst } catch {} }
+$FreqFirst = 0; $Topology = ''
+if(Test-Path $ConfigFile){ try { $c = Get-Content $ConfigFile -Raw | ConvertFrom-Json; $FreqFirst = [int]$c.FreqFirst; $Topology = [string]$c.Topology } catch {} }
 if($FreqFirst -lt 1){
     Clear-Host; Bar; Write-C "        iRacing X3D Tuning   -   BASELINE OPTIMIZER" $H; Bar
-    Write-C "  Which dual-CCD X3D do you have?" $T
-    Write-C "    [1] 16-core  (9950X3D / 7950X3D)" $T
-    Write-C "    [2] 12-core  (9900X3D / 7900X3D)" $T
-    do { $sel = Read-Host "  Choose 1 or 2" } while ($sel -notin '1','2')
-    $FreqFirst = if($sel -eq '1'){ 16 } else { 12 }
+    Write-C "  Which X3D chip do you have?" $T
+    Write-C "    [1] 16-core dual-CCD  (9950X3D / 7950X3D)" $T
+    Write-C "    [2] 12-core dual-CCD  (9900X3D / 7900X3D)" $T
+    Write-C "    [3] 8-core  single-CCD (7800X3D / 9800X3D / 5800X3D)" $T
+    do { $sel = Read-Host "  Choose 1, 2, or 3" } while ($sel -notin '1','2','3')
+    if($sel -eq '1'){ $FreqFirst = 16; $Topology = 'dual' }
+    elseif($sel -eq '2'){ $FreqFirst = 12; $Topology = 'dual' }
+    else { $FreqFirst = 8; $Topology = 'single' }
 }
+if(-not $Topology){ $Topology = 'dual' }   # old config without the field = dual
+$IsSingle = ($Topology -eq 'single')
 $VCache = "0-$($FreqFirst - 1)"
 
 # ---- advisory ----
@@ -54,12 +59,19 @@ Write-C "  Applies the full script baseline in ONE go:" $T
 Write-Host ""
 foreach($f in $fixes){ Write-C ("    * " + $f.title) $Dim }
 Write-Host ""
-Write-C "  Did you do the Process Lasso part first? (free, bitsum.com)" $Warn
-Write-C "    * Power plan: activate  Bitsum Highest Performance" $T
-Write-C ("    * Pin iRacing to V-Cache cores {0} (CPU Sets) + exclude" -f $VCache) $T
-Write-C "      it from ProBalance. (Launch iRacing into a race once so" $T
-Write-C "      iRacingSim64DX11.exe shows in Process Lasso's list.)" $T
-Write-C "    Exact clicks: Step 2 on the web guide (repo front page)." $Dim
+if($IsSingle){
+    Write-C "  Single-CCD chip: nothing to set up first." $Go
+    Write-C "    * No core pinning - all your cores have the V-Cache." $T
+    Write-C "    * Keep your normal Balanced power plan (do NOT force" $T
+    Write-C "      all-cores-unparked - that's a dual-CCD-only fix)." $T
+} else {
+    Write-C "  Did you do the Process Lasso part first? (free, bitsum.com)" $Warn
+    Write-C "    * Power plan: activate  Bitsum Highest Performance" $T
+    Write-C ("    * Pin iRacing to V-Cache cores {0} (CPU Sets) + exclude" -f $VCache) $T
+    Write-C "      it from ProBalance. (Launch iRacing into a race once so" $T
+    Write-C "      iRacingSim64DX11.exe shows in Process Lasso's list.)" $T
+    Write-C "    Exact clicks: Step 2 on the web guide (repo front page)." $Dim
+}
 Write-Host ""
 Write-C "  Good to know:" $H
 Write-C "    * These change Windows settings (registry, power, Defender)." $T
