@@ -41,21 +41,6 @@ function Load-Config {
     if(Test-Path $ConfigFile){ try { return (Get-Content $ConfigFile -Raw | ConvertFrom-Json) } catch { return $null } }
     return $null }
 
-# Backfill physical-core labels for configs saved before the core/thread split.
-# The V-Cache CCD holds half of the physical cores; each core is 2 threads.
-function Ensure-CoreLabels { param($cfg)
-    if(-not $cfg){ return $cfg }
-    if(-not $cfg.PSObject.Properties['VCacheCores'] -or -not $cfg.VCacheCores){
-        $vcCores = if($cfg.Cores -eq 12){'0-5'} else {'0-7'}
-        $cfg | Add-Member -NotePropertyName VCacheCores -NotePropertyValue $vcCores -Force
-    }
-    if(-not $cfg.PSObject.Properties['FreqCores'] -or -not $cfg.FreqCores){
-        $fCores = if($cfg.Cores -eq 12){'6-11'} else {'8-15'}
-        $cfg | Add-Member -NotePropertyName FreqCores -NotePropertyValue $fCores -Force
-    }
-    return $cfg
-}
-
 # ---------------------------------------------------------------- first run
 function Detect-System {
     $cpuName='(CPU not detected)'; $cores=0; $gpuName='(GPU not detected)'
@@ -84,11 +69,11 @@ function Run-FirstTimeSetup {
     $prof = switch ($d.Cores) { 16 {'16'} 12 {'12'} default {''} }
     if($prof -eq ''){ Write-C "  Which dual-CCD X3D do you have?" $Warn }
     else { Write-C ("  That looks like a {0}-core X3D - confirm below:" -f $prof) $H }
-    Write-C "    [1] 16-core (9950X3D / 7950X3D)  ->  V-Cache cores 0-7 (CPUs 0-15) | Standard cores 8-15 (CPUs 16-31)" $T
-    Write-C "    [2] 12-core (9900X3D / 7900X3D)  ->  V-Cache cores 0-5 (CPUs 0-11) | Standard cores 6-11 (CPUs 12-23)" $T
+    Write-C "    [1] 16-core  (9950X3D / 7950X3D)  ->  V-Cache 0-15, Frequency 16-31" $T
+    Write-C "    [2] 12-core  (9900X3D / 7900X3D)  ->  V-Cache 0-11, Frequency 12-23" $T
     do { $sel = Read-Host "  Choose 1 or 2" } while ($sel -notin '1','2')
-    if($sel -eq '1'){ $cores=16; $vcache='0-15'; $freqFirst=16; $freqRange='16-31'; $vcacheCores='0-7'; $freqCores='8-15' }
-    else            { $cores=12; $vcache='0-11'; $freqFirst=12; $freqRange='12-23'; $vcacheCores='0-5'; $freqCores='6-11' }
+    if($sel -eq '1'){ $cores=16; $vcache='0-15'; $freqFirst=16; $freqRange='16-31' }
+    else            { $cores=12; $vcache='0-11'; $freqFirst=12; $freqRange='12-23' }
     Write-Host ""
     Write-C "  Do you race in VR or on a monitor (flatscreen)?" $H
     Write-C "    [1] VR    [2] Flatscreen" $T
@@ -96,8 +81,7 @@ function Run-FirstTimeSetup {
     $display = if($ds -eq '1'){'VR'}else{'Flatscreen'}
     $cfg = [pscustomobject]@{
         CpuName=$d.CpuName; GpuName=$d.GpuName; Cores=$cores; Profile="$cores-core"
-        VCache=$vcache; FreqFirst=$freqFirst; FreqRange=$freqRange
-        VCacheCores=$vcacheCores; FreqCores=$freqCores; Display=$display
+        VCache=$vcache; FreqFirst=$freqFirst; FreqRange=$freqRange; Display=$display
         Launched=@(); SetupDate=(Get-Date).ToString('u') }
     Save-Config $cfg
     Write-Host ""; Spin "Saving your setup..." 800
@@ -109,9 +93,8 @@ function Run-FirstTimeSetup {
 # ---------------------------------------------------------------- UI bits
 function Draw-Header { param($cfg)
     Clear-Host; Bar; Write-C "        iRacing  X3D  Tuning        Guided Menu" $H; Bar
-    Write-C ("   CPU: {0} ({1})  |  GPU: {2}  |  Mode: {3}" -f $cfg.CpuName,$cfg.Profile,$cfg.GpuName,$cfg.Display) $Dim
-    Write-C ("   Sim  -> V-Cache cores {0} (CPUs {1})" -f $cfg.VCacheCores,$cfg.VCache) $Dim
-    Write-C ("   Back -> Standard cores {0} (CPUs {1})" -f $cfg.FreqCores,$cfg.FreqRange) $Dim
+    Write-C ("   {0}  ({1})   |   {2}   |   {3}" -f $cfg.CpuName,$cfg.Profile,$cfg.GpuName,$cfg.Display) $Dim
+    Write-C ("   Sim -> V-Cache cores {0}     background -> {1}" -f $cfg.VCache,$cfg.FreqRange) $Dim
     Rule
 }
 function Mark { param($cfg,$file) if($cfg.Launched -contains $file){ '[done]' } else { '' } }
@@ -127,29 +110,31 @@ function Tip { Write-C "   Not sure what something does? Type ? then its number 
 function Show-Welcome {
     Clear-Host; Bar; Write-C "        iRacing  X3D  Tuning        Guided Menu" $H; Bar
     Write-Host ""
-    Write-C "   Let's make iRacing stutter-free on your dual-CCD X3D." $T
+    Write-C "   This makes iRacing stutter-free on your dual-CCD X3D." $T
     Write-Host ""
+    Write-C "     *  Nothing runs until YOU pick it - browsing is safe." $Go
+    Write-C "     *  Each fix opens in its own window for you to approve." $Go
     Write-C "     *  Every change is reversible." $Go
     Write-Host ""
-    Write-C "   >> Type  ?  then its number to see more information." $H
-    Write-C "      e.g.  ?1  explains step 1: what it does, when/why and" $H
-    Write-C "      what comes next." $H
+    Write-C "   >> Curious what any option does? Type  ?  then its number." $H
+    Write-C "      e.g.  ?1  explains step 1: what it does, when/why, and" $H
+    Write-C "      what comes before and next." $H
     Write-Host ""
-    Write-C "   1) OPTIMIZE MY iRACING  - it walks you" $Go
-    Write-C "   through the proven fixes." $Go
+    Write-C "   New here? Pick  1) OPTIMIZE MY iRACING  - it walks you" $Go
+    Write-C "   through the proven fixes, one step at a time." $Go
     Write-Host ""
     Rule
     [void](Read-Host "   Press Enter to open the menu")
 }
 function Show-Help { param($cfg)
-    Clear-Host; Bar; Write-C "   HELP - How all this works" $H; Bar
-    Write-C "   To Learn about any step type ? then a number (e.g. ?2). You'll see" $T
-    Write-C "   what it does and why along with what should be next" $T
+    Clear-Host; Bar; Write-C "   HELP - how this works" $H; Bar
+    Write-C "   LEARN ANY STEP:  type ? then a number (e.g. ?2). You'll see" $T
+    Write-C "   what it does, when/why, and what comes before and next." $T
     Write-Host ""
     Write-C "   TWO PATHS:" $H
     Write-C "     1) OPTIMIZE    - apply the proven baseline (most people)" $T
     Write-C "     2) TROUBLESHOOT- record & pinpoint your own stutter" $T
-    Write-C "     3) DO EACH-RACE   - quick before/after routine" $T
+    Write-C "     3) EACH-RACE   - quick before/after routine" $T
     Write-Host ""
     Write-C "   FREE APP YOU'LL NEED (press W for details):" $Warn
     Write-C "     Process Lasso  (free, from bitsum.com)" $T
@@ -170,7 +155,7 @@ function Show-Requirements { param($cfg)
     Write-C "          (all cores unparked)  via  Main menu -> Power" $T
     Write-C "        - The free version does all of this." $Go
     Write-Host ""
-    Write-C ("   For your {0}, the sim goes on V-Cache cores {1} (CPUs {2})." -f $cfg.Profile,$cfg.VCacheCores,$cfg.VCache) $T
+    Write-C ("   For your {0}, the sim goes on cores {1}." -f $cfg.Profile,$cfg.VCache) $T
     Write-C "   The web guide (main menu -> G) shows the exact clicks." $T
     Bar
     [void](Read-Host "   Press Enter to go back")
@@ -239,6 +224,14 @@ $Info = @{
  'Extras'=[pscustomobject]@{ Title='Apply-Guide-Extras  (admin)'
    What='USB Selective Suspend off + Game Bar/Mode off.'; Why='Stops USB power-cycling hitches.'
    After='Defender exclusions.'; Next='GPU fix.' }
+ 'TimerFix'=[pscustomobject]@{ Title='Enable-GlobalTimerResolution  (admin, reboot)'
+   What='Registry fix: makes Windows honor high-resolution timer requests globally, even when the sim window loses foreground focus (which happens constantly in VR).'
+   Why='Windows 11 drops the system timer from ~1 ms to 15.6 ms whenever the sim loses focus - periodic hitches that stop the moment you CLICK the sim window. This ends that.'
+   After='Any time in setup.'; Next='Reboot.' }
+ 'WatchTimer'=[pscustomobject]@{ Title='Watch the timer resolution (Watch-TimerResolution)'
+   What='Shows the live system timer resolution and which window has focus, once a second. Read-only.'
+   Why='Proves (or rules out) the focus/timer stutter: if the timer jumps from ~1 ms to ~15.6 ms when the sim loses focus, the timer fix is your cure.'
+   After='Any time.'; Next='Enable-GlobalTimerResolution if you saw the jump.' }
 }
 function Show-Info { param($key)
     $i = $Info[$key]
@@ -303,11 +296,12 @@ function Optimize-Wizard { param($cfg)
             'This keeps all cores unparked - what the sim needs.') },
         @{ type='manual'; title='Pin the sim  (in Process Lasso)'; lines=@(
             'Run iRacing once so iRacingSim64DX11.exe shows in the list.',
-            ("Right-click it  ->  CPU Sets  ->  tick CPUs {0} (V-Cache cores {1})." -f $cfg.VCache,$cfg.VCacheCores),
+            ("Right-click it  ->  CPU Sets  ->  choose cores {0}." -f $cfg.VCache),
             'Right-click it  ->  ProBalance  ->  exclude it.') },
         @{ type='auto'; title='Defender exclusions'; script='Add-Defender-Exclusions.ps1' },
         @{ type='auto'; title='USB Suspend + Game Bar off'; script='Apply-Guide-Extras.ps1' },
         @{ type='auto'; title='Turn on the diagnostic log'; script='Enable-DiagnosticLogs.ps1' },
+        @{ type='auto'; title='Timer fix (VR focus stutter)'; script='Enable-GlobalTimerResolution.ps1' },
         @{ type='auto'; title='GPU interrupts off the sim core'; script='Set-GPU-IRQ-Affinity.ps1' },
         @{ type='manual'; title='iRacing + NVIDIA settings'; lines=@(
             'These have no script - set them yourself:',
@@ -336,7 +330,7 @@ function Optimize-Wizard { param($cfg)
     else { Write-C "   ALL DONE - your baseline is applied." $Go }
     Write-Host ""
     Write-C "   Two last things:" $H
-    Write-C "     1) REBOOT once - the GPU interrupt change needs it." $T
+    Write-C "     1) REBOOT once - the GPU interrupt + timer fixes need it." $T
     Write-C "     2) Each session: run the Each-Race routine (before / after)." $T
     Write-Host ""
     Write-C "   Still feel a stutter after this? Use Troubleshoot to pinpoint it." $T
@@ -356,16 +350,18 @@ function Troubleshoot-Menu { param($cfg)
         Item '2' 'Turn on the task log  (do this BEFORE the race)'       (Mark $cfg 'Enable-DiagnosticLogs.ps1') -Admin
         Item '3' 'Find the cause (Scan-Stutter-Events)'                  (Mark $cfg 'Scan-Stutter-Events.ps1')
         Item '4' 'Confirm your setup is live (Preflight-Check)'          (Mark $cfg 'Preflight-Check.ps1')
+        Item '5' 'Watch the timer resolution (stutters that stop on click)' (Mark $cfg 'Watch-TimerResolution.ps1')
         Write-Host ""
         Write-C "   0) <- Back to main menu" $Warn
         Tip; Rule
         $raw = ([string](Read-Host "  Select")).Trim()
-        if($raw -match '^\?\s*(.+)$'){ $mp=@{'1'='FullTrace';'2'='EnableLogs';'3'='Scan';'4'='Preflight'}; $k=$mp[$Matches[1].Trim()]; if($k){Show-Info $k}else{Write-C "  (no info)" $Warn; Start-Sleep -Milliseconds 800}; continue }
+        if($raw -match '^\?\s*(.+)$'){ $mp=@{'1'='FullTrace';'2'='EnableLogs';'3'='Scan';'4'='Preflight';'5'='WatchTimer'}; $k=$mp[$Matches[1].Trim()]; if($k){Show-Info $k}else{Write-C "  (no info)" $Warn; Start-Sleep -Milliseconds 800}; continue }
         switch ($raw) {
             '1' { $cfg = Launch-Script $cfg 'FullTrace.ps1' }
             '2' { $cfg = Launch-Script $cfg 'Enable-DiagnosticLogs.ps1' -Admin }
             '3' { $cfg = Launch-Script $cfg 'Scan-Stutter-Events.ps1' }
             '4' { $cfg = Launch-Script $cfg 'Preflight-Check.ps1' }
+            '5' { $cfg = Launch-Script $cfg 'Watch-TimerResolution.ps1' }
             '0' { return $cfg }
             default { }
         }
@@ -405,16 +401,18 @@ function Advanced-Menu { param($cfg)
         Item '4' 'Set-NIC-USB-IRQ-Affinity'    (Mark $cfg 'Set-NIC-USB-IRQ-Affinity.ps1') -Admin
         Item '5' 'Add-Defender-Exclusions'     (Mark $cfg 'Add-Defender-Exclusions.ps1') -Admin
         Item '6' 'Apply-Guide-Extras'          (Mark $cfg 'Apply-Guide-Extras.ps1') -Admin
+        Item '7' 'Enable-GlobalTimerResolution' (Mark $cfg 'Enable-GlobalTimerResolution.ps1') -Admin
         Write-Host ""
         Write-C "   UNDO" $H
-        Item '7' 'Undo-GPU-IRQ-Affinity'       '' -Admin
-        Item '8' 'Undo-NIC-USB-IRQ-Affinity'   '' -Admin
-        Item '9' 'Undo-Guide-Extras'           '' -Admin
+        Item '8' 'Undo-GPU-IRQ-Affinity'       '' -Admin
+        Item '9' 'Undo-NIC-USB-IRQ-Affinity'   '' -Admin
+        Item '10' 'Undo-Guide-Extras'          '' -Admin
+        Item '11' 'Undo-GlobalTimerResolution' '' -Admin
         Write-Host ""
         Write-C "   0) <- Back to main menu" $Warn
         Tip; Rule
         $raw = ([string](Read-Host "  Select")).Trim()
-        if($raw -match '^\?\s*(.+)$'){ $mp=@{'1'='CreateLaunchers';'2'='Repair';'3'='GpuIrq';'4'='NicUsb';'5'='Defender';'6'='Extras'}; $k=$mp[$Matches[1].Trim()]; if($k){Show-Info $k}else{Write-C "  (no info for that)" $Warn; Start-Sleep -Milliseconds 800}; continue }
+        if($raw -match '^\?\s*(.+)$'){ $mp=@{'1'='CreateLaunchers';'2'='Repair';'3'='GpuIrq';'4'='NicUsb';'5'='Defender';'6'='Extras';'7'='TimerFix'}; $k=$mp[$Matches[1].Trim()]; if($k){Show-Info $k}else{Write-C "  (no info for that)" $Warn; Start-Sleep -Milliseconds 800}; continue }
         switch ($raw) {
             '1' { $cfg = Launch-Script $cfg 'Create-Launchers.ps1' }
             '2' { $cfg = Launch-Script $cfg 'Repair-PerfCounters.ps1' -Admin }
@@ -422,9 +420,11 @@ function Advanced-Menu { param($cfg)
             '4' { $cfg = Launch-Script $cfg 'Set-NIC-USB-IRQ-Affinity.ps1' -Admin }
             '5' { $cfg = Launch-Script $cfg 'Add-Defender-Exclusions.ps1' -Admin }
             '6' { $cfg = Launch-Script $cfg 'Apply-Guide-Extras.ps1' -Admin }
-            '7' { $cfg = Launch-Script $cfg 'Undo-GPU-IRQ-Affinity.ps1' -Admin }
-            '8' { $cfg = Launch-Script $cfg 'Undo-NIC-USB-IRQ-Affinity.ps1' -Admin }
-            '9' { $cfg = Launch-Script $cfg 'Undo-Guide-Extras.ps1' -Admin }
+            '7' { $cfg = Launch-Script $cfg 'Enable-GlobalTimerResolution.ps1' -Admin }
+            '8' { $cfg = Launch-Script $cfg 'Undo-GPU-IRQ-Affinity.ps1' -Admin }
+            '9' { $cfg = Launch-Script $cfg 'Undo-NIC-USB-IRQ-Affinity.ps1' -Admin }
+            '10' { $cfg = Launch-Script $cfg 'Undo-Guide-Extras.ps1' -Admin }
+            '11' { $cfg = Launch-Script $cfg 'Undo-GlobalTimerResolution.ps1' -Admin }
             '0' { return $cfg }
             default { }
         }
@@ -453,20 +453,19 @@ function Main-Menu { param($cfg)
         Write-C "   What would you like to do?" $T
         Write-Host ""
         Write-Host "   1) " -ForegroundColor $H -NoNewline; Write-Host "OPTIMIZE MY iRACING" -ForegroundColor $Go -NoNewline; Write-Host "   (recommended)" -ForegroundColor $Go
-        Write-C "        Apply the proven baseline fixes, guided. Good starting point." $T
+        Write-C "        Apply the proven baseline fixes, guided. Best for" $T
+        Write-C "        almost everyone - no log-reading needed." $T
         Write-Host ""
         Write-Host "   2) " -ForegroundColor $H -NoNewline; Write-Host "TROUBLESHOOT A STUTTER" -ForegroundColor $T
-        Write-C "        Record & pinpoint a specific issue with guided tools." $T
+        Write-C "        Record & pinpoint a specific issue with the tools." $T
         Write-Host ""
         Write-Host "   3) " -ForegroundColor $H -NoNewline; Write-Host "EACH-RACE ROUTINE" -ForegroundColor $T
         Write-C "        Run before and after every session." $T
         Write-Host ""
-        Rule
-        Write-C "   [W] What do I need? (free apps)    [A] Advanced tools     [R] Reset layout" $H
-        Write-C "   [H] Help / Info                    [G] Web guide          [Q] Quit" $H
-        Write-Host ""
+        Write-C "   W) What do I need first? (free apps)     A) Advanced" $H
+        Write-C "   H) Help      G) Web guide      R) Reset      Q) Quit" $H
         Tip; Bar
-        $raw = ([string](Read-Host "   Select an option")).Trim()
+        $raw = ([string](Read-Host "  Select an option")).Trim()
         if($raw -match '^\?\s*(.+)$'){
             $mp=@{'1'='Optimize';'2'='Troubleshoot';'3'='EachRace';'W'='Requirements'}
             $k=$mp[$Matches[1].Trim()]
@@ -497,7 +496,7 @@ try {
         Write-Host ""; [void](Read-Host "  Press Enter to exit"); return
     }
     $cfg = Load-Config
-    if(-not $cfg){ $cfg = Run-FirstTimeSetup } else { $cfg = Ensure-CoreLabels $cfg }
+    if(-not $cfg){ $cfg = Run-FirstTimeSetup }
     Main-Menu $cfg
 } catch {
     Write-Host ""

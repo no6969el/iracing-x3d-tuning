@@ -1,19 +1,26 @@
 <#
     Set-NIC-USB-IRQ-Affinity.ps1
     ---------------------------------------------------------------
-    Same trick that worked for the GPU, applied to the next CPU-0
-    offenders. LatencyMon showed CPU 0 carrying ~all DPC load while
-    the sim runs there. This steers your physical NIC(s) and USB host
-    controllers' interrupts onto CCD1 cores (17/18/19) - off CPU 0,
-    off the GPU core (16), and off the VR block (20-27).
+    Same trick as the GPU fix, applied to the next CPU-0 offenders.
+    LatencyMon typically shows CPU 0 carrying most DPC load while the
+    sim runs there. This steers physical NIC(s) and USB host
+    controllers' interrupts onto the 2nd-4th frequency-die (CCD1)
+    cores - off CPU 0 (the sim) and off the first CCD1 core (GPU IRQ).
 
     MUST run as Administrator. REBOOT after. Verify with LatencyMon.
     Reversible with Undo-NIC-USB-IRQ-Affinity.ps1.
 #>
 
 # First frequency-CCD core: 16 for 9950X3D/7950X3D, 12 for 9900X3D/7900X3D.
-# The Tuning-Menu sets this automatically; for standalone use, change the 16 below if you're 12-core.
-$FreqFirst   = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else { 16 }
+# The Tuning-Menu sets this automatically (env var or saved config).
+# Standalone on a 12-core with no saved config: change the final 16 below to 12.
+$FreqFirst = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else {
+    $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
+    $ff = 0
+    if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
+    if ($ff -lt 1) { $ff = 16 }
+    $ff
+}
 $TargetCores = @($FreqFirst + 1, $FreqFirst + 2, $FreqFirst + 3)   # off CPU0(sim), off the GPU core, off VR
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -56,4 +63,4 @@ foreach ($t in $targets) {
 
 Write-Host ""
 Write-Host "Done. REBOOT, then run LatencyMon - CPU 0 DPC total should drop sharply." -ForegroundColor Yellow
-Write-Host "If a device reverts (MSI-mode), re-run this each session or we'll schedule it." -ForegroundColor DarkGray
+Write-Host "If a device reverts (MSI-mode), re-run this before each session." -ForegroundColor DarkGray

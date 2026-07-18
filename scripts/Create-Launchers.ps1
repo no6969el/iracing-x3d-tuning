@@ -3,12 +3,20 @@
     ---------------------------------------------------------------
     Makes a double-click .lnk shortcut next to every .ps1 in this
     folder tree. Loggers open with -NoExit (window stays up to read
-    results). The two GPU-IRQ scripts are flagged "Run as administrator".
+    results). Every script that changes a setting is flagged
+    "Run as administrator" so its shortcut elevates automatically.
     Safe to re-run any time; it just refreshes the shortcuts.
 #>
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$adminScripts = @('Set-GPU-IRQ-Affinity.ps1','Undo-GPU-IRQ-Affinity.ps1')
+$adminScripts = @(
+    'Set-GPU-IRQ-Affinity.ps1','Undo-GPU-IRQ-Affinity.ps1',
+    'Set-NIC-USB-IRQ-Affinity.ps1','Undo-NIC-USB-IRQ-Affinity.ps1',
+    'Pre-Race-Quiet.ps1','Post-Race-Restore.ps1',
+    'Add-Defender-Exclusions.ps1','Apply-Guide-Extras.ps1','Undo-Guide-Extras.ps1',
+    'Repair-PerfCounters.ps1','Enable-DiagnosticLogs.ps1',
+    'Enable-GlobalTimerResolution.ps1','Undo-GlobalTimerResolution.ps1'
+)
 $wsh = New-Object -ComObject WScript.Shell
 $made = 0
 

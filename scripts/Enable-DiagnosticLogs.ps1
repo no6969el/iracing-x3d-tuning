@@ -1,7 +1,7 @@
 <#
     Enable-DiagnosticLogs.ps1
     ---------------------------------------------------------------
-    Turns on the logs we need to catch the periodic (~7 min) stutter:
+    Turns on the logs needed to catch periodic stutters:
       * TaskScheduler/Operational  - so we can see which task fired
       * Kernel-Processor-Power/... - power/parking state changes
     Read-mostly: only enables event logs, changes nothing else.

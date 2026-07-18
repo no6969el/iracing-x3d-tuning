@@ -1,18 +1,25 @@
 <#
     Steer NVIDIA GPU interrupts to a CCD1 core (default CPU 16)
     ---------------------------------------------------------------
-    On your 9950X3D, iRacing's sim thread lives on CCD0 (V-cache, cores
-    0-15). GPU interrupts (nvlddmkm) default toward CPU 0 and collide
-    with it. This moves the GPU's interrupt handling onto CPU 16 (the
-    first CCD1 / frequency-die core), off the V-cache die entirely.
+    On a dual-CCD X3D, iRacing's sim thread lives on CCD0 (the V-Cache
+    die) and favors CPU 0. GPU interrupts (nvlddmkm) also default toward
+    CPU 0 and collide with it. This moves the GPU's interrupt handling
+    onto the first frequency-die (CCD1) core, off the V-Cache die entirely.
 
     MUST run as Administrator. Reboot afterward, then verify with LatencyMon.
     Reversible with Undo-GPU-IRQ-Affinity.ps1.
 #>
 
 # First frequency-CCD core: 16 for 9950X3D/7950X3D, 12 for 9900X3D/7900X3D.
-# The Tuning-Menu sets this automatically; for standalone use, change the 16 below if you're 12-core.
-$TargetCore = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else { 16 }
+# The Tuning-Menu sets this automatically (env var or saved config).
+# Standalone on a 12-core with no saved config: change the final 16 below to 12.
+$TargetCore = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else {
+    $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
+    $ff = 0
+    if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
+    if ($ff -lt 1) { $ff = 16 }
+    $ff
+}
 
 # --- require admin ---
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

@@ -77,7 +77,7 @@
     <p class="tag">A measurement-driven method for eliminating frametime spikes, freezes, and micro-stutters — built by diagnosing a real rig from session-ending freezes down to nothing.</p>
     <p class="promise">Goal: zero hiccups.</p>
     <div class="cta">
-      <a class="btn" href="./iracing-x3d-tuning.zip">⬇ Download guide + scripts (.zip)</a>
+      <a class="btn" href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">⬇ Download guide + scripts (.zip)</a>
       <a class="btn ghost" href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">Browse the scripts</a>
     </div>
     <p style="margin-top:16px">
@@ -118,6 +118,7 @@
     <div class="card"><h3>EAC blocks affinity</h3><p>EasyAntiCheat rejects external CPU-affinity changes to iRacing — hard-pinning reverts to all cores seconds after launch. Use a <b>soft CPU Set</b> instead. The mask reading <code>0xFFFFFFFF</code> is <b>normal</b> for CPU Sets, not a failure.</p></div>
     <div class="card"><h3>Unparked plan, NOT Balanced</h3><p>Single-CCD guides say “Balanced.” On dual-CCD with VR, Balanced’s core parking <b>strands the VR compositor and starves the GPU</b>. Keep <b>all cores unparked</b>.</p></div>
     <div class="card"><h3>Measure, don’t guess</h3><p>Frametime hiccups rarely show without instrumentation. Log first, change one thing, log again.</p></div>
+    <div class="card"><h3>The VR focus/timer trap</h3><p>Windows 11 only honors a game’s high-res timer while it owns <b>foreground focus</b> — and in VR, the compositor steals focus constantly. If your stutter <b>stops when you click the sim window</b>, that’s the signature. Fix #3 ends it.</p></div>
   </div>
 </section>
 
@@ -129,6 +130,7 @@
     <li><b>Preflight-Check.ps1</b> — confirms every fix is live before a session.</li>
     <li><a href="https://www.resplendence.com/latencymon">LatencyMon</a> — names the driver behind any DPC spike. Essential for the last mile.</li>
     <li><b>Repair-PerfCounters.ps1</b> — if per-core columns come back empty, your Windows performance counters are broken. Rebuild them.</li>
+    <li><b>Watch-TimerResolution.ps1</b> — live view of the system timer resolution + which window has focus. Catches the “stutters until I click” focus/timer problem in the act (see fix #3).</li>
   </ul>
   <p class="lead">Good result = CCD0 busier than CCD1, GPU util steady with no collapses, no time-gaps, hard pagefaults near zero (big bursts during <em>loading</em> are normal).</p>
 </section>
@@ -141,21 +143,23 @@
 
   <p><span class="num">2</span><b>Process Lasso: pin the sim to the V-Cache die.</b> Add a <b>CPU Set</b> for <code>iRacingSim64DX11.exe</code> = cores 0–15 (0–11 on 12-core). Put VR/overlays/wheel/browsers on the frequency die (16–31). <b>Exclude iRacing from ProBalance.</b> Optional: High I/O, memory, and CPU priority.</p>
 
-  <p><span class="num">3</span><b>GPU interrupt affinity off CPU 0.</b> The sim thread favors CPU 0 and so do NVIDIA’s GPU interrupts — they collide. <code>Set-GPU-IRQ-Affinity.ps1</code> (admin) steers them to CPU 16 → reboot → verify in LatencyMon that <code>nvlddmkm.sys</code> DPCs left CPU 0.</p>
+  <p><span class="num">3</span><b>Global timer resolution — the “stutters until I click” fix (Windows 11, big for VR).</b> Windows 11 drops the system timer from ~1 ms to 15.625 ms whenever the sim window loses foreground focus — which the VR compositor causes constantly — producing periodic frame-pacing hitches that <b>stop the moment you click the sim window</b>. Confirm it with <code>Watch-TimerResolution.ps1</code>, then run <code>Enable-GlobalTimerResolution.ps1</code> (admin) → reboot. It restores the pre-Win11 behavior: high-res timer requests honored globally, focus or not. Reversible with <code>Undo-GlobalTimerResolution.ps1</code>.</p>
 
-  <p><span class="num">4</span><b>NIC + USB interrupt affinity.</b> Optional. <code>Set-NIC-USB-IRQ-Affinity.ps1</code> steers network + USB interrupts to frequency-die cores. Worth it only if a hitch remains after the disk fixes — network DPC is usually small.</p>
+  <p><span class="num">4</span><b>GPU interrupt affinity off CPU 0.</b> The sim thread favors CPU 0 and so do NVIDIA’s GPU interrupts — they collide. <code>Set-GPU-IRQ-Affinity.ps1</code> (admin) steers them to the first frequency-die core (CPU 16, or 12 on a 12-core) → reboot → verify in LatencyMon that <code>nvlddmkm.sys</code> DPCs left CPU 0.</p>
 
-  <p><span class="num">5</span><b>Repair performance counters</b> if traces show empty per-core data. <code>Repair-PerfCounters.ps1</code> (admin) → reboot.</p>
+  <p><span class="num">5</span><b>NIC + USB interrupt affinity.</b> Optional. <code>Set-NIC-USB-IRQ-Affinity.ps1</code> steers network + USB interrupts to frequency-die cores. Worth it only if a hitch remains after the fixes above — network DPC is usually small.</p>
 
-  <p><span class="num">6</span><b>Quiet background + Defender.</b> <code>Pre-Race-Quiet.ps1</code> disables Windows Update/Orchestrator/Search scans (they fire every ~5–7 min and cause periodic stalls) and optionally Defender real-time for the session (needs Tamper Protection off). <code>Post-Race-Restore.ps1</code> reverts. <code>Add-Defender-Exclusions.ps1</code> excludes iRacing’s folders so Defender stops scanning texture reads mid-race.</p>
+  <p><span class="num">6</span><b>Repair performance counters</b> if traces show empty per-core data. <code>Repair-PerfCounters.ps1</code> (admin) → reboot.</p>
 
-  <p><span class="num">7</span><b>HAGS / Game Bar / USB Selective Suspend.</b> <code>Apply-Guide-Extras.ps1</code> turns off USB Selective Suspend (stops wheel/VR USB power-cycling) and Game Mode/Bar/DVR. Test HAGS both ways — it’s a toss-up on newer cards.</p>
+  <p><span class="num">7</span><b>Quiet background + Defender.</b> <code>Pre-Race-Quiet.ps1</code> disables Windows Update/Orchestrator/Search scans (they fire every ~5–7 min and cause periodic stalls) and optionally Defender real-time for the session (needs Tamper Protection off). <code>Post-Race-Restore.ps1</code> reverts. <code>Add-Defender-Exclusions.ps1</code> excludes iRacing’s folders so Defender stops scanning texture reads mid-race.</p>
 
-  <p><span class="num">8</span><b>iRacing in-game settings</b> (edit with the sim CLOSED): <code>LoadTexturesWhenDriving=0</code> (preload instead of streaming mid-lap), <code>CacheSwap3HighResCars=0</code>, <code>spoolingEnabled=0</code> in app.ini (no continuous replay-to-disk), <code>CrowdDetail=0</code>.</p>
+  <p><span class="num">8</span><b>HAGS / Game Bar / USB Selective Suspend.</b> <code>Apply-Guide-Extras.ps1</code> turns off USB Selective Suspend (stops wheel/VR USB power-cycling) and Game Mode/Bar/DVR. Test HAGS both ways — it’s a toss-up on newer cards.</p>
 
-  <p><span class="num">9</span><b>NVIDIA Control Panel</b> (per-app <code>iRacingSim64DX11.exe</code>): Low Latency = <b>On</b> (not Ultra), Power = Prefer Max Performance, V-Sync Off, Threaded Optimization On, Shader Cache Unlimited, Anisotropic 16x. Disable the in-game overlay.</p>
+  <p><span class="num">9</span><b>iRacing in-game settings</b> (edit with the sim CLOSED): <code>LoadTexturesWhenDriving=0</code> (preload instead of streaming mid-lap), <code>CacheSwap3HighResCars=0</code>, <code>spoolingEnabled=0</code> in app.ini (no continuous replay-to-disk), <code>CrowdDetail=0</code>.</p>
 
-  <p><span class="num">10</span><b>Remove monitoring overlays.</b> RTSS / MSI Afterburner are notorious DPC + hard-pagefault sources. Close them, especially while diagnosing.</p>
+  <p><span class="num">10</span><b>NVIDIA Control Panel</b> (per-app <code>iRacingSim64DX11.exe</code>): Low Latency = <b>On</b> (not Ultra), Power = Prefer Max Performance, V-Sync Off, Threaded Optimization On, Shader Cache Unlimited, Anisotropic 16x. Disable the in-game overlay.</p>
+
+  <p><span class="num">11</span><b>Remove monitoring overlays.</b> RTSS / MSI Afterburner are notorious DPC + hard-pagefault sources. Close them, especially while diagnosing.</p>
 </section>
 
 <section>
@@ -167,10 +171,11 @@
     <li><b>Quad-views / foveated</b> is a big free win — sharp center, low-res periphery. When the runtime provides it (e.g. Pimax’s Advanced Quad-View), the <b>runtime panel is authoritative</b>; the sim just renders into it.</li>
     <li><b>Sharpening amplifies shimmer</b> — lower it and let resolution do the work.</li>
     <li><b>Keep ~15% GPU headroom</b> (util peaks under ~85%). VR punishes any missed frame with reprojection judder.</li>
+    <li><b>Stutter that stops when you click the sim window?</b> That’s the focus/timer problem — see fix #3. It hits VR hardest because the compositor keeps taking foreground focus from the sim.</li>
   </ul>
 </section>
 
-<section>
+<section id="why-differs">
   <div class="kicker">Why this differs</div>
   <h2>Adapted from a single-CCD guide — two things flip</h2>
   <p>This method builds on an excellent single-CCD guide (<a href="https://rcsracing93.github.io/iracing-stutter-fix">rcsracing93.github.io/iracing-stutter-fix</a>). Most transfers, but on dual-CCD:</p>
@@ -185,7 +190,7 @@
     <b>Before you run anything:</b> these scripts change Windows / registry / power settings. Every one is reversible (an Undo script or a documented toggle), but review before running — it’s your PC, at your own risk.
   </div>
   <div class="cta" style="text-align:center">
-    <a class="btn" href="./iracing-x3d-tuning.zip">⬇ Download guide + scripts (.zip)</a>
+    <a class="btn" href="https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip">⬇ Download guide + scripts (.zip)</a>
     <a class="btn ghost" href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">Browse the scripts</a>
   </div>
 </section>

@@ -1,9 +1,9 @@
 <#
     Add-Defender-Exclusions.ps1
     ---------------------------------------------------------------
-    Stops Windows Defender from scanning iRacing's files, which was
-    causing continuous hard-pagefault micro-stalls mid-race (Defender
-    scanning every texture/asset read). Auto-detects your iRacing
+    Stops Windows Defender from scanning iRacing's files, a source of
+    continuous hard-pagefault micro-stalls mid-race (Defender scanning
+    every texture/asset read). Auto-detects your iRacing
     install + Documents folder and excludes them, plus the sim
     processes. Keeps Defender fully active everywhere else.
 
@@ -50,7 +50,7 @@ $paths = $paths | Sort-Object -Unique
 
 if (-not $paths) {
     Write-Host "Could not auto-find the iRacing install folder." -ForegroundColor Yellow
-    Write-Host "Edit this script and add your install path manually, or tell Claude the path." -ForegroundColor Yellow
+    Write-Host "Edit this script and add your install path to the \$subs list above, then re-run." -ForegroundColor Yellow
 }
 
 # --- add folder exclusions ---

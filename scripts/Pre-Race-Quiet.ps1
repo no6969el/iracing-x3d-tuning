@@ -1,9 +1,9 @@
 <#
     Pre-Race-Quiet.ps1
     ---------------------------------------------------------------
-    Silences the background tasks/services that caused your ~6-min
-    micro-stalls (Windows Update scans, Edge update, PushToInstall,
-    Windows Search) AND disables Defender real-time protection for the
+    Silences the background tasks/services behind the classic periodic
+    (~5-7 min cadence) micro-stalls (Windows Update scans, Edge update,
+    PushToInstall, Windows Search) AND disables Defender real-time protection for the
     session (stops it scanning iRacing's file reads). Run BEFORE a session.
 
     Requires Tamper Protection = OFF for the Defender toggle to take.
@@ -18,7 +18,7 @@ if (-not $admin) { Write-Host "ERROR: Run as Administrator." -ForegroundColor Re
 Write-Host ""
 Write-Host "Quieting background tasks for a clean session..." -ForegroundColor Cyan
 
-# --- scheduled tasks that fired during your stalls ---
+# --- scheduled tasks on the periodic-scan cadence ---
 $tasks = @(
     @{ Path='\Microsoft\Windows\InstallService\';               Name='ScanForUpdates' },
     @{ Path='\Microsoft\Windows\InstallService\';               Name='ScanForUpdatesAsUser' },

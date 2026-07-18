@@ -1,11 +1,11 @@
 <#
     Repair-PerfCounters.ps1
     ---------------------------------------------------------------
-    Your Windows performance counters are broken - every counter-based
-    column in the trace came back empty (per-core load, interrupt/DPC
-    time, pagefaults). That's also why Get-Counter failed earlier. This
-    rebuilds them so we can actually measure the CCD split, confirm the
-    GPU-interrupt move, and see which driver causes the periodic hitch.
+    If every counter-based column in a FullTrace comes back empty
+    (per-core load, interrupt/DPC time, pagefaults), your Windows
+    performance counters are corrupt - a surprisingly common Windows
+    fault. This rebuilds them so the trace can measure the CCD split,
+    confirm the GPU-interrupt move, and expose periodic hitches.
 
     RUN AS ADMINISTRATOR, then REBOOT.
 #>
@@ -33,4 +33,4 @@ if ($wm) { try { & winmgmt /resyncperf } catch { } }
 
 Write-Host ""
 Write-Host "Done. REBOOT, then re-run Preflight-Check - the per-core columns should populate." -ForegroundColor Green
-Write-Host "If they still don't, tell me and we'll try the deeper rebuild (sc / WMI repository)." -ForegroundColor DarkGray
+Write-Host "If they still don't populate, the deeper fix is rebuilding the WMI repository (search 'winmgmt salvagerepository')." -ForegroundColor DarkGray

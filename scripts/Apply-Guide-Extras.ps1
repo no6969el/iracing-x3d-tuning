@@ -1,13 +1,13 @@
 <#
     Apply-Guide-Extras.ps1
     ---------------------------------------------------------------
-    Remaining low-risk guide items (#11):
+    Remaining low-risk guide items:
       * USB Selective Suspend = OFF on the active power plan
-        (stops your wheel/VR USB devices power-cycling mid-race -
-         a real DPC-hitch source on this rig)
+        (stops wheel/VR USB devices power-cycling mid-race -
+         a real DPC-hitch source)
       * Windows Game Mode / Game Bar / Game DVR = OFF
     Safe and reversible (Undo-Guide-Extras.ps1). No reboot needed.
-    HAGS is handled separately - see the note Claude gave you.
+    HAGS is a genuine toss-up on newer cards - test both ways (see guide).
     RUN AS ADMINISTRATOR.
 #>
 
