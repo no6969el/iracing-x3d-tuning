@@ -15,7 +15,7 @@ When you select Option ("Troubleshoot a stutter") in the `Start-Tuning-Menu.bat`
 
 Adapted for dual-CCD from the single-CCD guide by [rcsracing93](https://rcsracing93.github.io/iracing-stutter-fix) · MIT licensed · share freely.
 
-SCRIPTS — iRacing Tuning Guide (Dual-CCD Ryzen X3D + NVIDIA)
+SCRIPTS — iRacing Tuning Guide (Ryzen X3D + NVIDIA)
 ============================================================
 EASIEST: double-click "Start-Tuning-Menu.bat" (one folder up) for an
 interactive menu that runs all of these for you and handles core numbers
