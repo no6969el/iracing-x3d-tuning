@@ -7,15 +7,26 @@ Zero hiccups in iRacing on Ryzen X3D — dual-CCD (9950X3D / 7950X3D / 9900X3D /
 
 ---
 
-**In this repo** (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it): `Apply-Baseline.bat` — one-shot optimizer · `Start-Tuning-Menu.bat` — guided menu with undo for everything · `scripts/` — the individual tools ([inventory](scripts/README.txt)).
+# iRacing Tuning Guide & Scripts
 
-When you select Option ("Troubleshoot a stutter") in the `Start-Tuning-Menu.bat` and complete a race session, the script parses that exact file, isolates the timestamps matching your race, and filters out the exact names of the tasks running at that moment.
+In this repo (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it):
 
-:::warning
-⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
-:::
+*   `Apply-Baseline.bat` — One-shot optimizer.
+*   `Start-Tuning-Menu.bat` — Guided menu with undo for everything.
+*   `scripts/` — The individual tools ([inventory](scripts/README.txt)).
 
-Adapted for dual-CCD from the single-CCD guide by [rcsracing93](LINK_TO_THEIR_PROFILE_OR_GUIDE) • MIT licensed • share freely.
+**How "Troubleshoot a stutter" works:**
+When you select this option in `Start-Tuning-Menu.bat` and complete a race session, the script:
+1. **Parses** that exact log file.
+2. **Isolates** the specific timestamps matching your race.
+3. **Filters out** the exact names of the tasks running at that exact moment.
+
+> [!WARNING]
+> ⚠️ **These scripts change Windows settings (power, registry, services, Defender).** All reversible, nothing runs without your approval — review before running, at your own risk.
+
+Adapted for dual-CCD from the single-CCD guide by [rcsracing93](https://github.com/no6969el/iracing-x3d-tuning/blob/main/LINK_TO_THEIR_PROFILE_OR_GUIDE) • MIT licensed • share freely.
+
+---
 
 # SCRIPTS — iRacing Tuning Guide (Ryzen X3D + NVIDIA)
 
