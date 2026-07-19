@@ -27,19 +27,6 @@ Run a script by hand with:
    powershell -ExecutionPolicy Bypass -File "<path to .ps1>"
 Or run Create-Launchers.ps1 once to get a double-click .lnk next to each.
 
->>> CHIP TYPE + CORE COUNT (handled for you by the menu) <<<
-Supported: dual-CCD (9950X3D/7950X3D = 16-core, 9900X3D/7900X3D = 12-core)
-AND single-CCD (7800X3D/9800X3D/5800X3D = 8-core). The Tuning-Menu and
-Apply-Baseline detect your chip and set the right IRQ target core for you.
-
-Run BY HAND with no saved config? The IRQ scripts fall back to HALF your
-logical processor count - a valid, safe target for every X3D:
-   16-core dual  (32 threads)  -> IRQ core 16
-   12-core dual  (24 threads)  -> IRQ core 12
-   8-core single (16 threads)  -> IRQ core 8
-So you normally don't need to edit anything. (To override, set the env var
-X3D_FREQ_FIRST_CORE, or edit the "...else { ... }" line near the top.)
-
 DUAL-CCD only: also pin the sim in Process Lasso (CPU Set) to your V-Cache
 cores - 0-15 on 16-core, 0-11 on 12-core. SINGLE-CCD chips have nothing to
 pin (all cores are V-Cache) and should stay on the Balanced power plan.
