@@ -69,6 +69,7 @@ ADMIN? Scripts that change system settings must be run from an elevated PowerShe
 7.  Preflight-Check, then FullTrace a race to verify zero time-gaps
 
 ### PER-SESSION
-**Before:** Pre-Race-Quiet / **After:** Post-Race-Restore
+**Before:** Pre-Race-Quiet   
+**After:** Post-Race-Restore
 
 These scripts change Windows/registry/power settings. Every one has an Undo or is reversible, but review before running on someone else's PC.
