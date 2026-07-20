@@ -1,4 +1,5 @@
-<div align="center"># Ryzen X3D + NVIDIA</div> 
+<div align="center"># Ryzen X3D + NVIDIA</div>   
+  
 
   
 <div align="center">Zero hiccups gaming on Ryzen X3D - dual-CCD **and** single-CCD </div> 
