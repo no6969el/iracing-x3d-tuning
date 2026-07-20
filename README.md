@@ -11,7 +11,7 @@
 
 ---
 
-# iRacing Tuning Guide & Scripts
+# Tuning Guide & Scripts
 
 In this repo (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it):
 
