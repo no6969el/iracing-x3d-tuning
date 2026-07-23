@@ -99,6 +99,7 @@ if ($P.IsX3D -and $P.Topology -ne 'single') {
     Write-C "    Exact clicks: Step 2 on the web guide (repo front page)." $Dim
 } elseif ($P.IsX3D) {
     Write-C "  Single-CCD chip: nothing to set up first." $Go
+    Write-C "    (No core pinning - every core already has the V-Cache.)" $Dim
     Write-C "    * No core pinning - all your cores have the V-Cache." $T
     Write-C "    * Keep your normal Balanced power plan (do NOT force" $T
     Write-C "      all-cores-unparked - that's a dual-CCD-only fix)." $T
