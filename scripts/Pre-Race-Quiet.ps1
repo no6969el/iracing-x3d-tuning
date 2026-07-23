@@ -22,12 +22,19 @@
 
     Requires Tamper Protection = OFF for the Defender toggle to take.
 
+    State + log live in C:\ProgramData\RaceQuiet\ so that the Admin run and
+    the SYSTEM run always agree on the path (a script folder on OneDrive or a
+    network share is not reliably writable by SYSTEM).
+
     Options:
       -Verify        after the work, wait then re-check nothing reverted.
       -VerifyDelay   seconds to wait before that check (default 180).
-      -AsSystem      run in SYSTEM context so the TrustedInstaller-locked
-                     WaaSMedic/Orchestrator tasks can be disabled too.
-                     If you use it here, use it on Post-Race-Restore too.
+      -NoSystem      do NOT hop to SYSTEM context. By DEFAULT this script
+                     re-runs itself as SYSTEM (via a temporary scheduled
+                     task) so the TrustedInstaller-locked WaaSMedic /
+                     Orchestrator tasks can be disabled too. That needs
+                     nothing from you beyond the admin prompt, costs a few
+                     seconds, and the task is deleted afterwards.
       -SkipDefender  leave Defender real-time protection alone.
       -PauseDays     WU pause backstop length (default 2; restore clears it).
       -Force         re-snapshot even if a state file already exists.
@@ -36,7 +43,7 @@
 param(
     [switch] $Verify,
     [int]    $VerifyDelay = 180,
-    [switch] $AsSystem,
+    [switch] $NoSystem,
     [switch] $SkipDefender,
     [int]    $PauseDays   = 2,
     [switch] $Force,
@@ -64,9 +71,12 @@ $TaskNamePatterns = @('MicrosoftEdgeUpdateTaskMachine*')  # Edge auto-update (GU
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$root = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { (Get-Location).Path }
-if (-not $StatePath) { $StatePath = Join-Path $root $StateName }
-if (-not $LogPath)   { $LogPath   = Join-Path $root 'RaceQuiet.log' }
+# State/log go to ProgramData: writable by BOTH the Admin run and the SYSTEM
+# run, unlike a script folder that may sit on OneDrive or a network share.
+$stateDir = Join-Path $env:ProgramData 'RaceQuiet'
+if (-not (Test-Path $stateDir)) { New-Item -Path $stateDir -ItemType Directory -Force | Out-Null }
+if (-not $StatePath) { $StatePath = Join-Path $stateDir $StateName }
+if (-not $LogPath)   { $LogPath   = Join-Path $stateDir 'RaceQuiet.log' }
 
 function Log { param($m,$c='Gray')
     $ts = (Get-Date).ToString('HH:mm:ss')
@@ -116,8 +126,8 @@ function Invoke-AsSystem {
     schtasks.exe /Delete /TN $tn /F > $null 2>&1
     Remove-Item $wrapper -ErrorAction SilentlyContinue
     if (Test-Path $LogPath) {
-        Write-Host "  --- SYSTEM run log (tail) ---" -ForegroundColor DarkGray
-        Get-Content $LogPath -Tail 32 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+        Write-Host "  --- SYSTEM run log (a SYSTEM task has no visible console) ---" -ForegroundColor DarkGray
+        Get-Content $LogPath -Tail 60 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
     }
 }
 
@@ -132,7 +142,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 # ---- SYSTEM hop -----------------------------------------------------------
-if ($AsSystem -and -not (Test-IsSystem)) {
+if (-not $NoSystem -and -not (Test-IsSystem)) {
     Write-Host ""
     Write-Host "  ==========================  PRE-RACE-QUIET  ========================" -ForegroundColor Cyan
     Invoke-AsSystem
@@ -208,9 +218,15 @@ foreach ($t in $uniq) {
     }
     $taskState.Add([pscustomobject]@{ Path=$t.TaskPath; Name=$t.TaskName; PrevState=$t.State.ToString(); Disabled=$ok; Method=$method })
 }
-if ($medicRefused -and -not (Test-IsSystem)) {
+if ($medicRefused) {
     Log "  ** WaaSMedic\PerformRemediation refused - that's the ~10-min reverter." Yellow
-    Log "     Re-run with -AsSystem to disable it (and use -AsSystem on restore too)." Yellow
+    if (Test-IsSystem) {
+        Log "     Refused even as SYSTEM -> this build has it TrustedInstaller-owned." Yellow
+        Log "     The service disable + WU pause still hold in most cases; run with" Yellow
+        Log "     -Verify to see whether anything actually reverts on THIS machine." Yellow
+    } else {
+        Log "     You used -NoSystem. Run without it (SYSTEM is the default) to try again." Yellow
+    }
 }
 
 # ---- 3. snapshot + pause updates (backstop) -------------------------------
@@ -284,12 +300,12 @@ if ($Verify) {
     else {
         Log "Verify: SOMETHING REVERTED --" Red
         foreach ($b in $bad) { Log "     $b" Red }
-        if (-not (Test-IsSystem)) { Log "Try re-running with -AsSystem. If it still reverts, it's an ownership-locked task or an Intune/GPO policy." Yellow }
-        else { Log "Already ran as SYSTEM and it still reverted -> ownership-locked task or management policy." Yellow }
+        if (-not (Test-IsSystem)) { Log "You used -NoSystem. Run without it (SYSTEM default) and re-test." Yellow }
+        else { Log "Ran as SYSTEM and it still reverted -> ownership-locked task or an Intune/GPO policy on this PC." Yellow }
     }
 }
 
 Write-Host "  ====================================================================" -ForegroundColor Cyan
 Write-Host "  Quiet. Go race. Services stay OFF (even across reboot) until restore." -ForegroundColor Green
-Write-Host "  >>> RUN Post-Race-Restore.ps1$(if($AsSystem){' -AsSystem'}) AFTER the session <<<" -ForegroundColor Yellow
+Write-Host "  >>> RUN Post-Race-Restore.ps1 AFTER the session <<<" -ForegroundColor Yellow
 Write-Host ""

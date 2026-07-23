@@ -11,13 +11,18 @@
     deletes the snapshot. If no snapshot is found it falls back to sane
     Windows defaults and says so.
 
-    -AsSystem   run the restore in SYSTEM context. Use this if you ran
-                Pre-Race-Quiet.ps1 with -AsSystem, so the tasks only SYSTEM
-                could disable can be re-enabled again.
+    -NoSystem   do NOT hop to SYSTEM context. By DEFAULT this script re-runs
+                itself as SYSTEM (temporary scheduled task, deleted after) so
+                the tasks that only SYSTEM could disable get re-enabled. This
+                mirrors Pre-Race-Quiet.ps1, which also defaults to SYSTEM.
+                Needs nothing from you beyond the admin prompt.
+
+    State + log live in C:\ProgramData\RaceQuiet\ so the Admin run and the
+    SYSTEM run always agree on the path.
 #>
 
 param(
-    [switch] $AsSystem,
+    [switch] $NoSystem,
     [string] $StatePath,
     [string] $LogPath
 )
@@ -47,9 +52,11 @@ $Defaults = @{
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$root = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { (Get-Location).Path }
-if (-not $StatePath) { $StatePath = Join-Path $root $StateName }
-if (-not $LogPath)   { $LogPath   = Join-Path $root 'RaceQuiet.log' }
+# Must match Pre-Race-Quiet.ps1: ProgramData is writable by Admin AND SYSTEM.
+$stateDir = Join-Path $env:ProgramData 'RaceQuiet'
+if (-not (Test-Path $stateDir)) { New-Item -Path $stateDir -ItemType Directory -Force | Out-Null }
+if (-not $StatePath) { $StatePath = Join-Path $stateDir $StateName }
+if (-not $LogPath)   { $LogPath   = Join-Path $stateDir 'RaceQuiet.log' }
 
 function Log { param($m,$c='Gray')
     $ts = (Get-Date).ToString('HH:mm:ss')
@@ -85,8 +92,8 @@ function Invoke-AsSystem {
     schtasks.exe /Delete /TN $tn /F > $null 2>&1
     Remove-Item $wrapper -ErrorAction SilentlyContinue
     if (Test-Path $LogPath) {
-        Write-Host "  --- SYSTEM restore log (tail) ---" -ForegroundColor DarkGray
-        Get-Content $LogPath -Tail 32 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+        Write-Host "  --- SYSTEM restore log (a SYSTEM task has no visible console) ---" -ForegroundColor DarkGray
+        Get-Content $LogPath -Tail 60 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
     }
 }
 
@@ -101,7 +108,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 # ---- SYSTEM hop -----------------------------------------------------------
-if ($AsSystem -and -not (Test-IsSystem)) {
+if (-not $NoSystem -and -not (Test-IsSystem)) {
     Write-Host ""
     Write-Host "  =========================  POST-RACE-RESTORE  ======================" -ForegroundColor Cyan
     Invoke-AsSystem
@@ -136,7 +143,7 @@ if (Test-Path $StatePath) {
         catch { schtasks.exe /Change /TN ($t.Path + $t.Name) /ENABLE > $null 2>&1; if ($LASTEXITCODE -eq 0) { $ok=$true } }
         if ($ok) { $en++; Log ("  enabled: {0}{1}" -f $t.Path,$t.Name) Green } else { $stuck++; Log ("  could not re-enable: {0}{1}" -f $t.Path,$t.Name) Yellow }
     }
-    Log "  re-enabled $en task(s)$(if($stuck){"; $stuck stuck (re-run with -AsSystem if Pre used it)"})" DarkGray
+    Log "  re-enabled $en task(s)$(if($stuck){"; $stuck stuck - re-run WITHOUT -NoSystem"})" DarkGray
 
     # 2. restore services
     Log "Restoring services..." Cyan
