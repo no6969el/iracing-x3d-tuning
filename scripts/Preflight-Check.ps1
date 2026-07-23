@@ -6,54 +6,64 @@
     No admin required (run as admin only if a registry line says
     "access denied").
 
-    Core numbers come from the Tuning-Menu's saved config when
-    available; otherwise they're inferred from your logical
-    processor count (32 -> 16-core X3D, 24 -> 12-core X3D).
+    Topology comes from X3D-Profiles.ps1, so this now adapts to the
+    chip it finds instead of assuming the example rig: 6/8-core
+    single-CCD, 12/16-core dual-CCD, the dual-cached 9950X3D2, mobile
+    HX3D parts, and non-X3D CPUs (where the core-pinning and interrupt
+    checks are skipped rather than failed).
 #>
 
 function Show-OK   { param($m) Write-Host "  [OK]   $m" -ForegroundColor Green }
 function Show-WARN { param($m) Write-Host "  [WARN] $m" -ForegroundColor Yellow }
 function Show-INFO { param($m) Write-Host "  [ .. ] $m" -ForegroundColor Gray }
+function Show-SKIP { param($m) Write-Host "  [ -- ] $m" -ForegroundColor DarkGray }
 
 $issues = 0
-$ncpu = [Environment]::ProcessorCount
 
-# --- resolve topology + the first frequency-CCD core ---
-$Topology = ''
-$cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
-if (Test-Path $cfgPath) { try { $Topology = [string](Get-Content $cfgPath -Raw | ConvertFrom-Json).Topology } catch {} }
-$FreqFirst = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else {
-    $ff = 0
-    if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
-    if ($ff -lt 1) { $ff = switch ($ncpu) { 32 {16} 24 {12} 16 {8} default {[int]($ncpu/2)} } }
-    $ff
+# --- resolve the profile -----------------------------------------
+$mod = Join-Path $PSScriptRoot 'X3D-Profiles.ps1'
+if (-not (Test-Path $mod)) {
+    Write-Host ""
+    Write-Host "  X3D-Profiles.ps1 is missing from the scripts folder - re-unzip the kit." -ForegroundColor Red
+    Write-Host ""
+    return
 }
-# infer single-CCD when we have no saved topology but the chip is an 8-core (16-thread) class
-if (-not $Topology) { $Topology = if ($ncpu -le 16) { 'single' } else { 'dual' } }
-$IsSingle = ($Topology -eq 'single')
-$VCacheRange = "0-$($FreqFirst - 1)"
+. $mod
+$P = Get-X3DProfile
+
+$ncpu        = [int]$P.ActualLogical
+$FreqFirst   = [int]$P.FreqFirst
+$IsSingle    = ($P.Topology -eq 'single')
+$VCacheRange = $P.VCacheRange
+$CanSteer    = ($P.TopologyKnown -and $P.IsX3D -and $FreqFirst -ge 1 -and $FreqFirst -lt $ncpu)
+$NeedsPin    = ($P.IsX3D -and -not $IsSingle)
 
 Write-Host ""
 Write-Host "=================  iRACING PREFLIGHT  =================" -ForegroundColor Cyan
-if ($IsSingle) {
-    Write-Host ("  single-CCD: all cores V-Cache, GPU IRQ steered to CPU {0}" -f $FreqFirst) -ForegroundColor DarkGray
-} else {
-    Write-Host ("  dual-CCD: sim on V-Cache cores {0}, GPU IRQ on CPU {1}" -f $VCacheRange, $FreqFirst) -ForegroundColor DarkGray
-}
+Write-Host ("  {0}  ({1})" -f $P.Model, $P.Profile) -ForegroundColor Gray
+Write-Host ("  " + (Get-X3DTopologySummary $P)) -ForegroundColor DarkGray
+if ($P.Simulated) { Write-Host "  SIMULATED PROFILE ACTIVE - readings below are from the real machine." -ForegroundColor Magenta }
 
 # 1. CPU visible to Windows
 Write-Host ""
 Write-Host "1. CPU topology"
-if ($IsSingle) {
-    Show-OK "$ncpu logical processors - single-CCD (all cores share the V-Cache)"
-} elseif ($ncpu -eq 2 * $FreqFirst) {
-    Show-OK "$ncpu logical processors - both CCDs active"
-} elseif ($ncpu -eq $FreqFirst) {
-    Show-WARN "only $ncpu logical processors - msconfig may be limiting cores; CPU $FreqFirst won't exist. Uncheck 'Number of processors' in msconfig > Boot > Advanced + reboot."
+$expected = 0
+if ($P.Known) { $expected = $P.Cores * $P.SmtFactor }
+if (-not $P.IsX3D) {
+    Show-SKIP "$ncpu logical processors - no 3D V-Cache detected, topology checks skipped"
+} elseif ($P.Known -and $ncpu -eq $expected) {
+    if ($IsSingle) { Show-OK "$ncpu logical processors - single-CCD, all cores share the V-Cache" }
+    else           { Show-OK "$ncpu logical processors - both CCDs active" }
+} elseif ($P.Known -and $ncpu -lt $expected) {
+    Show-WARN "only $ncpu of the expected $expected logical processors - cores are being limited. Check msconfig > Boot > Advanced ('Number of processors' should be UNCHECKED) and your BIOS CCD/SMT settings, then reboot."
     $issues++
+} elseif ($IsSingle) {
+    Show-OK "$ncpu logical processors - single-CCD"
 } else {
-    Show-WARN "$ncpu logical processors - unexpected for a $(2*$FreqFirst)-thread X3D (run the Tuning-Menu once to save your core profile)"
-    $issues++
+    Show-OK "$ncpu logical processors - $($P.CcdCount) CCDs detected"
+}
+if ($P.VCacheScope -eq 'both') {
+    Show-INFO "both CCDs carry V-Cache on this chip - there is no 'bad' CCD, but keeping the sim on one die still avoids cross-CCD latency"
 }
 
 # 2. Active power plan
@@ -62,9 +72,13 @@ Write-Host "2. Power plan"
 $scheme = (powercfg /getactivescheme) -join ' '
 $planName = '?'
 if ($scheme -match '\(([^)]+)\)') { $planName = $Matches[1] }
-if ($IsSingle) {
+if ($P.Form -eq 'mobile') {
+    Show-INFO "active plan = $planName - on a laptop your OEM power software may override this. Confirm the machine is on mains power and in its performance profile."
+} elseif ($IsSingle) {
     # single-CCD: any plan is fine; Balanced is actually AMD's recommendation
     Show-OK "active plan = $planName (single-CCD - power plan isn't critical; Balanced is fine)"
+} elseif (-not $P.IsX3D) {
+    Show-INFO "active plan = $planName - make sure core parking is OFF (100% cores unparked)"
 } elseif ($scheme.ToLower().Contains('a4342cf1') -or $planName -like '*Bitsum*') {
     Show-OK "active plan = $planName (all cores unparked)"
 } elseif ($scheme.ToLower().Contains('8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c')) {
@@ -78,46 +92,51 @@ if ($IsSingle) {
 
 # 3. GPU interrupt affinity (registry)
 Write-Host ""
-Write-Host "3. GPU interrupt affinity (target CPU $FreqFirst)"
-$gpus = Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like '*VEN_10DE*' }
-if (-not $gpus) {
-    Show-WARN "no active NVIDIA display device found"
-    $issues++
-}
-foreach ($g in $gpus) {
-    $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($g.InstanceId)\Device Parameters\Interrupt Management\Affinity Policy"
-    try {
-        if (Test-Path $key) {
-            $p   = Get-ItemProperty -Path $key -ErrorAction Stop
-            $pol = $p.DevicePolicy
-            $ov  = $p.AssignmentSetOverride
-            if ($pol -eq 4 -and $ov) {
-                $mask = [uint64]0
-                for ($i = 0; $i -lt $ov.Length; $i++) {
-                    $mask = $mask -bor ([uint64]$ov[$i] -shl (8 * $i))
-                }
-                $cores = @()
-                for ($b = 0; $b -lt 64; $b++) {
-                    if ((($mask -shr $b) -band [uint64]1) -eq 1) { $cores += $b }
-                }
-                $coreList = $cores -join ','
-                if ($cores -contains $FreqFirst) {
-                    Show-OK "GPU interrupts steered to CPU $coreList (override active)"
+Write-Host "3. GPU interrupt affinity"
+if (-not $CanSteer) {
+    Show-SKIP "interrupt steering not applicable on this CPU - skipped"
+} else {
+    Write-Host "   (target CPU $FreqFirst)" -ForegroundColor DarkGray
+    $gpus = Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like '*VEN_10DE*' }
+    if (-not $gpus) {
+        Show-WARN "no active NVIDIA display device found"
+        $issues++
+    }
+    foreach ($g in $gpus) {
+        $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($g.InstanceId)\Device Parameters\Interrupt Management\Affinity Policy"
+        try {
+            if (Test-Path $key) {
+                $p   = Get-ItemProperty -Path $key -ErrorAction Stop
+                $pol = $p.DevicePolicy
+                $ov  = $p.AssignmentSetOverride
+                if ($pol -eq 4 -and $ov) {
+                    $mask = [uint64]0
+                    for ($i = 0; $i -lt $ov.Length; $i++) {
+                        $mask = $mask -bor ([uint64]$ov[$i] -shl (8 * $i))
+                    }
+                    $cores = @()
+                    for ($b = 0; $b -lt 64; $b++) {
+                        if ((($mask -shr $b) -band [uint64]1) -eq 1) { $cores += $b }
+                    }
+                    $coreList = $cores -join ','
+                    if ($cores -contains $FreqFirst) {
+                        Show-OK "GPU interrupts steered to CPU $coreList (override active)"
+                    } else {
+                        Show-WARN "GPU IRQ override present but targets CPU $coreList (not $FreqFirst) - re-run Set-GPU-IRQ-Affinity, or reset the saved profile from the Tuning-Menu if you changed CPU"
+                        $issues++
+                    }
                 } else {
-                    Show-WARN "GPU IRQ override present but targets CPU $coreList (not $FreqFirst)"
+                    Show-WARN "policy present but not SpecifiedProcessors(4) - re-run Set-GPU-IRQ-Affinity"
                     $issues++
                 }
             } else {
-                Show-WARN "policy present but not SpecifiedProcessors(4) - re-run Set-GPU-IRQ-Affinity"
+                Show-WARN "no interrupt override on $($g.FriendlyName) - reverted (MSI quirk). Re-run Set-GPU-IRQ-Affinity as admin."
                 $issues++
             }
-        } else {
-            Show-WARN "no interrupt override on $($g.FriendlyName) - reverted (MSI quirk). Re-run Set-GPU-IRQ-Affinity as admin."
+        } catch {
+            Show-WARN "could not read IRQ registry (try running as admin)"
             $issues++
         }
-    } catch {
-        Show-WARN "could not read IRQ registry (try running as admin)"
-        $issues++
     }
 }
 
@@ -132,10 +151,12 @@ if ($tv -eq 1) {
     Show-INFO "not set - if you get hitches that stop when you CLICK the sim window (common in VR), run Enable-GlobalTimerResolution (admin) + reboot"
 }
 
-# 5. Process Lasso config + engine (dual-CCD only - single-CCD has nothing to pin)
+# 5. Process Lasso config + engine (dual-CCD only)
 Write-Host ""
 Write-Host "5. Process Lasso (core pinning)"
-if ($IsSingle) {
+if (-not $P.IsX3D) {
+    Show-SKIP "no V-Cache to pin to on this CPU - skipped"
+} elseif ($IsSingle) {
     Show-OK "single-CCD - no core pinning needed (all cores are V-Cache)"
 } else {
     if (Get-Process ProcessGovernor -ErrorAction SilentlyContinue) {
@@ -175,11 +196,18 @@ Write-Host "7. GPU driver"
 $vc = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like '*NVIDIA*' } | Select-Object -First 1
 if ($vc) { Show-INFO "$($vc.Name)  driver $($vc.DriverVersion)  ($($vc.DriverDate))" }
 
+# profile notes
+if ($P.Warnings -and $P.Warnings.Count) {
+    Write-Host ""
+    Write-Host "Notes about this CPU"
+    Write-X3DWarnings $P '  '
+}
+
 # verdict
 Write-Host ""
 Write-Host "======================================================" -ForegroundColor Cyan
 if ($issues -eq 0) {
-    Write-Host "  READY - all checks passed. Launch FullTrace, then race." -ForegroundColor Green
+    Write-Host "  READY - all applicable checks passed. Launch FullTrace, then race." -ForegroundColor Green
 } else {
     Write-Host "  NOT READY - $issues item(s) need attention above." -ForegroundColor Yellow
 }

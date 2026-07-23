@@ -25,38 +25,22 @@ try {
 $ErrorActionPreference = 'SilentlyContinue'
 $Root       = $PSScriptRoot
 $ScriptsDir = Join-Path $Root 'scripts'
-$ConfigDir  = Join-Path $env:APPDATA 'iRacingX3DTuning'
-$ConfigFile = Join-Path $ConfigDir 'config.json'
 $SiteUrl    = 'https://no6969el.github.io/iracing-x3d-tuning/'
 
-# ---------------------------------------------------------------- config + detect
-function Save-Config { param($cfg)
-    if(-not (Test-Path $ConfigDir)){ New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
-    $cfg | ConvertTo-Json | Out-File -FilePath $ConfigFile -Encoding utf8
+# ---------------------------------------------------------------- detection
+# All CPU knowledge now lives in scripts\X3D-Profiles.ps1 (every X3D SKU,
+# real CCD boundaries from the L3 cache topology, and hard validation so a
+# target core can never point at a processor that doesn't exist).
+$ProfileModule = Join-Path $ScriptsDir 'X3D-Profiles.ps1'
+if (-not (Test-Path $ProfileModule)) {
+    Add-Type -AssemblyName PresentationFramework
+    [System.Windows.MessageBox]::Show("scripts\X3D-Profiles.ps1 is missing.`n`nRe-unzip the kit so the scripts folder sits next to this file.","Missing file")
+    return
 }
-function Load-Config {
-    if(Test-Path $ConfigFile){ try { return (Get-Content $ConfigFile -Raw | ConvertFrom-Json) } catch { return $null } }
-    return $null
-}
-function Detect-System {
-    $cpuName='(CPU not detected)'; $cores=0; $gpuName='(GPU not detected)'
-    try {
-        $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($cpu) { if ($cpu.Name) { $cpuName = ([string]$cpu.Name).Trim() }; if ($cpu.NumberOfCores) { $cores = [int]$cpu.NumberOfCores } }
-    } catch { }
-    try {
-        $gpu = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1
-        if (-not $gpu) { $gpu = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1 }
-        if ($gpu -and $gpu.Name) { $gpuName = [string]$gpu.Name }
-    } catch { }
-    $topo='single'; $vcache='all'; $freqFirst=8
-    if ($cores -eq 16) { $topo='dual'; $vcache='0-15'; $freqFirst=16 }
-    if ($cores -eq 12) { $topo='dual'; $vcache='0-11'; $freqFirst=12 }
-    $profLabel = if($topo -eq 'single'){"$cores-core single-CCD"}else{"$cores-core dual-CCD"}
-    return [pscustomobject]@{ CpuName=$cpuName; GpuName=$gpuName; Cores=$cores; Topology=$topo; Profile=$profLabel; VCache=$vcache; FreqFirst=$freqFirst; Launched=@() }
-}
-$cfg = Load-Config
-if (-not $cfg) { $cfg = Detect-System; Save-Config $cfg }
+. $ProfileModule
+
+$cfg      = Get-X3DProfile
+$CanSteer = ($cfg.TopologyKnown -and $cfg.IsX3D -and $cfg.FreqFirst -ge 1 -and $cfg.FreqFirst -lt $cfg.ActualLogical)
 
 # ---------------------------------------------------------------- GUI
 Add-Type -AssemblyName PresentationFramework
@@ -141,7 +125,7 @@ Add-Type -AssemblyName PresentationFramework
                 <Grid Margin="0,15,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Button x:Name="BtnWebGuide" Content="Web Guide" Grid.Column="0" Margin="0,0,4,0" Background="#1E1E1E"/>
-                    <Button x:Name="BtnReset" Content="Reset system" Grid.Column="1" Margin="4,0,4,0" Background="#1E1E1E"/>
+                    <Button x:Name="BtnChip" Content="CPU profile" Grid.Column="1" Margin="4,0,4,0" Background="#1E1E1E" ToolTip="See the chip that was detected, or pick it yourself."/>
                     <Button x:Name="BtnExit" Content="Exit" Grid.Column="2" Margin="4,0,0,0" Background="#4A1919" BorderBrush="#FF5252"/>
                 </Grid>
             </StackPanel>
@@ -149,7 +133,7 @@ Add-Type -AssemblyName PresentationFramework
             <!-- OPTIMIZE -->
             <StackPanel x:Name="PageOptimize" Visibility="Collapsed">
                 <TextBlock Text="OPTIMIZE MY iRACING" FontSize="16" Foreground="White" FontWeight="Bold" Margin="0,0,0,8"/>
-                <TextBlock Text="First, two steps by hand in Process Lasso (free, bitsum.com):" Foreground="#FFB74D" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                <TextBlock x:Name="TxtOptHeading" Text="First, two steps by hand in Process Lasso (free, bitsum.com):" Foreground="#FFB74D" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,6"/>
                 <TextBlock x:Name="TxtOptManual" Foreground="#CCCCCC" FontSize="13" TextWrapping="Wrap" Margin="6,0,0,12"/>
                 <Button x:Name="BtnRunAuto" Content="Run the automatic fixes now  (Admin)" Background="#1E4620" BorderBrush="#4CAF50" FontWeight="Bold" Height="44" ToolTip="Runs Defender exclusions, USB/Game Bar, task log, timer + GPU-IRQ in one elevated window."/>
                 <TextBlock Style="{StaticResource Hint}" Text="Runs the scriptable fixes in one elevated window that closes itself."/>
@@ -263,6 +247,24 @@ Add-Type -AssemblyName PresentationFramework
                 <Button x:Name="BtnBackFromAdvanced" Content="Back to Main Menu" Background="#1E1E1E" Margin="0,10,0,0"/>
             </StackPanel>
 
+            <!-- CPU PROFILE / CHIP PICKER -->
+            <StackPanel x:Name="PageChip" Visibility="Collapsed">
+                <TextBlock Text="CPU PROFILE" FontSize="16" Foreground="White" FontWeight="Bold" Margin="0,0,0,4"/>
+                <TextBlock x:Name="TxtChipNow" Foreground="#4CAF50" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,2"/>
+                <TextBlock x:Name="TxtChipDetail" Foreground="#888888" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <TextBlock x:Name="TxtChipWarn" Foreground="#FFB74D" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <TextBlock Text="Wrong? Pick your chip class below - everything in a group behaves the same here." Foreground="#CCCCCC" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <Button x:Name="BtnChip1" Content="6-core single-CCD   -   5500X3D / 5600X3D / 7500X3D / 7600X3D"/>
+                <Button x:Name="BtnChip2" Content="8-core single-CCD   -   5700X3D / 5800X3D / 7700X3D / 7800X3D / 9800X3D / 9850X3D"/>
+                <Button x:Name="BtnChip3" Content="12-core dual-CCD   -   7900X3D / 9900X3D"/>
+                <Button x:Name="BtnChip4" Content="16-core dual-CCD   -   7950X3D / 9950X3D / 7945HX3D / 9955HX3D"/>
+                <Button x:Name="BtnChip5" Content="16-core dual-CCD, V-Cache on BOTH   -   9950X3D2 Dual Edition"/>
+                <Button x:Name="BtnChip6" Content="Something else / not an X3D   -   general fixes only"/>
+                <Button x:Name="BtnChipAuto" Content="Detect my CPU again (clears the saved profile)" Background="#15303A" BorderBrush="#3EA6FF" Margin="0,10,0,0"/>
+                <TextBlock Style="{StaticResource Hint}" Text="After changing this, close and reopen the dashboard so every page picks up the new core numbers."/>
+                <Button x:Name="BtnBackFromChip" Content="Back to Main Menu" Background="#1E1E1E" Margin="0,10,0,0"/>
+            </StackPanel>
+
             <!-- HELP -->
             <StackPanel x:Name="PageHelp" Visibility="Collapsed">
                 <TextBlock Text="HELP  -  what each step does" FontSize="16" Foreground="White" FontWeight="Bold" Margin="0,0,0,8"/>
@@ -294,17 +296,48 @@ try {
 
 # ---------------------------------------------------------------- logic
 $pages = @{}
-foreach($p in 'PageMain','PageOptimize','PageTroubleshoot','PageEachRace','PageAdvanced','PageHelp'){ $pages[$p]=$Window.FindName($p) }
+foreach($p in 'PageMain','PageOptimize','PageTroubleshoot','PageEachRace','PageAdvanced','PageHelp','PageChip'){ $pages[$p]=$Window.FindName($p) }
 
-$Window.FindName("TxtSysInfo").Text = "$($cfg.CpuName)  |  $($cfg.GpuName)"
-if ($cfg.Topology -eq 'single') {
-    $Window.FindName("TxtTopo").Text = "Single-CCD: all $($cfg.Cores) cores are V-Cache - no core pinning needed."
-    $Window.FindName("TxtOptManual").Text = "Your chip is single-CCD, so no CPU-Set pinning is needed.`nJust set the power plan: open Process Lasso, Main menu -> Power -> Bitsum Highest Performance (all cores unparked)."
-    $Window.FindName("TxtHelpReq").Text = "You need: Process Lasso (free, bitsum.com) - it sets the Bitsum Highest Performance power plan."
-} else {
-    $Window.FindName("TxtTopo").Text = "Sim -> V-Cache cores $($cfg.VCache)   |   Background -> cores $($cfg.FreqFirst) to $([int]$cfg.Cores*2-1)"
-    $Window.FindName("TxtOptManual").Text = "1) Open Process Lasso -> Main menu -> Power -> Bitsum Highest Performance (all cores unparked).`n2) Right-click iRacingSim64DX11.exe -> CPU Sets -> cores $($cfg.VCache).`n3) Right-click it -> ProBalance -> exclude it."
-    $Window.FindName("TxtHelpReq").Text = "You need: Process Lasso (free, bitsum.com) - it pins the sim to your V-Cache cores AND sets the Bitsum Highest Performance power plan."
+function Update-Header {
+    $sim = if ($cfg.Simulated) { "  [SIMULATED]" } else { "" }
+    $Window.FindName("TxtSysInfo").Text = "$($cfg.Model)  |  $($cfg.GpuName)$sim"
+    $Window.FindName("TxtTopo").Text    = (Get-X3DTopologySummary $cfg)
+    $Window.FindName("TxtOptManual").Text = (Get-X3DPinningAdvice $cfg).Trim()
+
+    # The "do this by hand first" heading only makes sense when there IS
+    # something to do by hand. Non-X3D chips have no Process Lasso step at all.
+    $optHead = $Window.FindName("TxtOptHeading")
+    if (-not $cfg.IsX3D) {
+        $optHead.Visibility = 'Collapsed'
+    } elseif ($cfg.Topology -eq 'single') {
+        $optHead.Visibility = 'Visible'
+        $optHead.Text = "First, one step by hand in Process Lasso (free, bitsum.com):"
+    } else {
+        $optHead.Visibility = 'Visible'
+        $optHead.Text = "First, two steps by hand in Process Lasso (free, bitsum.com):"
+    }
+
+    if (-not $cfg.IsX3D) {
+        $Window.FindName("TxtHelpReq").Text = "No 3D V-Cache detected on this CPU. The general fixes still apply; core pinning and interrupt steering are skipped. Process Lasso is optional here."
+    } elseif ($cfg.Topology -eq 'single') {
+        $Window.FindName("TxtHelpReq").Text = "You need: Process Lasso (free, bitsum.com) - it sets the Bitsum Highest Performance power plan."
+    } else {
+        $Window.FindName("TxtHelpReq").Text = "You need: Process Lasso (free, bitsum.com) - it pins the sim to your V-Cache cores AND sets the Bitsum Highest Performance power plan."
+    }
+
+    $Window.FindName("TxtChipNow").Text    = "Detected: $($cfg.Model)"
+    $Window.FindName("TxtChipDetail").Text = "$($cfg.Profile)  |  $($cfg.LogicalCores) logical CPUs  |  interrupt target CPU $($cfg.FreqFirst)  |  source: $($cfg.DetectSource)"
+    $warn = ''
+    if ($cfg.Warnings -and $cfg.Warnings.Count) { $warn = ($cfg.Warnings -join "`n`n") }
+    $Window.FindName("TxtChipWarn").Text = $warn
+    $Window.FindName("TxtChipWarn").Visibility = if ($warn) { 'Visible' } else { 'Collapsed' }
+}
+Update-Header
+
+# Interrupt steering only makes sense when we actually understand the CPU.
+if (-not $CanSteer) {
+    $b = $Window.FindName("BtnGPUIRQ")
+    if ($b) { $b.IsEnabled = $false; $b.ToolTip = "Not applicable on this CPU - topology unknown or no V-Cache." }
 }
 
 function Show-Page($name){ foreach($k in $pages.Keys){ $pages[$k].Visibility = 'Collapsed' }; $pages[$name].Visibility = 'Visible' }
@@ -316,6 +349,7 @@ function Launch-Script($FileName, [switch]$Admin) {
         return
     }
     $env:X3D_FREQ_FIRST_CORE = "$($cfg.FreqFirst)"
+    $env:X3D_SIMULATED       = $(if ($cfg.Simulated) { '1' } else { '0' })
     $argStr = "-NoExit -ExecutionPolicy Bypass -File `"$path`""
     try {
         if ($Admin) { Start-Process 'powershell.exe' -Verb RunAs -ArgumentList $argStr }
@@ -329,6 +363,8 @@ $Window.FindName("BtnTroubleshoot").Add_Click({ Show-Page 'PageTroubleshoot' })
 $Window.FindName("BtnEachRace").Add_Click({ Show-Page 'PageEachRace' })
 $Window.FindName("BtnAdvanced").Add_Click({ Show-Page 'PageAdvanced' })
 $Window.FindName("BtnHelp").Add_Click({ Show-Page 'PageHelp' })
+$Window.FindName("BtnChip").Add_Click({ Show-Page 'PageChip' })
+$Window.FindName("BtnBackFromChip").Add_Click({ Show-Page 'PageMain' })
 $Window.FindName("BtnBackFromOptimize").Add_Click({ Show-Page 'PageMain' })
 $Window.FindName("BtnBackFromTroubleshoot").Add_Click({ Show-Page 'PageMain' })
 $Window.FindName("BtnBackFromEachRace").Add_Click({ Show-Page 'PageMain' })
@@ -337,11 +373,29 @@ $Window.FindName("BtnBackFromHelp").Add_Click({ Show-Page 'PageMain' })
 $Window.FindName("BtnExit").Add_Click({ $Window.Close() })
 $Window.FindName("BtnWebGuide").Add_Click({ Start-Process $SiteUrl })
 
-$Window.FindName("BtnReset").Add_Click({
-    if(Test-Path $ConfigFile){ Remove-Item $ConfigFile -Force }
-    $script:cfg = Detect-System; Save-Config $script:cfg
-    [System.Windows.MessageBox]::Show("System re-detected:`n$($script:cfg.CpuName)`n$($script:cfg.Profile)`n`nReopen the dashboard to refresh the header.","Reset done")
-})
+function Set-ChipClass($key) {
+    Clear-X3DConfig
+    if ($key -eq 'AUTO') {
+        $script:cfg = Get-X3DProfile -NoCache
+    } else {
+        $cls = Get-X3DClasses | Where-Object { $_.Key -eq $key } | Select-Object -First 1
+        if ($cls -and $cls.Cores -ge 1) { $script:cfg = Get-X3DProfile -NoCache -Assume $cls }
+        else                            { $script:cfg = Get-X3DProfile -NoCache }
+    }
+    Export-X3DConfig $script:cfg
+    Update-Header
+    [System.Windows.MessageBox]::Show(
+        "Profile set to:`n$($script:cfg.Model)`n$($script:cfg.Profile)`n`nInterrupt target: CPU $($script:cfg.FreqFirst)`n`nClose and reopen the dashboard so every page picks up the new numbers.",
+        "CPU profile updated")
+}
+
+$Window.FindName("BtnChip1").Add_Click({ Set-ChipClass '1' })
+$Window.FindName("BtnChip2").Add_Click({ Set-ChipClass '2' })
+$Window.FindName("BtnChip3").Add_Click({ Set-ChipClass '3' })
+$Window.FindName("BtnChip4").Add_Click({ Set-ChipClass '4' })
+$Window.FindName("BtnChip5").Add_Click({ Set-ChipClass '5' })
+$Window.FindName("BtnChip6").Add_Click({ Set-ChipClass '6' })
+$Window.FindName("BtnChipAuto").Add_Click({ Set-ChipClass 'AUTO' })
 
 # tools
 $Window.FindName("BtnFullTrace").Add_Click({ Launch-Script 'FullTrace.ps1' })
@@ -364,12 +418,25 @@ $Window.FindName("BtnUndoTimer").Add_Click({ Launch-Script 'Undo-GlobalTimerReso
 
 # optimize - run the automatic fixes in one elevated window
 $Window.FindName("BtnRunAuto").Add_Click({
-    $result = [System.Windows.MessageBox]::Show(
-        "This runs the automatic fixes in one elevated window (it closes itself when done).`n`nMake sure you did the Process Lasso steps shown above first. Continue?",
-        "Run automatic fixes", [System.Windows.MessageBoxButton]::YesNo)
+    # No Process Lasso prerequisite on a non-X3D chip, so don't ask about one.
+    # The UAC prompt that follows is confirmation enough.
+    $result = 'Yes'
+    if ($cfg.IsX3D) {
+        $prereq = if ($cfg.Topology -eq 'single') {
+            "Make sure you set the Process Lasso power plan shown above first. Continue?"
+        } else {
+            "Make sure you did the Process Lasso steps shown above first. Continue?"
+        }
+        $result = [System.Windows.MessageBox]::Show(
+            "This runs the automatic fixes in one elevated window (it closes itself when done).`n`n$prereq",
+            "Run automatic fixes", [System.Windows.MessageBoxButton]::YesNo)
+    }
     if ($result -eq 'Yes') {
-        $auto = @('Add-Defender-Exclusions.ps1','Apply-Guide-Extras.ps1','Enable-DiagnosticLogs.ps1','Enable-GlobalTimerResolution.ps1','Set-GPU-IRQ-Affinity.ps1')
-        $sb = "`$env:X3D_FREQ_FIRST_CORE='$($cfg.FreqFirst)'; `$Host.UI.RawUI.WindowTitle='Applying Fixes';"
+        $auto = @('Add-Defender-Exclusions.ps1','Apply-Guide-Extras.ps1','Enable-DiagnosticLogs.ps1','Enable-GlobalTimerResolution.ps1')
+        if ($CanSteer) { $auto += 'Set-GPU-IRQ-Affinity.ps1' }
+        $simFlag = $(if ($cfg.Simulated) { '1' } else { '0' })
+        $sb = "`$env:X3D_FREQ_FIRST_CORE='$($cfg.FreqFirst)'; `$env:X3D_SIMULATED='$simFlag'; `$Host.UI.RawUI.WindowTitle='Applying Fixes';"
+        if ($cfg.Simulated) { $sb += " `$env:X3D_FORCE_PROFILE='$($env:X3D_FORCE_PROFILE)';" }
         foreach($script in $auto) {
             $pth = Join-Path $ScriptsDir $script
             if (Test-Path $pth) {

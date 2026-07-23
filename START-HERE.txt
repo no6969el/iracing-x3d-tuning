@@ -1,0 +1,75 @@
+iRacing X3D Tuning Kit  -  COMPLETE FOLDER
+============================================================
+This is the whole kit, not a patch. Nothing to merge.
+
+HOW TO INSTALL
+  1. Rename your old kit folder to something like "kit-OLD"
+     (keep it until you've confirmed this one works).
+  2. Drop this folder in its place.
+  3. Double-click Start-Tuning-Menu.bat
+
+  Do NOT copy individual files across from the old folder.
+  The scripts now share scripts\X3D-Profiles.ps1, so an old
+  copy of one script mixed in with new ones will misbehave.
+
+REQUIREMENTS
+  Windows PowerShell 5.1 - built into Windows 10 and 11.
+  PowerShell 7 is NOT required for any part of this kit.
+  (Test-UndervoltStability can optionally use PS7 for AVX-512
+  coverage, but works fine without it.)
+
+FIRST RUN
+  Your saved profile from the old kit is ignored automatically
+  (the format changed), so the first launch re-detects your CPU.
+  Check the header shows the right chip. If not:
+     Tuning-Menu > CPU profile > pick your chip class
+
+FOLDER LAYOUT  -  keep this structure intact
+  Start-Tuning-Menu.bat        <- start here
+  Apply-Baseline.bat           <- or here, for the one-shot version
+  Tuning-Menu.ps1
+  Apply-Baseline.ps1
+  scripts\                     <- all the individual tools
+      X3D-Profiles.ps1         <- shared CPU detection, don't delete
+      README.txt               <- what every script does
+  tests\                       <- dev only, safe to delete
+
+WHAT CHANGED IN THIS VERSION
+  * Every X3D AMD has shipped is now supported and offered in the
+    chip picker - including the 6-core parts (5500X3D, 5600X3D,
+    7500X3D, 7600X3D) that were previously missing.
+  * Added 7700X3D, 9850X3D, the 9950X3D2 Dual Edition (V-Cache on
+    both CCDs), and the mobile 7945HX3D / 9955HX3D.
+  * Fixed a real bug: on a 6-core chip the old code targeted CPU 8
+    and CPUs 9/10/11 for interrupt steering. With SMT disabled those
+    processors don't exist, so it wrote affinity masks pointing at
+    nothing. Targets are now validated against the CPUs Windows
+    actually reports and can never be out of range.
+  * Non-X3D CPUs are allowed: the general fixes run, and core
+    pinning / interrupt steering are skipped instead of guessed.
+  * All CPU logic now lives in one file instead of six copies that
+    disagreed with each other.
+
+  Full detail: scripts\README.txt
+
+TWO FILES I REBUILT
+  Start-Tuning-Menu.bat and Apply-Baseline.bat were not in the
+  material I was given, so I rewrote them from scratch. They are
+  plain launchers and should behave the same as yours, but if your
+  originals did anything extra, copy those two back over.
+
+TESTING BEFORE YOU RELEASE
+  You can make the whole kit behave as any supported chip:
+
+     $env:X3D_FORCE_PROFILE = '5600X3D'
+     .\Start-Tuning-Menu.bat
+
+  Anything that writes to the registry switches to DRY RUN and
+  changes nothing. Close the window to go back to normal.
+
+  tests\test-integration.ps1 sweeps all 17 chips in one pass and
+  asserts every target core is valid. Run it from PowerShell:
+
+     powershell -ExecutionPolicy Bypass -File .\tests\test-integration.ps1
+
+  It should end with "RESULT: all assertions passed".

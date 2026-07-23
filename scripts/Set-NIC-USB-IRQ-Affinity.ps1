@@ -4,24 +4,58 @@
     Same trick as the GPU fix, applied to the next CPU-0 offenders.
     LatencyMon typically shows CPU 0 carrying most DPC load while the
     sim runs there. This steers physical NIC(s) and USB host
-    controllers' interrupts onto the 2nd-4th frequency-die (CCD1)
-    cores - off CPU 0 (the sim) and off the first CCD1 core (GPU IRQ).
+    controllers' interrupts onto background cores - off CPU 0 (the sim)
+    and off the core the GPU interrupts were moved to.
+
+    The target list comes from X3D-Profiles.ps1 and is clamped to the
+    CPUs Windows actually reports, so on a 6-core chip it uses 7/8/9
+    rather than walking off the end of the processor list.
 
     MUST run as Administrator. REBOOT after. Verify with LatencyMon.
     Reversible with Undo-NIC-USB-IRQ-Affinity.ps1.
 #>
 
-# First frequency-CCD core: 16 for 9950X3D/7950X3D, 12 for 9900X3D/7900X3D.
-# The Tuning-Menu sets this automatically (env var or saved config).
-# Standalone on a 12-core with no saved config: change the final 16 below to 12.
-$FreqFirst = if ($env:X3D_FREQ_FIRST_CORE) { [int]$env:X3D_FREQ_FIRST_CORE } else {
-    $cfgPath = Join-Path $env:APPDATA 'iRacingX3DTuning\config.json'
-    $ff = 0
-    if (Test-Path $cfgPath) { try { $ff = [int](Get-Content $cfgPath -Raw | ConvertFrom-Json).FreqFirst } catch {} }
-    if ($ff -lt 1) { $ff = [int]([Environment]::ProcessorCount / 2) }   # 8-core single-CCD -> 8, never a nonexistent core
-    $ff
+# ---- resolve the target cores -----------------------------------
+$mod = Join-Path $PSScriptRoot 'X3D-Profiles.ps1'
+$Simulated = $false
+$Valid     = $true
+$TargetCores = @()
+
+if (Test-Path $mod) {
+    . $mod
+    $r = Resolve-X3DTarget
+    $FreqFirst = $r.FreqFirst
+    $Limit     = $r.Limit
+    $Simulated = $r.Simulated
+    $Valid     = $r.Valid
+    if ($r.Profile -and $r.Profile.IrqTargets -and $r.Profile.IrqTargets.Count -gt 0) {
+        $TargetCores = @($r.Profile.IrqTargets)
+    }
+} else {
+    Write-Host "  ! X3D-Profiles.ps1 not found next to this script - using a safe fallback." -ForegroundColor Yellow
+    $Limit     = [int][Environment]::ProcessorCount
+    $FreqFirst = [int]($Limit / 2)
 }
-$TargetCores = @($FreqFirst + 1, $FreqFirst + 2, $FreqFirst + 3)   # off CPU0(sim), off the GPU core, off VR
+
+# Build/clamp the list ourselves if the module did not supply one
+# (e.g. the core came from X3D_FREQ_FIRST_CORE rather than detection).
+if ($TargetCores.Count -lt 1) {
+    for ($i = $FreqFirst + 1; $i -lt $Limit -and $TargetCores.Count -lt 3; $i++) { $TargetCores += $i }
+}
+$TargetCores = @($TargetCores | Where-Object { $_ -ge 1 -and $_ -lt $Limit } | Sort-Object -Unique)
+
+if ($TargetCores.Count -lt 1) {
+    Write-Host ""
+    Write-Host "ABORTED: no usable background core on this machine ($Limit logical processors)." -ForegroundColor Red
+    Write-Host "Nothing was changed." -ForegroundColor DarkGray
+    return
+}
+if (-not $Valid) {
+    Write-Host ""
+    Write-Host "ABORTED: this CPU's topology could not be identified, so interrupt steering is disabled." -ForegroundColor Red
+    Write-Host "The rest of the kit still works. Nothing was changed." -ForegroundColor DarkGray
+    return
+}
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Host "ERROR: right-click PowerShell -> Run as Administrator, then re-run." -ForegroundColor Red; return }
@@ -47,10 +81,19 @@ foreach ($u in $usb)  { $targets += [pscustomobject]@{ Type='USB'; Name=$u.Frien
 if (-not $targets) { Write-Host "No PCI NIC or USB controllers found." -ForegroundColor Yellow; return }
 
 Write-Host ""
-Write-Host "Steering interrupts off CPU 0 -> CCD1 cores $($TargetCores -join ',')" -ForegroundColor Cyan
+if ($Simulated) {
+    Write-Host "  DRY RUN - X3D_FORCE_PROFILE is set, so nothing will be written." -ForegroundColor Magenta
+}
+Write-Host "Steering interrupts off CPU 0 -> background CPUs $($TargetCores -join ',')" -ForegroundColor Cyan
 $i = 0
 foreach ($t in $targets) {
     $core = $TargetCores[$i % $TargetCores.Count]
+    if ($Simulated) {
+        Write-Host ("  [{0}] {1}" -f $t.Type, $t.Name) -ForegroundColor Magenta
+        Write-Host ("        -> WOULD use CPU {0}" -f $core) -ForegroundColor DarkGray
+        $i++
+        continue
+    }
     try {
         Set-IrqAffinity -InstanceId $t.Id -Core $core
         Write-Host ("  [{0}] {1}" -f $t.Type, $t.Name) -ForegroundColor Green
@@ -62,5 +105,9 @@ foreach ($t in $targets) {
 }
 
 Write-Host ""
-Write-Host "Done. REBOOT, then run LatencyMon - CPU 0 DPC total should drop sharply." -ForegroundColor Yellow
-Write-Host "If a device reverts (MSI-mode), re-run this before each session." -ForegroundColor DarkGray
+if ($Simulated) {
+    Write-Host "Dry run complete - no changes were made." -ForegroundColor Magenta
+} else {
+    Write-Host "Done. REBOOT, then run LatencyMon - CPU 0 DPC total should drop sharply." -ForegroundColor Yellow
+    Write-Host "If a device reverts (MSI-mode), re-run this before each session." -ForegroundColor DarkGray
+}
