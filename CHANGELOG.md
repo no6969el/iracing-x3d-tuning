@@ -6,7 +6,130 @@ The project ships as a script kit plus a web guide at
 
 ---
 
-## v2.1.0 — Race-Quiet that actually holds (current)
+## v2.2.0 — Every X3D AMD has shipped (current)
+
+The kit recognised three chip layouts and guessed at anything else. It now knows
+all 17 X3D processors, reads real CCD boundaries from the CPU's cache topology,
+and validates every core number against the processors Windows actually reports.
+
+If you run a 12- or 16-core X3D nothing about your setup changes — the numbers you
+were given before were correct and are unchanged. If you run anything else, this is
+the release that makes the kit work for you.
+
+### Breaking
+- **All CPU logic moved into `scripts\X3D-Profiles.ps1`.** Six scripts previously
+  carried their own copy of the detection fallback and those copies had drifted
+  apart. They now dot-source one shared module. **Mixing an old copy of any of
+  those scripts with new ones produces inconsistent core numbers** — replace the
+  whole folder rather than cherry-picking files.
+- **`config.json` schema bumped to 3.** Saved profiles from earlier versions are
+  discarded and re-detected on first launch. Profiles are also rejected when the
+  logical processor count no longer matches, so a CPU swap can't leave stale core
+  numbers behind. Nothing to clear by hand.
+
+### Added
+- **6-core X3D support** — 5500X3D, 5600X3D, 7500X3D, 7600X3D. These had no entry
+  in the chip picker at all, so owners had to select the 8-core profile and got the
+  wrong core numbers.
+- **7700X3D, 9850X3D** (8-core single-CCD) and **9950X3D2 Dual Edition**.
+- **Mobile HX3D support** — 7945HX3D, 9955HX3D. Detected as 16-core dual-CCD, with
+  a warning that OEM power management can override the power plan and interrupt
+  settings and that vendor control apps may revert them.
+- **Non-X3D CPUs are allowed.** Defender exclusions, timer resolution, Game Bar /
+  USB suspend, pre-race quieting, tracing and stutter scanning all run. Core
+  pinning and interrupt steering are skipped rather than guessed at.
+- **Cache-topology detection.** `GetLogicalProcessorInformationEx` finds real CCD
+  boundaries and identifies which CCDs carry V-Cache by L3 size, so future chips
+  resolve correctly without a catalog entry. Defensive by design: overlapping
+  cache pools, asymmetric CCDs or coverage that doesn't match the reported CPU
+  count all cause it to report "unknown" and hand off to the name catalog rather
+  than act on bad data. `Preflight-Check` prints which layer answered.
+- **CPU profile page** in the dashboard, replacing the *Reset system* button. Shows
+  the detected chip, how it was identified and the core numbers in use, with a
+  six-option manual picker covering every supported layout plus re-detect.
+- **`X3D_FORCE_PROFILE`** makes the whole kit behave as any supported chip for
+  testing. Everything that writes to the registry switches to dry-run.
+- **`tests\`** — `test-integration.ps1` sweeps all 17 chips asserting every
+  interrupt target, CPU-Set range and trace split is valid and in range;
+  `test-xaml.ps1` verifies the markup and that every wired control exists.
+  Development-only, safe to delete.
+
+### Fixed
+- **Invalid interrupt targets on 6-core chips.** The old code assumed anything that
+  wasn't 12 or 16 cores had 8, steering GPU interrupts to CPU 8 and NIC/USB to CPUs
+  9–11. With SMT enabled on a 6-core those processors happen to exist, so it looked
+  fine while pointing at arbitrary cores. With SMT disabled, or cores capped in
+  msconfig, they do not exist — the same class of fault documented earlier for
+  single-CCD chips picking "16-core", which risked GPU Code 10 / no display on
+  reboot. Targets are now derived from actual topology and validated before
+  anything is written; an unusable target aborts with an explanation instead of
+  writing a bad mask.
+- **Components disagreed about the CPU.** `Preflight-Check` and `Tuning-Menu` used
+  different fallbacks — on a 6-core the menu chose CPU 8 while Preflight expected
+  CPU 6, producing a GPU-IRQ mismatch warning that wasn't real.
+- **Wrong V-Cache range on single-CCD chips.** Preflight reported an 8-core
+  single-CCD chip's V-Cache as CPUs `0-7` when all 16 logical processors share it.
+- **SMT-disabled systems mis-numbered.** The dashboard derived the highest CPU index
+  as `cores × 2 - 1`, wrong whenever SMT is off. Now uses the real logical count.
+- **Core count could be under-reported.** Detection used
+  `[Environment]::ProcessorCount`, which reflects process affinity. Now reads
+  `NumberOfLogicalProcessors` from WMI.
+- **FullTrace could drop rows.** A CPU missing from the performance counter set
+  threw during the per-core lookup. Missing counters are now skipped, not fatal.
+- **Contradictory advice on non-X3D chips.** The Optimize page said to skip the
+  Process Lasso step, then a dialog asked whether you'd done it. That dialog no
+  longer appears on non-X3D chips and the "steps by hand" heading is hidden.
+  Single-CCD chips now correctly read *one* step (the power plan) rather than two.
+- **`Create-Launchers`** no longer generates shortcuts for `X3D-Profiles.ps1` (a
+  library, not a tool) or for anything in `tests\`.
+- **`README.txt`** per-session section rewritten to describe precisely what the
+  shipped scripts do: scan *tasks* are disabled and persist across a reboot, while
+  the services and Defender recover on their own. The previous wording left it
+  ambiguous which parts self-heal.
+
+### Changed
+- **9950X3D2 guidance rewritten.** V-Cache sits on both CCDs, so there is no good
+  and bad die and no preferred CCD for the scheduler to target. Pinning still
+  helps, but because keeping the sim on one die avoids reaching across to the other
+  CCD's cache — not because one die is slower. Same CPU-Set (`0-15`), correct
+  explanation. Note this chip reports 16 cores exactly like a 9950X3D, so
+  core-count detection alone cannot separate them; it is identified by name and
+  cache size.
+- **Interrupt steering hidden when inapplicable.** On non-X3D chips, or when
+  topology can't be determined confidently, the GPU-IRQ fix is dropped from the
+  automatic run and its Advanced button is disabled with an explanation.
+- `Test-UndervoltStability.ps1` prose is chip-neutral (it referenced the 9950X3D
+  specifically). Its logic already read core count dynamically — unchanged.
+- All kit files normalised to CRLF.
+
+### Supported processors
+- **6-core single-CCD** — 5500X3D, 5600X3D, 7500X3D, 7600X3D
+- **8-core single-CCD** — 5700X3D, 5800X3D, 7700X3D, 7800X3D, 9800X3D, 9850X3D
+- **12-core dual-CCD** — 7900X3D, 9900X3D
+- **16-core dual-CCD** — 7950X3D, 9950X3D
+- **16-core dual-CCD, both cached** — 9950X3D2 Dual Edition
+- **Mobile** — 7945HX3D, 9955HX3D
+- **Non-X3D** — general fixes only
+
+### Validated
+- All 17 chips resolve to valid, in-range interrupt targets, CPU-Set ranges and
+  trace splits (141 assertions, `tests\test-integration.ps1`).
+- Every script parses clean; XAML well-formed with all 54 wired controls present.
+- Confirmed on a non-X3D laptop chip (Ryzen 7 8745HX): detected as 16 logical
+  processors with no V-Cache, general fixes only, topology-specific steps skipped.
+- Windows PowerShell 5.1 compatibility verified by inspection — no PS7-only syntax
+  or cmdlets, and the cache probe's C# is C#5-clean for the 5.1 CodeDom compiler.
+  PowerShell 7 is not required by any part of the kit.
+
+### Not changed
+FullTrace CSV column names are the same (`ccd0_cpu`, `ccd1_cpu`, `freqcore_int`,
+`freqcore_dpc`) so existing traces and spreadsheets still work. On a single-CCD chip
+those two columns represent the low and high halves of the CPU list rather than
+separate dies; the console output labels this correctly while logging.
+
+---
+
+## v2.1.0 — Race-Quiet that actually holds
 
 Field report: `wuauserv` and `UsoSvc` came back on their own roughly 10 minutes
 after `Pre-Race-Quiet` ran, so background update scans resumed mid-session.
@@ -101,6 +224,10 @@ elevated prompt or the state will look absent when it isn't.
 ### Follow-ups
 - `README.txt` still describes the per-session routine as not surviving a reboot;
   that line needs updating for the new behavior.
+  **Still open as of v2.2.0** — the v2.1.0 script rewrite is not present in the
+  repo (`Pre-Race-Quiet.ps1` and `Post-Race-Restore.ps1` are still the stop-only
+  v2.0.0 versions), so v2.2.0 documented the stop-only behavior that actually
+  ships. Re-open this once the rewritten scripts are committed.
 - Optional deadman switch under consideration: `Pre-Race-Quiet` registers a
   one-shot task to auto-run `Post-Race-Restore` at next boot, deleted on a normal
   restore, so a forgotten session self-heals.
@@ -110,7 +237,7 @@ elevated prompt or the state will look absent when it isn't.
 ## v2.0.0 — WPF GUI Dashboard
 
 The text menu was replaced with a modern dark-themed graphical dashboard
-(`Tuning-Menu.ps1`, "upgraded"). This is the current version.
+(`Tuning-Menu.ps1`, "upgraded").
 
 ### Added
 - **Real GUI.** WPF dark-theme dashboard with page-based navigation
@@ -125,7 +252,7 @@ The text menu was replaced with a modern dark-themed graphical dashboard
   hidden for single-CCD chips), then runs all automatic fixes in a single
   one-UAC elevated window.
 - **Help page + per-button tooltips**, an "Am I race-ready?" status check, and a
-  **Reset / re-detect** button.
+  **Reset / re-detect** button (replaced by the CPU profile page in v2.2.0).
 - One-click Web Guide link.
 
 ### Changed / Fixed
@@ -251,5 +378,7 @@ Before any tool existed, the core theory and measurement method were worked out.
   Historical entries below describe the older stop-only behavior.
 - **Launch reliably** via the `.bat` / shortcuts (they use `-ExecutionPolicy Bypass`),
   and `Unblock-File` the kit once after unzipping.
+- **As of v2.2.0 all CPU detection lives in `scripts\X3D-Profiles.ps1`.** Don't
+  delete it and don't mix script versions across releases — six scripts depend on it.
 - Every settings-changing script has an undo or is reversible; review before running
   on another PC.
