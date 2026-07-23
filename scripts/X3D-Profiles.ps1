@@ -10,7 +10,7 @@
     places and disagreed with itself. Resolves topology in four layers,
     most reliable first:
 
-      1. CPU name  -> catalog lookup (all 18 X3D SKUs, below)
+      1. CPU name  -> catalog lookup (all 17 X3D SKUs, below)
       2. L3 cache topology via GetLogicalProcessorInformationEx
          (finds real CCD boundaries + which CCDs carry V-Cache, so
          chips AMD hasn't shipped yet still resolve correctly)
@@ -74,7 +74,7 @@ function Get-X3DCatalog { return $script:X3DCatalog }
 
 # ----------------------------------------------------------------
 #  Classes offered by the manual "which chip do you have?" picker.
-#  Grouped rather than 18 separate entries - everything inside a
+#  Grouped rather than 17 separate entries - everything inside a
 #  group behaves identically as far as this kit is concerned.
 # ----------------------------------------------------------------
 $script:X3DClasses = @(
@@ -484,24 +484,41 @@ function Get-X3DPinningAdvice {
     param([Parameter(Mandatory)]$Profile)
 
     if (-not $Profile.IsX3D) {
-        return "No X3D V-Cache detected, so there is no cache-preferred CCD to pin to. Skip the Process Lasso CPU-Set step; the rest of the kit still applies."
+        return @"
+No 3D V-Cache on this CPU, so there is no cache CCD to pin the sim to. Skip the Process Lasso pinning step - the rest of the kit still applies in full.
+
+Optional, only if you already run Process Lasso: launch iRacing into any session so iRacingSim64DX11.exe appears in its list, then right-click it -> ProBalance -> exclude. That stops it ever being throttled. Not worth installing Process Lasso just for this.
+"@
     }
     if ($Profile.Topology -eq 'single') {
-        return "Single-CCD chip: every core shares the V-Cache, so there is nothing to pin. Just set the power plan in Process Lasso (Main menu -> Power -> Bitsum Highest Performance)."
+        return @"
+Single-CCD chip: every core has the V-Cache, so there is nothing to pin.
+
+1) Keep your normal Balanced power plan. Do NOT force an all-cores-unparked plan - that is a dual-CCD-only fix and does nothing good here.
+2) Optional, only if you already run Process Lasso: launch iRacing into any session so iRacingSim64DX11.exe appears in its list, then right-click it -> ProBalance -> exclude.
+"@
     }
     if ($Profile.VCacheScope -eq 'both') {
         return @"
 Both CCDs have V-Cache on this chip, so there is no "good" and "bad" CCD - the cores are equivalent. Pinning still helps, but for a different reason: keeping the sim on ONE CCD avoids the latency cost of reaching across to the other die's cache.
 
 1) Process Lasso -> Main menu -> Power -> Bitsum Highest Performance.
-2) Right-click iRacingSim64DX11.exe -> CPU Sets -> cores $($Profile.VCacheRange).
-3) Right-click it -> ProBalance -> exclude it.
+2) Launch iRacing and join any session (a test or AI race is fine) so iRacingSim64DX11.exe shows up in Process Lasso's list. You can quit the sim afterwards.
+3) Right-click iRacingSim64DX11.exe -> CPU Sets -> ALWAYS -> tick CPUs $($Profile.VCacheRange).
+     * "Always" is what makes it stick. Without it the setting is lost as soon as the sim closes.
+     * Use CPU Sets, NOT CPU Affinity - EasyAntiCheat reverts hard affinity within seconds.
+     * The dialog's "Cache" button is no help on this chip: both CCDs are cache, so it will select all of them. Tick $($Profile.VCacheRange) by hand.
+4) Right-click it again -> ProBalance -> exclude it.
 "@
     }
     return @"
 1) Process Lasso -> Main menu -> Power -> Bitsum Highest Performance (all cores unparked).
-2) Right-click iRacingSim64DX11.exe -> CPU Sets -> cores $($Profile.VCacheRange) (the V-Cache CCD).
-3) Right-click it -> ProBalance -> exclude it.
+2) Launch iRacing and join any session (a test or AI race is fine) so iRacingSim64DX11.exe shows up in Process Lasso's list. You can quit the sim afterwards.
+3) Right-click iRacingSim64DX11.exe -> CPU Sets -> ALWAYS -> tick CPUs $($Profile.VCacheRange) (the V-Cache CCD).
+     * "Always" is what makes it stick. Without it the setting is lost as soon as the sim closes.
+     * Use CPU Sets, NOT CPU Affinity - EasyAntiCheat reverts hard affinity within seconds.
+     * Shortcut: the CPU Sets dialog has a "Cache" button that picks the V-Cache CCD for you, so you do not have to count checkboxes.
+4) Right-click it again -> ProBalance -> exclude it.
 "@
 }
 

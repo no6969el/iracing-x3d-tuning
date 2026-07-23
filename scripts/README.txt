@@ -77,10 +77,12 @@ Set-GPU-IRQ-Affinity.ps1       Steer GPU interrupts off the sim core. Reboot.(AD
 Undo-GPU-IRQ-Affinity.ps1      Revert the above. Reboot.                     (ADMIN)
 Set-NIC-USB-IRQ-Affinity.ps1   Steer NIC + USB interrupts off CPU 0. Reboot. (ADMIN)
 Undo-NIC-USB-IRQ-Affinity.ps1  Revert the above. Reboot.                     (ADMIN)
-Pre-Race-Quiet.ps1             Before racing: quiet Windows Update/Search +
-                               (optional) Defender real-time. Needs Tamper
-                               Protection OFF for the Defender part.         (ADMIN)
-Post-Race-Restore.ps1          After racing: turn all of the above back on.  (ADMIN)
+Pre-Race-Quiet.ps1             Before racing: disable the update scan tasks,
+                               stop Windows Update/Search, and turn off
+                               Defender real-time. Needs Tamper Protection
+                               OFF for the Defender part. See PER-SESSION.    (ADMIN)
+Post-Race-Restore.ps1          After racing: re-enable the tasks and restart
+                               the services. Run this every session.         (ADMIN)
 Add-Defender-Exclusions.ps1    Exclude iRacing folders from Defender (once).  (ADMIN)
 Apply-Guide-Extras.ps1         USB Selective Suspend off + Game Mode/Bar off. (ADMIN)
 Undo-Guide-Extras.ps1          Revert the above.                             (ADMIN)
@@ -100,8 +102,25 @@ SUGGESTED FIRST-TIME ORDER
 6) iRacing in-game settings (see guide) with the sim CLOSED
 7) Preflight-Check, then FullTrace a race to verify zero time-gaps
 
-PER-SESSION
+PER-SESSION  -  READ THIS
 Before: Pre-Race-Quiet     After: Post-Race-Restore
+
+  These do two different kinds of thing, and they behave differently:
+
+    * SCHEDULED TASKS are disabled, and stay disabled until you
+      restore them. This DOES survive a reboot.
+    * SERVICES (wuauserv, UsoSvc, WSearch) are only stopped, not
+      disabled. Windows can restart them on its own, and a reboot
+      brings them back.
+    * DEFENDER real-time protection is switched off for the session.
+      Windows generally turns it back on by itself, and always after
+      a reboot. Needs Tamper Protection OFF to take effect at all.
+
+  So run Post-Race-Restore after every session. The services and
+  Defender would eventually recover without it, but the disabled scan
+  tasks will not - they stay off until something re-enables them.
+
+  Check-Quiet-Status shows which state you're in right now.
 
 TESTING ON HARDWARE YOU DON'T OWN
 ---------------------------------
