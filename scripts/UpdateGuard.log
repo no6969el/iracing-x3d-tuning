@@ -1,0 +1,24 @@
+[19:57:44] PRE  run start (PauseDays=2)
+[19:57:44] PRE  Snapshotting + disabling services...
+[19:57:45] PRE    wuauserv : was Running -> stopped + disabled
+[19:57:46] PRE    usosvc : was Running -> stopped + disabled
+[19:57:46] PRE    bits : was Running -> stopped + disabled
+[19:57:46] PRE    dosvc : was Running -> stopped + disabled
+[19:57:47] PRE    WaaSMedicSvc : stopped
+[19:57:47] PRE  Disabling update scheduled tasks...
+[19:57:47] PRE    disabled 5 task(s); 12 refused (access denied - expected on hardened builds)
+[19:57:47] PRE  Pausing feature/quality updates for 2 day(s)...
+[19:57:47] PRE    updates paused until 2026-07-24 19:57 local
+[19:57:47] PRE  State saved -> C:\PS-Scratch\iracing-x3d-tuning-MODERN v2.0.1\iracing-x3d-tuning\scripts\UpdateGuard-State.json
+[19:58:54] PRE  run start (PauseDays=2)
+[19:58:54] PRE  Snapshotting + disabling services...
+[19:58:55] PRE    wuauserv : was Running -> stopped + disabled
+[19:58:55] PRE    usosvc : was Running -> stopped + disabled
+[19:58:56] PRE    bits : was Running -> stopped + disabled
+[19:58:56] PRE    dosvc : was Running -> stopped + disabled
+[19:58:56] PRE    WaaSMedicSvc : stopped
+[19:58:56] PRE  Disabling update scheduled tasks...
+[19:58:57] PRE    disabled 2 task(s); 12 refused (access denied - expected on hardened builds)
+[19:58:57] PRE  Pausing feature/quality updates for 2 day(s)...
+[19:58:57] PRE    updates paused until 2026-07-24 19:58 local
+[19:58:57] PRE  State saved -> C:\PS-Scratch\iracing-x3d-tuning-MODERN v2.0.1\iracing-x3d-tuning\scripts\UpdateGuard-State.json

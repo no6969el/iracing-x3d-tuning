@@ -48,10 +48,19 @@ Set-GPU-IRQ-Affinity.ps1       Steer GPU interrupts to frequency CCD. Reboot.(AD
 Undo-GPU-IRQ-Affinity.ps1      Revert the above. Reboot.                     (ADMIN)
 Set-NIC-USB-IRQ-Affinity.ps1   Steer NIC + USB interrupts off CPU 0. Reboot. (ADMIN)
 Undo-NIC-USB-IRQ-Affinity.ps1  Revert the above. Reboot.                     (ADMIN)
-Pre-Race-Quiet.ps1             Before racing: quiet Windows Update/Search +
-                               (optional) Defender real-time. Needs Tamper
-                               Protection OFF for the Defender part.         (ADMIN)
-Post-Race-Restore.ps1          After racing: turn all of the above back on.  (ADMIN)
+Pre-Race-Quiet.ps1             Before racing: quiets Windows Update/Search +
+                               (optional) Defender real-time. DISABLES those
+                               services (v2.1.0) so they can't be restarted by
+                               the Update Medic mid-session - which means it
+                               HOLDS ACROSS A REBOOT until you restore.
+                               Runs itself as SYSTEM automatically; add -Verify
+                               to re-check a few minutes later that nothing
+                               reverted. Needs Tamper Protection OFF for the
+                               Defender part.                                (ADMIN)
+Post-Race-Restore.ps1          After racing: REQUIRED, not optional. Restores
+                               every service, task, and Defender setting to its
+                               exact prior state from the snapshot that
+                               Pre-Race-Quiet saved.                         (ADMIN)
 Add-Defender-Exclusions.ps1    Exclude iRacing folders from Defender (once).  (ADMIN)
 Apply-Guide-Extras.ps1         USB Selective Suspend off + Game Mode/Bar off. (ADMIN)
 Undo-Guide-Extras.ps1          Revert the above.                             (ADMIN)
@@ -70,6 +79,21 @@ SUGGESTED FIRST-TIME ORDER
 
 PER-SESSION
 Before: Pre-Race-Quiet     After: Post-Race-Restore
+
+>>> CHANGED IN v2.1.0 - READ THIS <<<
+Quieting now SURVIVES A REBOOT. Earlier versions only stopped the services, so
+Windows quietly restarted them (that was the bug: update scans came back ~10
+minutes into a session). They are now disabled outright, so nothing brings them
+back on its own - not even a reboot.
+
+That makes Post-Race-Restore mandatory. Until you run it:
+  - Windows Update stays off (no patches), and
+  - Defender definition updates ride on those same services, so signatures
+    go stale. Don't leave a rig quieted for days.
+
+Snapshot + log live in C:\ProgramData\RaceQuiet\ (not the script folder, so the
+SYSTEM run can always write them). The restore consumes the snapshot.
+Not sure what state a PC is in? Run Check-Quiet-Status.ps1 - read-only, no admin.
 
 These scripts change Windows/registry/power settings. Every one has an
 Undo or is reversible, but review before running on someone else's PC.

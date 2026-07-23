@@ -1,0 +1,57 @@
+[21:12:04] PRE  run start (PauseDays=2; ctx=Admin)
+[21:12:04] PRE  Disabling update / search services for the session...
+[21:12:04] PRE    wuauserv : was Stopped -> stopped + disabled
+[21:12:04] PRE    UsoSvc : was Stopped -> stopped + disabled
+[21:12:04] PRE    WSearch : was Stopped -> stopped + disabled
+[21:12:04] PRE    bits : was Running -> stopped + disabled
+[21:12:04] PRE    DoSvc : was Stopped -> stopped + disabled
+[21:12:04] PRE    WaaSMedicSvc : stopped
+[21:12:04] PRE  Disabling background scan / update tasks...
+[21:12:08] PRE    refused : \Microsoft\Windows\UpdateOrchestrator\Schedule Scan (protected)
+[21:12:08] PRE    refused : \Microsoft\Windows\UpdateOrchestrator\Schedule Scan Static Task (protected)
+[21:12:08] PRE    refused : \Microsoft\Windows\WaaSMedic\PerformRemediation (protected)
+[21:12:08] PRE    ** WaaSMedic\PerformRemediation refused - that's the ~10-min reverter.
+[21:12:08] PRE       Re-run with -AsSystem to disable it (and use -AsSystem on restore too).
+[21:12:08] PRE  Pausing Windows Update for 2 day(s) (backstop)...
+[21:12:08] PRE    paused until 2026-07-24 21:12 local
+[21:12:08] PRE  Disabling Defender real-time protection for the session...
+[21:12:08] PRE    Defender real-time protection: DISABLED for this session
+[21:12:08] PRE  State saved -> C:\PS-Scratch\iracing-x3d-tuning-MODERN v2.0.1\iracing-x3d-tuning\scripts\RaceQuiet-State.json
+[21:13:00] PRE  run start (PauseDays=2; ctx=Admin)
+[21:13:00] PRE  Disabling update / search services for the session...
+[21:13:00] PRE    wuauserv : was Stopped -> stopped + disabled
+[21:13:00] PRE    UsoSvc : was Stopped -> stopped + disabled
+[21:13:00] PRE    WSearch : was Stopped -> stopped + disabled
+[21:13:02] PRE    bits : was Running -> stopped + disabled
+[21:13:02] PRE    DoSvc : was Stopped -> stopped + disabled
+[21:13:02] PRE    WaaSMedicSvc : stopped
+[21:13:02] PRE  Disabling background scan / update tasks...
+[21:13:05] PRE    refused : \Microsoft\Windows\UpdateOrchestrator\Schedule Scan (protected)
+[21:13:05] PRE    refused : \Microsoft\Windows\UpdateOrchestrator\Schedule Scan Static Task (protected)
+[21:13:05] PRE    refused : \Microsoft\Windows\WaaSMedic\PerformRemediation (protected)
+[21:13:05] PRE    ** WaaSMedic\PerformRemediation refused - that's the ~10-min reverter.
+[21:13:05] PRE       Re-run with -AsSystem to disable it (and use -AsSystem on restore too).
+[21:13:05] PRE  Pausing Windows Update for 2 day(s) (backstop)...
+[21:13:05] PRE    paused until 2026-07-24 21:13 local
+[21:13:05] PRE  Disabling Defender real-time protection for the session...
+[21:13:06] PRE    Defender real-time protection: DISABLED for this session
+[21:13:06] PRE  State saved -> C:\PS-Scratch\iracing-x3d-tuning-MODERN v2.0.1\iracing-x3d-tuning\scripts\RaceQuiet-State.json
+[21:13:53] PRE  run start (PauseDays=2; ctx=Admin)
+[21:13:53] PRE  Disabling update / search services for the session...
+[21:13:53] PRE    wuauserv : was Stopped -> stopped + disabled
+[21:13:53] PRE    UsoSvc : was Stopped -> stopped + disabled
+[21:13:53] PRE    WSearch : was Stopped -> stopped + disabled
+[21:13:53] PRE    bits : was Running -> stopped + disabled
+[21:13:53] PRE    DoSvc : was Stopped -> stopped + disabled
+[21:13:53] PRE    WaaSMedicSvc : stopped
+[21:13:53] PRE  Disabling background scan / update tasks...
+[21:13:57] PRE    refused : \Microsoft\Windows\UpdateOrchestrator\Schedule Scan (protected)
+[21:13:57] PRE    refused : \Microsoft\Windows\UpdateOrchestrator\Schedule Scan Static Task (protected)
+[21:13:57] PRE    refused : \Microsoft\Windows\WaaSMedic\PerformRemediation (protected)
+[21:13:57] PRE    ** WaaSMedic\PerformRemediation refused - that's the ~10-min reverter.
+[21:13:57] PRE       Re-run with -AsSystem to disable it (and use -AsSystem on restore too).
+[21:13:57] PRE  Pausing Windows Update for 2 day(s) (backstop)...
+[21:13:57] PRE    paused until 2026-07-24 21:13 local
+[21:13:57] PRE  Disabling Defender real-time protection for the session...
+[21:13:57] PRE    Defender real-time protection: DISABLED for this session
+[21:13:57] PRE  State saved -> C:\PS-Scratch\iracing-x3d-tuning-MODERN v2.0.1\iracing-x3d-tuning\scripts\RaceQuiet-State.json
