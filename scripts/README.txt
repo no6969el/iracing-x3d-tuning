@@ -77,12 +77,13 @@ Set-GPU-IRQ-Affinity.ps1       Steer GPU interrupts off the sim core. Reboot.(AD
 Undo-GPU-IRQ-Affinity.ps1      Revert the above. Reboot.                     (ADMIN)
 Set-NIC-USB-IRQ-Affinity.ps1   Steer NIC + USB interrupts off CPU 0. Reboot. (ADMIN)
 Undo-NIC-USB-IRQ-Affinity.ps1  Revert the above. Reboot.                     (ADMIN)
-Pre-Race-Quiet.ps1             Before racing: disable the update scan tasks,
-                               stop Windows Update/Search, and turn off
-                               Defender real-time. Needs Tamper Protection
-                               OFF for the Defender part. See PER-SESSION.    (ADMIN)
-Post-Race-Restore.ps1          After racing: re-enable the tasks and restart
-                               the services. Run this every session.         (ADMIN)
+Pre-Race-Quiet.ps1             Before racing: DISABLES the update services
+                               (incl. Update Medic), clears their recovery
+                               actions, disables the scan tasks, and turns
+                               off Defender real-time. Snapshots prior state
+                               first. Self-elevates. See PER-SESSION.        (ADMIN)
+Post-Race-Restore.ps1          After racing: REQUIRED. Replays the snapshot
+                               so everything goes back exactly as it was.    (ADMIN)
 Add-Defender-Exclusions.ps1    Exclude iRacing folders from Defender (once).  (ADMIN)
 Apply-Guide-Extras.ps1         USB Selective Suspend off + Game Mode/Bar off. (ADMIN)
 Undo-Guide-Extras.ps1          Revert the above.                             (ADMIN)
@@ -105,22 +106,33 @@ SUGGESTED FIRST-TIME ORDER
 PER-SESSION  -  READ THIS
 Before: Pre-Race-Quiet     After: Post-Race-Restore
 
-  These do two different kinds of thing, and they behave differently:
+  Pre-Race-Quiet DISABLES the update services rather than just stopping
+  them. Stopping never held: a stopped service keeps its startup type,
+  so the first API call restarts it, and Windows Update Medic exists
+  specifically to repair a tampered update stack on a ~10 minute cycle.
+  Users were getting a stutter the moment it came back mid-race.
 
-    * SCHEDULED TASKS are disabled, and stay disabled until you
-      restore them. This DOES survive a reboot.
-    * SERVICES (wuauserv, UsoSvc, WSearch) are only stopped, not
-      disabled. Windows can restart them on its own, and a reboot
-      brings them back.
-    * DEFENDER real-time protection is switched off for the session.
-      Windows generally turns it back on by itself, and always after
-      a reboot. Needs Tamper Protection OFF to take effect at all.
+  Because it disables rather than stops, NOTHING SELF-HEALS ON REBOOT.
+  Post-Race-Restore is REQUIRED. Skip it and the machine has no Windows
+  Update - and no fresh Defender definitions, since those ride on the
+  same services.
 
-  So run Post-Race-Restore after every session. The services and
-  Defender would eventually recover without it, but the disabled scan
-  tasks will not - they stay off until something re-enables them.
+  Pre-Race-Quiet snapshots your real prior state to
+  C:\ProgramData\RaceQuiet\state.json first, and Post-Race-Restore
+  replays exactly that - so anything you had already turned off stays
+  off. Defender is left OFF on restore if it was already OFF.
 
-  Check-Quiet-Status shows which state you're in right now.
+  Useful switches:
+     -Verify        wait 3 min afterwards and report anything that came back
+     -KeepSearch    leave Windows Search alone (Start Menu search keeps working)
+     -SkipDefender  leave Defender real-time alone
+     -Deadman       auto-restore at next boot if you forget
+     -Force         snapshot over a stale state file from an unrestored session
+
+  Check-Quiet-Status shows which state you are in, including whether a
+  service is stopped but still set to Manual (the condition that let it
+  come back). Run it ELEVATED - the WaaSMedic tasks are invisible to a
+  normal user, so they look absent when they are not.
 
 TESTING ON HARDWARE YOU DON'T OWN
 ---------------------------------

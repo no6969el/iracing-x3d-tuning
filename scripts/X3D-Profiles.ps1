@@ -213,12 +213,24 @@ function Get-X3DCacheTopology {
 # ================================================================
 #  Basic hardware facts
 # ================================================================
+# WMI is the slowest thing in this module. The CPU cannot change while the
+# process is alive, so query it once and reuse. This used to be three separate
+# round trips for the same class.
+$script:X3DCpuCache = $null
+function Get-X3DCpuInfo {
+    if ($null -eq $script:X3DCpuCache) {
+        try   { $script:X3DCpuCache = @(Get-CimInstance Win32_Processor -ErrorAction Stop) }
+        catch { $script:X3DCpuCache = @() }
+    }
+    return $script:X3DCpuCache
+}
+
 function Get-X3DLogicalCount {
     # Win32_Processor is preferred: [Environment]::ProcessorCount can be
     # skewed by the current process's affinity mask.
     $n = 0
     try {
-        $cpus = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+        $cpus = Get-X3DCpuInfo
         foreach ($c in $cpus) { if ($c.NumberOfLogicalProcessors) { $n += [int]$c.NumberOfLogicalProcessors } }
     } catch { }
     if ($n -lt 1) { $n = [int][Environment]::ProcessorCount }
@@ -229,7 +241,7 @@ function Get-X3DLogicalCount {
 function Get-X3DPhysicalCount {
     $n = 0
     try {
-        $cpus = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+        $cpus = Get-X3DCpuInfo
         foreach ($c in $cpus) { if ($c.NumberOfCores) { $n += [int]$c.NumberOfCores } }
     } catch { }
     return $n
@@ -260,7 +272,7 @@ function Get-X3DProfile {
     $cpuName = '(CPU not detected)'
     $l3TotalMB = 0
     try {
-        $c = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $c = (Get-X3DCpuInfo) | Select-Object -First 1
         if ($c) {
             if ($c.Name) { $cpuName = ([string]$c.Name).Trim() }
             if ($c.L3CacheSize) { $l3TotalMB = [int]([int]$c.L3CacheSize / 1024) }
@@ -556,7 +568,12 @@ function Import-X3DConfig {
         if (-not $c.PSObject.Properties['FreqFirst']) { return $null }
         # Re-validate against the machine we are on right now - a saved
         # config from a previous CPU must not survive a hardware swap.
-        $live = Get-X3DLogicalCount
+        # [Environment]::ProcessorCount is instant; Get-CimInstance is a WMI
+        # round trip that used to run on EVERY launch just to confirm nothing
+        # changed. Only fall back to WMI when the cheap check disagrees, which
+        # process affinity can occasionally cause.
+        $live = [int][Environment]::ProcessorCount
+        if ($live -ne [int]$c.ActualLogical) { $live = Get-X3DLogicalCount }
         if ([int]$c.ActualLogical -ne $live) { return $null }
         if ([int]$c.FreqFirst -lt 0 -or [int]$c.FreqFirst -ge $live) { return $null }
         return $c
