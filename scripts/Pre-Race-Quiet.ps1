@@ -1,5 +1,5 @@
 <#
-    Pre-Race-Quiet.ps1                                        v3.0.0
+    Pre-Race-Quiet.ps1                                        v3.1.0
     ================================================================
     Silences the background work behind the classic periodic micro-stalls
     (Windows Update scans, Update Orchestrator, Edge updates, PushToInstall,
@@ -33,10 +33,29 @@
       .\Pre-Race-Quiet.ps1 -KeepSearch     leave Windows Search alone
       .\Pre-Race-Quiet.ps1 -SkipDefender   leave Defender real-time alone
       .\Pre-Race-Quiet.ps1 -Deadman        auto-restore at next boot if you forget
+      .\Pre-Race-Quiet.ps1 -UnlockMedic    LAST RESORT - see below
       .\Pre-Race-Quiet.ps1 -Force          throw away the saved snapshot and
                                            capture a new one (rarely wanted -
                                            see RUNNING IT TWICE below)
       .\Pre-Race-Quiet.ps1 -NoSystem       don't use the SYSTEM helper
+
+    -UnlockMedic  (last resort, opt-in, off by default)
+    ------------------------------------------------------------------
+    On some builds WaaSMedicSvc's registry key is owned by TrustedInstaller
+    and refuses to be disabled even as SYSTEM. While Medic runs it will keep
+    switching Windows Update back on, roughly every ten minutes.
+
+    -UnlockMedic takes ownership of that ONE key, grants Administrators
+    write access, disables the service, and hands ownership straight back.
+    Post-Race-Restore puts the original permissions back byte-for-byte from
+    a saved SDDL string.
+
+    Only use it if Trace-QuietReverts.ps1 has shown you that WaaSMedicSvc is
+    the thing undoing your session. It is more invasive than anything else in
+    this kit. The original security descriptor is saved to the snapshot AND
+    to a separate .sddl file next to it, so it can be restored by hand if
+    something goes wrong - the command to do that is printed if a restore
+    ever fails.
 
     RUNNING IT TWICE
     ----------------
@@ -62,7 +81,8 @@ param(
     [switch]$NoSystem,
     [switch]$Verify,
     [int]   $VerifyDelay = 180,
-    [switch]$Deadman
+    [switch]$Deadman,
+    [switch]$UnlockMedic
 )
 
 # ================================================================
@@ -108,6 +128,96 @@ function Write-Log {
     if (-not $NoHost) { Write-Host ("  " + $Msg) -ForegroundColor $Color }
 }
 
+
+# ================================================================
+#  Registry ownership helpers - only used by -UnlockMedic
+# ================================================================
+function Initialize-Privileges {
+    # Taking ownership needs SeTakeOwnershipPrivilege, and handing it back to
+    # TrustedInstaller needs SeRestorePrivilege. Admins hold both, but they
+    # are disabled in the token until explicitly enabled.
+    if ('RQPriv' -as [type]) { return $true }
+    $code = @'
+using System;
+using System.Runtime.InteropServices;
+public class RQPriv {
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool OpenProcessToken(IntPtr h, uint acc, out IntPtr tok);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool LookupPrivilegeValue(string host, string name, out long luid);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool AdjustTokenPrivileges(IntPtr tok, bool disall, ref TOKPRIV1LUID newst, int len, IntPtr prev, IntPtr rel);
+    [StructLayout(LayoutKind.Sequential, Pack=1)]
+    public struct TOKPRIV1LUID { public int Count; public long Luid; public int Attr; }
+    public static bool Enable(string priv) {
+        IntPtr tok = IntPtr.Zero;
+        if (!OpenProcessToken(System.Diagnostics.Process.GetCurrentProcess().Handle, 0x28, out tok)) return false;
+        TOKPRIV1LUID tp;
+        tp.Count = 1;
+        tp.Luid  = 0;
+        tp.Attr  = 2;   // SE_PRIVILEGE_ENABLED
+        if (!LookupPrivilegeValue(null, priv, out tp.Luid)) return false;
+        return AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+    }
+}
+'@
+    try { Add-Type -TypeDefinition $code -ErrorAction Stop } catch { return $false }
+    return $true
+}
+
+function Unlock-ServiceKey {
+    <#
+        Take ownership of a service's registry key so its Start value can be
+        written. Returns the ORIGINAL owner + SDDL so it can be handed back.
+        Returns $null if anything failed - in which case nothing was changed.
+    #>
+    param([string]$ServiceName)
+
+    $path = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $sub  = "SYSTEM\CurrentControlSet\Services\$ServiceName"
+
+    if (-not (Initialize-Privileges)) { Write-Log "could not compile the privilege helper" 'Yellow'; return $null }
+    [void][RQPriv]::Enable('SeTakeOwnershipPrivilege')
+    [void][RQPriv]::Enable('SeRestorePrivilege')
+    [void][RQPriv]::Enable('SeBackupPrivilege')
+
+    # capture BEFORE touching anything
+    $origSddl = $null; $origOwner = $null
+    try {
+        $acl = Get-Acl -Path $path -ErrorAction Stop
+        $origSddl  = $acl.Sddl
+        $origOwner = [string]$acl.Owner
+    } catch {
+        Write-Log "could not read the security descriptor on $ServiceName - not touching it" 'Yellow'
+        return $null
+    }
+    Write-Log ("original owner of {0}: {1}" -f $ServiceName, $origOwner) 'DarkGray'
+
+    # belt and braces: a copy on disk as well as in the snapshot
+    try { Set-Content -Path (Join-Path $StateDir "$ServiceName.sddl") -Value ("{0}`n{1}" -f $origOwner, $origSddl) -Encoding utf8 } catch { }
+
+    try {
+        $me  = New-Object System.Security.Principal.NTAccount('BUILTIN\Administrators')
+        $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($sub, 'ReadWriteSubTree', 'TakeOwnership')
+        $sec = $key.GetAccessControl([System.Security.AccessControl.AccessControlSections]::None)
+        $sec.SetOwner($me)
+        $key.SetAccessControl($sec)
+        $key.Close()
+
+        $key2 = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($sub, 'ReadWriteSubTree', 'ChangePermissions')
+        $sec2 = $key2.GetAccessControl()
+        $rule = New-Object System.Security.AccessControl.RegistryAccessRule($me,'FullControl','ContainerInherit','None','Allow')
+        $sec2.SetAccessRule($rule)
+        $key2.SetAccessControl($sec2)
+        $key2.Close()
+    } catch {
+        Write-Log ("could not take ownership of {0}: {1}" -f $ServiceName, $_.Exception.Message) 'Yellow'
+        return $null
+    }
+
+    return [pscustomobject]@{ Name = $ServiceName; Owner = $origOwner; Sddl = $origSddl }
+}
+
 # ---- self-elevate -------------------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -119,6 +229,7 @@ if (-not $isAdmin) {
     if ($NoSystem)     { $argList += '-NoSystem' }
     if ($Verify)       { $argList += @('-Verify','-VerifyDelay',$VerifyDelay) }
     if ($Deadman)      { $argList += '-Deadman' }
+    if ($UnlockMedic)  { $argList += '-UnlockMedic' }
     try   { Start-Process powershell.exe -Verb RunAs -ArgumentList $argList }
     catch { Write-Host "Elevation cancelled - nothing was changed." -ForegroundColor Yellow }
     return
@@ -128,7 +239,7 @@ if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -
 
 Write-Host ""
 Write-Host "================  PRE-RACE QUIET  ================" -ForegroundColor Cyan
-Write-Log "=== Pre-Race-Quiet v3.0.0 starting ===" 'Gray' -NoHost
+Write-Log "=== Pre-Race-Quiet v3.1.0 starting ===" 'Gray' -NoHost
 
 # ---- an un-restored snapshot means we are already quiet ----------
 # Don't refuse and don't re-snapshot: the machine is currently quieted, so
@@ -223,7 +334,7 @@ if (-not $SkipDefender -and (Get-Command Get-MpComputerStatus -ErrorAction Silen
 
 $snapshot = [pscustomobject]@{
     SchemaVersion = 1
-    Tool          = 'Pre-Race-Quiet v3.0.0'
+    Tool          = 'Pre-Race-Quiet v3.1.0'
     CreatedUtc    = (Get-Date).ToUniversalTime().ToString('s')
     Machine       = $env:COMPUTERNAME
     Services      = $snapServices
@@ -232,6 +343,7 @@ $snapshot = [pscustomobject]@{
     KeptSearch    = [bool]$KeepSearch
     SkippedDefender = [bool]$SkipDefender
     Deadman       = [bool]$Deadman
+    UnlockedKeys  = @()
 }
 try {
     $snapshot | ConvertTo-Json -Depth 6 | Out-File -FilePath $StateFile -Encoding utf8 -ErrorAction Stop
@@ -310,6 +422,7 @@ elseif ($failedTasks.Count -gt 0) {
 # ================================================================
 Write-Host ""
 Write-Host "3. Disabling services" -ForegroundColor White
+$script:UnlockedKeys = @()
 foreach ($s in $snapServices) {
     $name = $s.Name
     $key  = Join-Path $SvcRoot $name
@@ -334,10 +447,53 @@ foreach ($s in $snapServices) {
     try { Stop-Service -Name $name -Force -ErrorAction Stop; $stopped = $true }
     catch { if ((Get-Service -Name $name -ErrorAction SilentlyContinue).Status -eq 'Stopped') { $stopped = $true } }
 
+    # ---- last resort: the key is TrustedInstaller-owned -----------
+    if (-not $disabled -and $UnlockMedic) {
+        Write-Log ("{0}: protected - taking ownership of its registry key" -f $name) 'Yellow'
+        $unlocked = Unlock-ServiceKey -ServiceName $name
+        if ($unlocked) {
+            try {
+                Set-ItemProperty -Path $key -Name 'Start' -Value 4 -Type DWord -ErrorAction Stop
+                $disabled = $true
+                $script:UnlockedKeys += $unlocked
+                Write-Log ("{0}: DISABLED after taking ownership" -f $name) 'Green'
+            } catch {
+                Write-Log ("{0}: still refused after taking ownership - {1}" -f $name, $_.Exception.Message) 'Yellow'
+            }
+            # hand ownership straight back - don't leave it changed a moment longer
+            try {
+                $a = Get-Acl -Path $key
+                $a.SetSecurityDescriptorSddlForm($unlocked.Sddl)
+                Set-Acl -Path $key -AclObject $a -ErrorAction Stop
+                Write-Log ("{0}: original permissions restored immediately" -f $name) 'DarkGray'
+            } catch {
+                Write-Log ("{0}: could NOT hand permissions back yet - Post-Race-Restore will retry" -f $name) 'Yellow'
+            }
+        }
+        if (-not $stopped) {
+            try { Stop-Service -Name $name -Force -ErrorAction Stop; $stopped = $true } catch { }
+        }
+    }
+
     if ($disabled -and $stopped)      { Write-Log ("{0}: disabled + stopped" -f $name) 'Green' }
     elseif ($disabled)                { Write-Log ("{0}: disabled, still running - it will not come back after a reboot" -f $name) 'Yellow' }
-    elseif ($stopped)                 { Write-Log ("{0}: stopped, but could NOT disable (protected) - may return" -f $name) 'Yellow' }
+    elseif ($stopped)                 { Write-Log ("{0}: stopped, but could NOT disable (protected) - may return" -f $name) 'Yellow'
+                                        if (-not $UnlockMedic) { Write-Log ("   re-run with -UnlockMedic to force it (see the script header)" -f $name) 'Yellow' } }
     else                              { Write-Log ("{0}: could not disable or stop (protected)" -f $name) 'Yellow' }
+}
+
+# ---- record any keys we had to unlock, so the restore can verify ----
+if ($script:UnlockedKeys.Count -gt 0) {
+    try {
+        $snapshot.UnlockedKeys = @($script:UnlockedKeys)
+        $snapshot | ConvertTo-Json -Depth 6 | Out-File -FilePath $StateFile -Encoding utf8 -ErrorAction Stop
+        Write-Log ("saved original permissions for {0} key(s) to the snapshot" -f $script:UnlockedKeys.Count) 'DarkGray'
+    } catch {
+        Write-Log "COULD NOT save the original permissions to the snapshot" 'Red'
+        foreach ($u in $script:UnlockedKeys) {
+            Write-Log ("  keep this: {0} owner={1}" -f $u.Name, $u.Owner) 'Red'
+        }
+    }
 }
 
 # ================================================================

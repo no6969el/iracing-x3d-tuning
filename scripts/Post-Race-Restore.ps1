@@ -1,5 +1,5 @@
 <#
-    Post-Race-Restore.ps1                                     v3.0.0
+    Post-Race-Restore.ps1                                     v3.1.0
     ================================================================
     Puts everything Pre-Race-Quiet touched back exactly as it was.
 
@@ -54,6 +54,37 @@ function Write-Log {
     if (-not $NoHost) { Write-Host ("  " + $Msg) -ForegroundColor $Color }
 }
 
+
+function Initialize-Privileges {
+    if ('RQPriv' -as [type]) { return $true }
+    $code = @'
+using System;
+using System.Runtime.InteropServices;
+public class RQPriv {
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool OpenProcessToken(IntPtr h, uint acc, out IntPtr tok);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool LookupPrivilegeValue(string host, string name, out long luid);
+    [DllImport("advapi32.dll", SetLastError=true)]
+    static extern bool AdjustTokenPrivileges(IntPtr tok, bool disall, ref TOKPRIV1LUID newst, int len, IntPtr prev, IntPtr rel);
+    [StructLayout(LayoutKind.Sequential, Pack=1)]
+    public struct TOKPRIV1LUID { public int Count; public long Luid; public int Attr; }
+    public static bool Enable(string priv) {
+        IntPtr tok = IntPtr.Zero;
+        if (!OpenProcessToken(System.Diagnostics.Process.GetCurrentProcess().Handle, 0x28, out tok)) return false;
+        TOKPRIV1LUID tp;
+        tp.Count = 1;
+        tp.Luid  = 0;
+        tp.Attr  = 2;
+        if (!LookupPrivilegeValue(null, priv, out tp.Luid)) return false;
+        return AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+    }
+}
+'@
+    try { Add-Type -TypeDefinition $code -ErrorAction Stop } catch { return $false }
+    return $true
+}
+
 # ---- self-elevate -------------------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -67,7 +98,7 @@ if (-not $isAdmin) {
 
 Write-Host ""
 Write-Host "===============  POST-RACE RESTORE  ===============" -ForegroundColor Cyan
-Write-Log "=== Post-Race-Restore v3.0.0 starting ===" 'Gray' -NoHost
+Write-Log "=== Post-Race-Restore v3.1.0 starting ===" 'Gray' -NoHost
 
 # ---- load the snapshot -------------------------------------------
 $snap = $null
@@ -146,6 +177,72 @@ foreach ($s in $svcList) {
 
     if ($ok) { Write-Log ("{0}: startup type {1}{2}" -f $name, $mapped[[int]$target], $started) 'Green' }
     else     { Write-Log ("{0}: could NOT restore startup type (protected)" -f $name) 'Yellow' }
+}
+
+# ================================================================
+#  1b. PERMISSIONS on any key we had to unlock
+# ================================================================
+$unlocked = @()
+if ($snap -and $snap.PSObject.Properties['UnlockedKeys']) { $unlocked = @($snap.UnlockedKeys) }
+
+# also pick up any .sddl files left behind, in case the snapshot lost them
+foreach ($f in @(Get-ChildItem -Path $StateDir -Filter '*.sddl' -ErrorAction SilentlyContinue)) {
+    $svcName = [IO.Path]::GetFileNameWithoutExtension($f.Name)
+    if ($unlocked | Where-Object { $_.Name -eq $svcName }) { continue }
+    try {
+        $lines = Get-Content $f.FullName
+        if ($lines.Count -ge 2) {
+            $unlocked += [pscustomobject]@{ Name = $svcName; Owner = $lines[0]; Sddl = $lines[1] }
+        }
+    } catch { }
+}
+
+if ($unlocked.Count -gt 0) {
+    Write-Host ""
+    Write-Host "1b. Registry permissions" -ForegroundColor White
+    if (-not (Initialize-Privileges)) {
+        Write-Log "could not compile the privilege helper - permissions NOT restored" 'Red'
+    } else {
+        [void][RQPriv]::Enable('SeTakeOwnershipPrivilege')
+        [void][RQPriv]::Enable('SeRestorePrivilege')
+        [void][RQPriv]::Enable('SeBackupPrivilege')
+    }
+    foreach ($u in $unlocked) {
+        $key = Join-Path $SvcRoot $u.Name
+        $ok  = $false
+        try {
+            $a = Get-Acl -Path $key -ErrorAction Stop
+            $a.SetSecurityDescriptorSddlForm($u.Sddl)
+            Set-Acl -Path $key -AclObject $a -ErrorAction Stop
+            $ok = $true
+        } catch { }
+
+        # hand ownership back to whoever had it (usually TrustedInstaller)
+        $ownerOk = $false
+        try {
+            $sub  = "SYSTEM\CurrentControlSet\Services\" + $u.Name
+            $k    = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($sub, 'ReadWriteSubTree', 'TakeOwnership')
+            $sec  = $k.GetAccessControl([System.Security.AccessControl.AccessControlSections]::None)
+            $sec.SetOwner((New-Object System.Security.Principal.NTAccount($u.Owner)))
+            $k.SetAccessControl($sec)
+            $k.Close()
+            $ownerOk = $true
+        } catch { }
+
+        if ($ok -and $ownerOk) {
+            Write-Log ("{0}: permissions and owner ({1}) restored" -f $u.Name, $u.Owner) 'Green'
+            try { Remove-Item (Join-Path $StateDir ($u.Name + '.sddl')) -Force -ErrorAction SilentlyContinue } catch { }
+        } else {
+            Write-Log ("{0}: PERMISSIONS NOT FULLY RESTORED (acl={1} owner={2})" -f $u.Name, $ok, $ownerOk) 'Red'
+            Write-Host ""
+            Write-Host "  Restore it by hand from an elevated PowerShell:" -ForegroundColor Yellow
+            Write-Host ("    `$a = Get-Acl 'HKLM:\SYSTEM\CurrentControlSet\Services\{0}'" -f $u.Name) -ForegroundColor Gray
+            Write-Host ("    `$a.SetSecurityDescriptorSddlForm('{0}')" -f $u.Sddl) -ForegroundColor Gray
+            Write-Host ("    Set-Acl 'HKLM:\SYSTEM\CurrentControlSet\Services\{0}' `$a" -f $u.Name) -ForegroundColor Gray
+            Write-Host ("  The saved copy is also at {0}\{1}.sddl - do not delete it" -f $StateDir, $u.Name) -ForegroundColor Yellow
+            Write-Host ""
+        }
+    }
 }
 
 # ================================================================
@@ -257,7 +354,10 @@ if (-not $shouldReenable) {
 # ================================================================
 & schtasks.exe /Delete /TN 'RaceQuiet-Deadman' /F 2>&1 | Out-Null
 
-if (Test-Path $StateFile) {
+$leftover = @(Get-ChildItem -Path $StateDir -Filter '*.sddl' -ErrorAction SilentlyContinue)
+if ($leftover.Count -gt 0) {
+    Write-Log ("KEEPING the snapshot - {0} key(s) still have modified permissions" -f $leftover.Count) 'Red'
+} elseif (Test-Path $StateFile) {
     try { Remove-Item $StateFile -Force -ErrorAction Stop; Write-Log "snapshot consumed" 'DarkGray' }
     catch { Write-Log "could not delete the snapshot - delete $StateFile by hand" 'Yellow' }
 }
