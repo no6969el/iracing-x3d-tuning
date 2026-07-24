@@ -45,7 +45,7 @@ $CanSteer = ($cfg.TopologyKnown -and $cfg.IsX3D -and $cfg.FreqFirst -ge 1 -and $
 # ---------------------------------------------------------------- GUI
 Add-Type -AssemblyName PresentationFramework
 
-[xml]$XAML = @"
+$XAML = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="iRacing X3D Tuning Dashboard" Width="640" SizeToContent="Height"
@@ -111,7 +111,7 @@ Add-Type -AssemblyName PresentationFramework
             </StackPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="MainScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto">
         <Grid>
 
             <!-- MAIN -->
@@ -287,8 +287,11 @@ Add-Type -AssemblyName PresentationFramework
 "@
 
 try {
-    $Reader = New-Object System.Xml.XmlNodeReader $XAML
-    $Window = [Windows.Markup.XamlReader]::Load($Reader)
+    # Parse() reads the markup directly. The old route built an XmlDocument,
+    # walked it with an XmlNodeReader, then threw it away - two parses instead
+    # of one, and the document stayed resident for the whole session.
+    $Window = [Windows.Markup.XamlReader]::Parse($XAML)
+    $XAML   = $null      # let the markup string go; the object tree is built
 } catch {
     [System.Windows.MessageBox]::Show("The dashboard failed to load.`n`n$($_.Exception.Message)","Startup error")
     return
@@ -340,7 +343,67 @@ if (-not $CanSteer) {
     if ($b) { $b.IsEnabled = $false; $b.ToolTip = "Not applicable on this CPU - topology unknown or no V-Cache." }
 }
 
-function Show-Page($name){ foreach($k in $pages.Keys){ $pages[$k].Visibility = 'Collapsed' }; $pages[$name].Visibility = 'Visible' }
+$MainScroll = $Window.FindName('MainScroll')
+
+function Resize-ToPage {
+    <#
+        Make the window exactly as tall as the page that's showing.
+
+        Two things fight this by default:
+         * Show-Page only toggles Visibility, which doesn't make the window
+           re-measure, so it kept whatever height PageMain needed at startup.
+         * A ScrollViewer reports a tiny desired height (it can always scroll),
+           so SizeToContent="Height" never grows the window past that.
+
+        Disabling the scrollbar makes the ScrollViewer report the page's real
+        height, so SizeToContent can do its job. Only if the result is taller
+        than the screen do we clamp and put the scrollbar back.
+    #>
+    if (-not $MainScroll) { return }
+    try {
+        # Going Manual -> Height guarantees a property change, so the window
+        # re-measures even when the previous page also fitted.
+        $Window.SizeToContent = 'Manual'
+        $MainScroll.VerticalScrollBarVisibility = 'Disabled'
+        $Window.SizeToContent = 'Height'
+        $Window.UpdateLayout()
+
+        $wa  = [System.Windows.SystemParameters]::WorkArea
+        $max = [Math]::Max(320, $wa.Height - 60)
+
+        if ($Window.ActualHeight -gt $max) {
+            # genuinely taller than this screen - scroll as a last resort
+            $Window.SizeToContent = 'Manual'
+            $Window.Height = $max
+            $MainScroll.VerticalScrollBarVisibility = 'Auto'
+            $Window.UpdateLayout()
+        }
+
+        # keep it on screen after growing or shrinking
+        $top = $wa.Top + (($wa.Height - $Window.ActualHeight) / 2)
+        if ($top -lt $wa.Top) { $top = $wa.Top }
+        $Window.Top = $top
+    } catch { }
+}
+
+function Show-Page($name){
+    foreach($k in $pages.Keys){ $pages[$k].Visibility = 'Collapsed' }
+    $pages[$name].Visibility = 'Visible'
+    try { $MainScroll.ScrollToTop() } catch { }
+    Resize-ToPage
+}
+
+function Find-Expanders($parent) {
+    # Logical tree, not visual - works before the window has rendered.
+    $found = @()
+    try {
+        foreach ($child in [System.Windows.LogicalTreeHelper]::GetChildren($parent)) {
+            if ($child -is [System.Windows.Controls.Expander]) { $found += $child }
+            if ($child -is [System.Windows.DependencyObject])  { $found += (Find-Expanders $child) }
+        }
+    } catch { }
+    return $found
+}
 
 function Launch-Script($FileName, [switch]$Admin) {
     $path = Join-Path $ScriptsDir $FileName
@@ -452,10 +515,15 @@ $Window.FindName("BtnRunAuto").Add_Click({
     }
 })
 
-# Grow the window to fit the page, but never past the screen; scroll only when it must
+# Refit whenever a section is expanded or collapsed - those change page height.
 try {
-    $wa = [System.Windows.SystemParameters]::WorkArea
-    if ($wa.Height -gt 0) { $Window.MaxHeight = [Math]::Max(300, $wa.Height - 40) }
+    foreach ($ex in (Find-Expanders $Window)) {
+        $ex.Add_Expanded({  Resize-ToPage })
+        $ex.Add_Collapsed({ Resize-ToPage })
+    }
 } catch { }
+
+# Size to the first page once the window has actually rendered.
+$Window.Add_Loaded({ Resize-ToPage })
 
 $Window.ShowDialog() | Out-Null

@@ -6,7 +6,148 @@ The project ships as a script kit plus a web guide at
 
 ---
 
-## v2.2.0 — Every X3D AMD has shipped (current)
+## v3.0.0 — Race-Quiet that actually holds (current)
+
+**Major release.** Two breaking changes, both worth reading before you upgrade:
+`Post-Race-Restore` is now mandatory rather than tidy-up, and scripts can no
+longer be mixed across versions. Details under **Breaking** below.
+
+*(v2.2.1 was never published — its contents ship here.)*
+
+Field report from a user: `wuauserv` and `UsoSvc` came back on their own roughly
+10 minutes after `Pre-Race-Quiet` ran, stuttering the moment they did — mid-race.
+
+**Root cause.** The shipped script only *stopped* those services. A stopped
+service keeps its startup type, so the first API call restarts it, and Windows
+Update Medic (`WaaSMedicSvc`) exists specifically to detect a tampered-with update
+stack and repair it. Stopping was never going to hold. This is the fix v2.1.0
+described but which never reached the repo.
+
+### Breaking
+- **Quieting now survives a reboot.** Services are set to `Start=4` (Disabled),
+  not merely stopped. **`Post-Race-Restore.ps1` is now mandatory, not tidy-up** —
+  a forgotten restore leaves the machine with no Windows Update and, since
+  Defender signature updates ride `wuauserv`/BITS, stale definitions.
+
+### Added
+- **Snapshot / faithful restore.** `Pre-Race-Quiet` writes the *actual* prior
+  state — each service's `Start`, `DelayedAutostart` and recovery actions, each
+  task's prior state, whether Defender was already off — to
+  `C:\ProgramData\RaceQuiet\state.json`. `Post-Race-Restore` replays exactly
+  that rather than re-enabling blindly, so anything you had already turned off
+  stays off. Snapshot is consumed on a successful restore.
+- **Service recovery actions are cleared and restored byte-for-byte.** A service
+  with restart-on-failure configured can come back after a force-stop. The
+  `FailureActions` binary value is captured to base64, deleted, and written back
+  verbatim on restore. *(Not in the v2.1.0 design — new here.)*
+- **`WaaSMedic\PerformRemediation`** added to the disabled-task list — the task
+  that drives the ~10-minute revert.
+- **`WaaSMedicSvc`, `bits` and `DoSvc`** added to the quieted services, plus the
+  `UpdateOrchestrator` tasks `Universal Orchestrator Start`, `Report policies`
+  and `UUS Failover Task`.
+- **SYSTEM helper** for TrustedInstaller-owned tasks: anything that refuses to
+  disable as admin is retried through a temporary SYSTEM scheduled task (created,
+  run, deleted). `-NoSystem` opts out. Both scripts do this.
+- **`-Verify` / `-VerifyDelay`** (default 180s) — waits, then re-reads each
+  service's `Start` value and re-checks the tasks, reporting anything that
+  reverted. The definitive per-machine test.
+- **`-KeepSearch`** leaves Windows Search alone. Disabling `WSearch` degrades
+  Start Menu search visibly, and it is the least likely of the services to cause
+  a mid-race stall — so it is now easy to opt out of.
+- **`-Deadman`** registers a one-shot boot task that auto-restores if you forget.
+  Deleted on a normal restore.
+- **`-SkipDefender`**, **`-Force`** (re-snapshot over a stale state file), and
+  self-elevation in both scripts.
+- **Shared log** at `C:\ProgramData\RaceQuiet\RaceQuiet.log`.
+- **`tests\test-racequiet.ps1`** — verifies the snapshot round-trips (including
+  the recovery-action bytes), that a service the user had already disabled is
+  left alone, and that the generated SYSTEM helper is valid, injection-safe
+  PowerShell.
+
+### Changed / Fixed
+- **`Check-Quiet-Status.ps1` now reports startup type, not just running state.**
+  A service that is stopped but still Manual is exactly the condition that let it
+  return, and the old checker reported that as "quiet". It also flags an
+  un-restored snapshot, warns when `WaaSMedic\PerformRemediation` is still
+  enabled, and notes that the Medic tasks are invisible unless run elevated.
+- **Fixed a latent crash in the SYSTEM helper generation.** The command string was
+  built with the `-f` format operator around literal `try {` / `catch {` braces,
+  which .NET parses as malformed placeholders — it would have thrown
+  `FormatException` the first time a task refused to disable. Rebuilt using
+  concatenation, with apostrophe escaping so a task name containing a quote
+  cannot break out of the generated script.
+- State lives in ProgramData rather than the script folder, which is not reliably
+  writable by SYSTEM when the kit sits on a OneDrive-redirected Desktop.
+- A stale state file blocks a second `Pre-Race-Quiet` run unless `-Force` is
+  passed, so the original state cannot be overwritten with an already-quieted one.
+- `Post-Race-Restore` falls back to Windows defaults, loudly, when no snapshot
+  is found.
+
+### Fixed — dashboard
+- **Every page now opens at the right size.** `Show-Page` only toggled
+  `Visibility`, which never made the window re-measure, so it kept whatever
+  height the main page needed at startup and taller pages scrolled. Compounding
+  it, a `ScrollViewer` reports a tiny desired height — it can always scroll — so
+  `SizeToContent="Height"` had nothing to grow toward, and a `MaxHeight` safety
+  net would have capped `ActualHeight` so an oversized page could never even be
+  detected. The window now measures each page properly, resizes to fit, and
+  scrolls only when a page genuinely exceeds the screen. It also refits when a
+  section is expanded or collapsed, and re-centres so a tall page can't drop off
+  the bottom of the display.
+
+### Fixed — Process Lasso guidance
+- **The pinning step was missing "Always".** Both the dashboard and the web guide
+  said CPU Sets → tick cores, omitting the `Always` submenu that makes the
+  setting persist. Without it the pin is silently lost when the sim closes —
+  people followed the instructions, saw it work once, and lost the single
+  biggest fix the next day with nothing to indicate it.
+- **The dashboard never said to launch the sim first.** `iRacingSim64DX11.exe`
+  only appears in Process Lasso's list while it is running. The web guide said
+  so; the dashboard did not.
+- **Contradictory power-plan advice on single-CCD chips.** `Get-X3DPinningAdvice`
+  told single-CCD owners to set Bitsum Highest Performance while
+  `Preflight-Check`, `Apply-Baseline` and the web guide all correctly said to
+  keep Balanced.
+- Added the CPU Sets dialog's **Cache** button as a shortcut, with a note that it
+  is no help on a 9950X3D2 (both dies are cache, so it selects everything).
+
+### Changed — web guide
+- Chip picker expanded from three options to five, adding **9950X3D2** and
+  **7600X3D / 5600X3D**, with a mapping line for every other supported chip
+  including the mobile parts. Core numbers throughout follow the selection.
+- Removed a stale instruction telling 12-core owners they may need "a one-line
+  edit" in `scripts\README.txt` — that edit no longer exists, and anyone
+  following it would hunt for something that isn't there.
+- Dropped "Dual-CCD" from the title and meta description, and made the
+  single-CCD paragraph chip-neutral rather than hardcoded to 8-core.
+
+### Performance
+- **WMI removed from the startup path.** Cache validation was calling
+  `Get-CimInstance Win32_Processor` on every single launch just to confirm the
+  CPU hadn't changed — a regression introduced in v2.2.0, where the previous code
+  simply read the JSON. It now compares `[Environment]::ProcessorCount`, which is
+  instant, and only falls back to WMI if that disagrees. Same correctness, same
+  protection against a CPU swap. Measured 8.46 ms → 1.62 ms even where the WMI
+  call fails instantly; on a real machine the saving is larger.
+- **One CPU query instead of three.** `Get-X3DLogicalCount`,
+  `Get-X3DPhysicalCount` and `Get-X3DProfile` each ran their own
+  `Win32_Processor` query for identical data. Cached per process — the CPU cannot
+  change while the app is running.
+- **Single-pass XAML parse.** The markup was cast to `[xml]`, building an
+  `XmlDocument` that an `XmlNodeReader` then walked to construct the object tree —
+  two parses, with the document left resident for the whole session.
+  `XamlReader::Parse` reads it directly and the string is released after.
+
+### Known limitation
+On some builds `WaaSMedic\PerformRemediation` is TrustedInstaller-owned and can
+refuse to disable even as SYSTEM. Where that happens the service disable plus the
+cleared recovery actions generally still hold; `-Verify` is how you confirm it per
+machine. Clearing that last task would require a registry ownership change,
+deliberately not included — invasive and hard to restore cleanly.
+
+---
+
+## v2.2.0 — Every X3D AMD has shipped
 
 The kit recognised three chip layouts and guessed at anything else. It now knows
 all 17 X3D processors, reads real CCD boundaries from the CPU's cache topology,
@@ -222,15 +363,9 @@ Note: the `WaaSMedic` tasks are not visible to a **non-elevated** `Get-Scheduled
 elevated prompt or the state will look absent when it isn't.
 
 ### Follow-ups
-- `README.txt` still describes the per-session routine as not surviving a reboot;
-  that line needs updating for the new behavior.
-  **Still open as of v2.2.0** — the v2.1.0 script rewrite is not present in the
-  repo (`Pre-Race-Quiet.ps1` and `Post-Race-Restore.ps1` are still the stop-only
-  v2.0.0 versions), so v2.2.0 documented the stop-only behavior that actually
-  ships. Re-open this once the rewritten scripts are committed.
-- Optional deadman switch under consideration: `Pre-Race-Quiet` registers a
-  one-shot task to auto-run `Post-Race-Restore` at next boot, deleted on a normal
-  restore, so a forgotten session self-heals.
+- ~~`README.txt` still describes the per-session routine as not surviving a reboot.~~
+  Closed in v2.2.1, which ships the disable-not-stop behavior and documents it.
+- ~~Optional deadman switch under consideration.~~ Shipped in v2.2.1 as `-Deadman`.
 
 ---
 

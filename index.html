@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>iRacing Tuning — Dual-CCD Ryzen X3D + NVIDIA</title>
-<meta name="description" content="Zero hiccups in iRacing on dual-CCD Ryzen X3D (9950X3D/7950X3D/9900X3D/7900X3D) + NVIDIA. Six steps, measured and reversible.">
+<title>iRacing Tuning — Ryzen X3D + NVIDIA</title>
+<meta name="description" content="Zero hiccups in iRacing on any Ryzen X3D — 6-core to 16-core, single- and dual-CCD — plus NVIDIA. Six steps, measured and reversible.">
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a3240;
@@ -105,6 +105,13 @@
   .pathcard .tagline{color:var(--muted);font-size:.9rem;margin:0 0 8px}
   kbd{font-family:var(--mono);background:#000;border:1px solid var(--border);border-bottom-width:2px;
     border-radius:5px;padding:1px 6px;font-size:.85em}
+
+  /* 9950X3D2 - V-Cache on BOTH dies. Same actions, different reasoning.
+     Explicit block/inline rather than `revert` for older-browser safety. */
+  .only-dualcache{display:none !important}
+  body.chip-dualcache p.only-dualcache{display:block !important}
+  body.chip-dualcache span.only-dualcache{display:inline !important}
+  body.chip-dualcache .not-dualcache{display:none !important}
 </style>
 </head>
 <body>
@@ -125,15 +132,18 @@
     <div class="toggles">
       <div class="cpu-toggle" id="cpuToggle" role="group" aria-label="Select your CPU">
         <button data-pick="16" class="on">9950X3D / 7950X3D</button>
+        <button data-pick="16d">9950X3D2</button>
         <button data-pick="12">9900X3D / 7900X3D</button>
-        <button data-pick="8">7800X3D / 9800X3D</button>
+        <button data-pick="8">9800X3D / 7800X3D</button>
+        <button data-pick="6">7600X3D / 5600X3D</button>
       </div>
       <div class="cpu-toggle" id="dispToggle" role="group" aria-label="How do you race?">
         <button data-disp-pick="vr" class="on">🥽 VR</button>
         <button data-disp-pick="flat">🖥️ Flatscreen</button>
       </div>
     </div>
-    <div class="cpu-note">Pick your chip and how you race — the page adjusts to show exactly what applies to you. <span data-topo="single">(5800X3D owners: pick 7800X3D — same 8-core layout.)</span></div>
+    <div class="cpu-note">Pick your chip and how you race — the page adjusts to show exactly what applies to you.<br>
+      <small>Same layout, so pick the button shown: <b>5800X3D · 5700X3D · 7700X3D · 9850X3D</b> → 9800X3D&nbsp;/&nbsp;7800X3D · <b>5500X3D · 7500X3D</b> → 7600X3D&nbsp;/&nbsp;5600X3D · <b>7945HX3D · 9955HX3D</b> (laptop) → 9950X3D&nbsp;/&nbsp;7950X3D.</small></div>
 
     <div style="margin-top:22px">
       <a class="btn" href="#do-it">Start the steps ↓</a>
@@ -160,7 +170,8 @@
 <section id="idea">
   <div class="kicker">30 seconds of background</div>
   <h2>The idea</h2>
-  <p data-topo="dual">Your CPU has two halves: a <b>V-Cache die</b> (games love it) and a <b>frequency die</b>. Stutters happen when Windows lets background work — GPU interrupts, antivirus scans, update tasks — fight the sim for the V-Cache die. The fix: <b>put the sim there, move everything else off, and stop Windows from interrupting.</b> That's all six steps do.</p>
+  <p class="only-dualcache"><b>Your 9950X3D2 has V-Cache on both dies</b>, so there's no “good” and “bad” half — the cores are equivalent. Pinning still helps, but for a different reason: keeping the sim on <b>one</b> die avoids the latency cost of reaching across to the other die's cache. Everything below applies; just read “V-Cache die” as “the die you picked”.</p>
+  <p data-topo="dual" class="not-dualcache">Your CPU has two halves: a <b>V-Cache die</b> (games love it) and a <b>frequency die</b>. Stutters happen when Windows lets background work — GPU interrupts, antivirus scans, update tasks — fight the sim for the V-Cache die. The fix: <b>put the sim there, move everything else off, and stop Windows from interrupting.</b> That's all six steps do.</p>
   <p data-topo="single">Your whole CPU is one V-Cache die — nothing to pin, which makes this simpler for you. Your stutters come from Windows letting background work — GPU interrupts, antivirus scans, update tasks, a Windows 11 timer quirk — pile onto the cores the sim is using. The fix: <b>stop Windows from interrupting.</b> The steps below skip the core-pinning parts automatically for your chip.</p>
 
   <details>
@@ -170,8 +181,9 @@
         <tr><th>CPU</th><th>V-Cache die (sim goes here)</th><th>Frequency die (everything else)</th></tr>
         <tr><td>9950X3D / 7950X3D</td><td>logical cores <b>0–15</b></td><td>logical cores <b>16–31</b></td></tr>
         <tr><td>9900X3D / 7900X3D</td><td>logical cores <b>0–11</b></td><td>logical cores <b>12–23</b></td></tr>
+        <tr><td>9950X3D2 <small>(both dies cached)</small></td><td>logical cores <b>0–15</b></td><td>logical cores <b>16–31</b> <small>— also cached</small></td></tr>
       </table>
-      <p data-topo="single"><b>Your chip (7800X3D / 9800X3D / 5800X3D)</b> is a single 8-core die — all 16 threads share the V-Cache, so Rules 1 and 2 below don't apply to you (nothing to pin, no die to keep clear). Rules 3 and 4, and every automatic fix, still do.</p>
+      <p data-topo="single"><b>Your chip is a single die</b> — every core shares the V-Cache, so Rules 1 and 2 below don't apply to you (nothing to pin, no die to keep clear). Rules 3 and 4, and every automatic fix, still do.</p>
       <p data-topo="dual"><b>Rule 1 — EasyAntiCheat blocks hard CPU affinity.</b> Pinning iRacing the forceful way gets reverted seconds after launch. We use <b>CPU Sets</b> (a scheduler hint EAC can't block). The affinity mask still reading <code>0xFFFFFFFF</code> afterward is <em>normal</em>, not a failure.</p>
       <p data-topo="dual"><b>Rule 2 — All cores unparked, NOT the Balanced plan.</b> Single-CCD guides recommend Balanced; on a dual-CCD chip with VR, Balanced's core parking strands the VR compositor on a parked die and starves the GPU (measured: ~55% GPU util → 11%, unplayable). <em>Single-CCD chips are the opposite — keep Balanced.</em></p>
       <p><b>Rule 3 — The Windows 11 focus/timer trap.</b> Windows only honors a game's 1&nbsp;ms timer while it owns window focus — and the VR compositor steals focus constantly, dropping the timer to 15.6&nbsp;ms mid-race. Signature: <b>stutters that stop the moment you click the sim window.</b> Step 3 fixes it permanently.</p>
@@ -220,7 +232,8 @@
         <li><input type="checkbox" class="save" id="s2a"><span><b>Install it</b> from bitsum.com.</span></li>
         <li><input type="checkbox" class="save" id="s2b"><span><b>Power plan:</b> Main&nbsp;menu → Power → activate <b>Bitsum Highest Performance</b>. (Keeps every core awake.)</span></li>
         <li><input type="checkbox" class="save" id="s2c"><span><b>Launch iRacing and enter any race</b> (a test or AI session is fine) so <code>iRacingSim64DX11.exe</code> shows up in Process Lasso's list. Then you can exit.</span></li>
-        <li><input type="checkbox" class="save" id="s2d"><span><b>Pin the sim:</b> right-click <code>iRacingSim64DX11.exe</code> → <b>CPU Sets</b> (⚠ not CPU <em>Affinity</em>) → select cores <b data-cpu="vc">0–15</b>.</span></li>
+        <li><input type="checkbox" class="save" id="s2d"><span><b>Pin the sim:</b> right-click <code>iRacingSim64DX11.exe</code> → <b>CPU Sets</b> (⚠ not CPU <em>Affinity</em>) → <b>Always</b> → tick cores <b data-cpu="vc">0–15</b>.<br>
+          <small>⚠ <b>Don't skip “Always”</b> — it's the submenu that makes the setting persist. Without it the pin is lost the moment you close the sim, and you'd never be told.<span class="not-dualcache"> Shortcut: the dialog has a <b>Cache</b> button that ticks the V-Cache cores for you.</span><span class="only-dualcache"> On this chip <em>both</em> dies are cache, so the <b>Cache</b> button selects all 32 — tick <b>0–15</b> by hand.</span></small></span></li>
         <li><input type="checkbox" class="save" id="s2e"><span><b>Protect it:</b> right-click it again → <b>ProBalance</b> → exclude.</span></li>
       </ul>
       <details>
@@ -259,7 +272,7 @@
       </div>
     </div>
     <div class="step-body">
-      <p>In the kit folder, double-click <span class="file">Apply-Baseline.bat</span>. It confirms your CPU, shows a short advisory, then applies all five script fixes in one window with <b>one admin prompt</b>. Nothing to type.</p>
+      <p>In the kit folder, double-click <span class="file">Apply-Baseline.bat</span>. It confirms your CPU, shows a short advisory, then applies every script fix that suits your chip in one window with <b>one admin prompt</b>. Nothing to type.</p>
       <div class="two">
         <div class="pathcard">
           <h4>⚡ Apply-Baseline.bat</h4>
@@ -288,7 +301,7 @@
         <div class="inner">
           <p>Each fix is a readable <code>.ps1</code> in <span class="file">scripts\</span> (<a href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">browse them</a>, and see <span class="file">scripts\README.txt</span>). Run one with:</p>
           <p><code>powershell -ExecutionPolicy Bypass -File "path\to\script.ps1"</code></p>
-          <p>Setting-changers need an elevated PowerShell (Start → type PowerShell → right-click → Run as administrator). Or run <span class="file">Create-Launchers.ps1</span> once to get double-click shortcuts that self-elevate. 12-core chips: the launchers and menu set your core numbers automatically; only pure-manual runs need the one-line edit described in <span class="file">scripts\README.txt</span>.</p>
+          <p>Setting-changers need an elevated PowerShell (Start → type PowerShell → right-click → Run as administrator). Or run <span class="file">Create-Launchers.ps1</span> once to get double-click shortcuts that self-elevate. Core numbers are detected automatically from your CPU and checked against the processors Windows reports — there is nothing to edit, however you run the scripts.</p>
         </div>
       </details>
     </div>
@@ -493,9 +506,11 @@
   var LS = 'x3d-';
   // ---------- CPU toggle ----------
   var cpu = {
-    '16': { topo:'dual',   vc:'0–15', freq:'16–31', first:'16', nic:'17–19' },
-    '12': { topo:'dual',   vc:'0–11', freq:'12–23', first:'12', nic:'13–15' },
-    '8':  { topo:'single', vc:'all',  freq:'n/a',   first:'8',  nic:'9–11' }
+    '16':  { topo:'dual',   vc:'0–15', freq:'16–31', first:'16', nic:'17–19' },
+    '16d': { topo:'dual',   vc:'0–15', freq:'16–31', first:'16', nic:'17–19' },
+    '12':  { topo:'dual',   vc:'0–11', freq:'12–23', first:'12', nic:'13–15' },
+    '8':   { topo:'single', vc:'all',  freq:'n/a',   first:'8',  nic:'9–11' },
+    '6':   { topo:'single', vc:'all',  freq:'n/a',   first:'6',  nic:'7–9' }
   };
   var toggle = document.getElementById('cpuToggle');
   function setCpu(p){
@@ -508,6 +523,8 @@
     });
     document.body.classList.remove('topo-dual','topo-single');
     document.body.classList.add('topo-' + cpu[p].topo);
+    // 9950X3D2 has V-Cache on BOTH dies - same actions, different reasoning
+    document.body.classList.toggle('chip-dualcache', p === '16d');
     try { localStorage.setItem(LS + 'cpu', p); } catch(e){}
     if(typeof refresh === 'function') refresh();   // step count can change when rows hide
   }

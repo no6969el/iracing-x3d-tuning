@@ -1,4 +1,4 @@
-iRacing X3D Tuning Kit  -  v2.2.0
+iRacing X3D Tuning Kit  -  v3.0.0
 ============================================================
 This is the complete kit. Nothing to merge, nothing to configure.
 
@@ -52,16 +52,21 @@ FOLDER LAYOUT  -  keep this structure intact
   CHANGELOG.md                 <- full project history
 
 IMPORTANT  -  the per-session routine
-  Pre-Race-Quiet disables the Windows Update scan TASKS, stops the
-  update/search services, and turns off Defender real-time for the
-  session.
+  Pre-Race-Quiet DISABLES the Windows Update services (including Update
+  Medic), clears their auto-restart settings, disables the scan tasks,
+  and turns off Defender real-time for the session.
 
-  The stopped services and Defender come back on their own (and always
-  after a reboot). The disabled scan tasks do NOT - they stay off until
-  Post-Race-Restore re-enables them.
+  Earlier versions only stopped the services, and Windows restarted them
+  about ten minutes later - mid-race, with a stutter. Disabling is what
+  makes it hold.
 
-  So run Post-Race-Restore after every session. Check-Quiet-Status
-  shows which state you're in.
+  Because of that, NOTHING comes back on its own. Post-Race-Restore is
+  REQUIRED, not tidy-up. Until it runs this PC has no Windows Update and
+  no fresh Defender definitions.
+
+  It restores from a snapshot of your real prior state, so anything you
+  had already turned off stays off. Run Check-Quiet-Status any time to
+  see which state you are in.
 
 IF WINDOWS BLOCKS THE SCRIPTS
   The .bat launchers already use -ExecutionPolicy Bypass, so this is
@@ -69,7 +74,12 @@ IF WINDOWS BLOCKS THE SCRIPTS
   the ZIP -> Properties -> tick Unblock, THEN extract. Doing it on the
   zip handles every file at once.
 
-WHAT CHANGED IN v2.2.0
+WHAT CHANGED IN v3.0.0
+  Pre-Race-Quiet now DISABLES the update services instead of stopping
+  them. Stopping didn't hold - Windows Update Medic restarted them about
+  ten minutes later, mid-race. It also clears their auto-restart settings
+  and snapshots your real prior state so the restore is exact.
+
   Every X3D AMD has shipped is now supported, including the 6-core
   parts (5500X3D, 5600X3D, 7500X3D, 7600X3D) that had no option at all
   before, plus the 7700X3D, 9850X3D, the dual-cached 9950X3D2, and the

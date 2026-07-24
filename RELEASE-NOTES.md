@@ -1,4 +1,85 @@
-# Release Notes — v2.2.0
+# Release Notes — v3.0.0
+
+> **Major release.** Two things need your attention before upgrading — see
+> *Breaking changes* at the bottom. Everything else is a straight improvement.
+
+## Race-Quiet now actually holds
+
+A user reported `wuauserv` and `UsoSvc` switching themselves back on about ten
+minutes into a session, stuttering the moment they did.
+
+**Cause.** The script only *stopped* those services. A stopped service keeps its
+startup type, so the first API call restarts it — and Windows Update Medic
+(`WaaSMedicSvc`) exists specifically to detect a tampered-with update stack and
+repair it, on roughly that cadence.
+
+**Fix.** `Pre-Race-Quiet` now:
+
+- sets the services to **Disabled** (`Start=4`) rather than stopping them
+- disables `WaaSMedic\PerformRemediation`, the task driving the ~10-minute revert
+- clears each service's **recovery actions**, so a force-stop can't trigger an
+  auto-restart, and restores them byte-for-byte afterwards
+- adds `WaaSMedicSvc`, `bits` and `DoSvc`, plus three more `UpdateOrchestrator`
+  tasks
+- retries anything TrustedInstaller-owned through a temporary **SYSTEM** task
+- **snapshots your real prior state** to `C:\ProgramData\RaceQuiet\state.json`
+  so the restore replays exactly that — anything you had already turned off
+  stays off
+
+New switches: `-Verify` (wait, then report anything that crept back),
+`-KeepSearch` (leave Start Menu search working), `-SkipDefender`, `-Deadman`
+(auto-restore at next boot if you forget), `-Force`.
+
+`Check-Quiet-Status` now reports **startup type**, not just running state — a
+service that is stopped but still Manual is precisely the condition that let it
+return, and the old checker called that "quiet".
+
+> ⚠️ **Because this survives a reboot, `Post-Race-Restore.ps1` is now required.**
+> Until it runs, the PC has no Windows Update and no fresh Defender definitions.
+
+---
+
+## Also fixed
+
+**Every dashboard page now opens at the right size.** Some pages needed scrolling
+to see all the buttons. The window now measures each page and resizes to fit,
+scrolling only if a page genuinely exceeds your screen — and it refits when you
+expand a section.
+
+**The Process Lasso step was missing "Always".** Both the guide and the dashboard
+said CPU Sets → tick your cores, leaving out the `Always` submenu that makes it
+persist. Without it the pin was silently lost when the sim closed. If you set
+this up before, it is worth redoing — you may have been racing without it.
+
+**Single-CCD owners were told to change power plan.** The dashboard said to set
+Bitsum Highest Performance; everything else correctly says keep Balanced. Fixed.
+
+**The web guide** now offers all five chip classes (including 9950X3D2 and the
+6-core parts), and a stale instruction about editing a file that no longer exists
+has been removed.
+
+## Faster startup
+
+Cache validation was making a WMI call on every launch — a regression in v2.2.0,
+where the previous code just read a JSON file. That is gone, three duplicate CPU
+queries are now one, and the XAML is parsed once instead of twice. The app should
+open noticeably quicker than v2.2.0.
+
+## Breaking changes
+
+**1. `Post-Race-Restore.ps1` is now required.** Quieting disables services rather
+than stopping them, so nothing self-heals on reboot. Skip the restore and the PC
+has no Windows Update and no fresh Defender definitions until you run it.
+
+**2. Do not mix files across versions.** Six scripts share
+`scripts\X3D-Profiles.ps1`. Replace the whole folder — a partial upgrade produces
+wrong core numbers silently.
+
+---
+
+## If you are coming from v2.1.0 or earlier — full AMD X3D lineup support
+*(this shipped in v2.2.0)*
+
 
 **Full AMD X3D lineup support**
 
