@@ -82,10 +82,20 @@
   .step-body{margin-top:10px}
   .step-body > :first-child{margin-top:0}
   .mini{list-style:none;padding:0;margin:8px 0}
-  .mini li{display:flex;gap:10px;align-items:flex-start;margin:9px 0}
+  /* Only checklist items need flex. A plain <li><b>Label</b> text <code>x</code></li>
+     was making every inline child its own flex column - one word per line on a
+     phone. :has() keeps the checkbox layout; anything else flows as normal text. */
+  .mini li{display:block;margin:9px 0}
+  .mini li:has(> input){display:flex;gap:10px;align-items:flex-start}
   .mini input{width:17px;height:17px;margin-top:4px;flex:0 0 auto;accent-color:var(--accent2);cursor:pointer}
   .file{font-family:var(--mono);background:var(--panel2);border:1px solid var(--border);
     border-radius:6px;padding:2px 8px;font-size:.86em;white-space:nowrap}
+  /* A path or setting name that can't break will push everything around it into
+     a sliver of the screen. Below tablet width, let them wrap. */
+  @media(max-width:760px){
+    .file{white-space:normal}
+    code,.file{overflow-wrap:anywhere;word-break:break-word}
+  }
 
   /* details / depth */
   details{background:var(--panel2);border:1px solid var(--border);border-radius:9px;
@@ -100,6 +110,19 @@
 
   .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media(max-width:640px){.two{grid-template-columns:1fr}}
+
+  /* Three columns on a phone gives ~100px each, which wraps to one word per
+     line. Stack each row into a card instead; the header row is redundant once
+     stacked because the order reads File / Setting / Reason on its own. */
+  @media(max-width:760px){
+    table{display:block;margin:14px 0}
+    table tr:first-child{display:none}
+    tr{display:block;border:1px solid var(--border);border-radius:9px;
+       margin:0 0 12px;overflow:hidden;background:var(--panel2)}
+    td{display:block;border:0;border-bottom:1px solid var(--border);padding:9px 13px}
+    tr td:last-child{border-bottom:0;color:var(--muted);font-size:.92em}
+    tr td:first-child{background:rgba(255,255,255,.03);font-size:.9em}
+  }
   .pathcard{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
   .pathcard h4{margin:0 0 6px;font-size:1.02rem}
   .pathcard .tagline{color:var(--muted);font-size:.9rem;margin:0 0 8px}
