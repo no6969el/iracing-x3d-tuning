@@ -1,7 +1,18 @@
 # Release Notes — v3.0.0
 
-> **Major release.** Two things need your attention before upgrading — see
-> *Breaking changes* at the bottom. Everything else is a straight improvement.
+## Read this first — two breaking changes
+
+**1. `Post-Race-Restore.ps1` is now required.** Quieting disables services rather
+than stopping them, so nothing self-heals on reboot. Skip the restore and the PC
+has no Windows Update and no fresh Defender definitions until you run it.
+
+**2. Do not mix files across versions.** Six scripts share
+`scripts\X3D-Profiles.ps1`. Replace the whole folder — a partial upgrade produces
+wrong core numbers silently.
+
+Everything else in this release is a straight improvement.
+
+---
 
 ## Race-Quiet now actually holds
 
@@ -64,16 +75,6 @@ Cache validation was making a WMI call on every launch — a regression in v2.2.
 where the previous code just read a JSON file. That is gone, three duplicate CPU
 queries are now one, and the XAML is parsed once instead of twice. The app should
 open noticeably quicker than v2.2.0.
-
-## Breaking changes
-
-**1. `Post-Race-Restore.ps1` is now required.** Quieting disables services rather
-than stopping them, so nothing self-heals on reboot. Skip the restore and the PC
-has no Windows Update and no fresh Defender definitions until you run it.
-
-**2. Do not mix files across versions.** Six scripts share
-`scripts\X3D-Profiles.ps1`. Replace the whole folder — a partial upgrade produces
-wrong core numbers silently.
 
 ---
 
