@@ -369,11 +369,21 @@
           <p data-disp="vr">🥽 <b>Your renderer file</b> depends on your headset runtime: <code>rendererDX11OpenXR.ini</code> for most modern headsets, <code>rendererDX11Oculus.ini</code> for the Oculus/Meta runtime, <code>rendererDX11OpenVR.ini</code> for SteamVR. <b>Not sure? Sort the folder by date modified after a VR session — the one iRacing just touched is yours.</b></p>
           <table>
             <tr><th>File</th><th>Set</th><th>Why</th></tr>
-            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(or your runtime's — see above)</span></span></td><td><code>LoadTexturesWhenDriving=0</code></td><td>Preload textures instead of streaming off disk mid-lap</td></tr>
-            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(same file)</span></span></td><td><code>CacheSwap3HighResCars=0</code></td><td>No mid-race texture swapping</td></tr>
+            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(or your runtime's — see above)</span></span></td><td><code>LoadTexturesWhenDriving=0</code></td><td>Preload textures instead of streaming off disk mid-lap <b>⚠ breaks Trading Paints — see the note below</b></td></tr>
+            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(same file)</span></span></td><td><code>CacheSwap3HighResCars=0</code></td><td>No mid-race texture swapping <b>⚠ same</b></td></tr>
             <tr><td><code>app.ini</code></td><td><code>spoolingEnabled=0</code></td><td>Stops continuous replay-to-disk writes</td></tr>
             <tr><td>Graphics options <span class="muted">(in-sim)</span></td><td><code>CrowdDetail=0</code></td><td>Fewer draw calls, near-zero visual impact</td></tr>
           </table>
+          <div class="callout warn">
+            <p><b>⚠ Use Trading Paints? Read this before setting those first two.</b></p>
+            <p>Trading Paints doesn't pre-load anything. It fetches each opponent's livery <i>while you're in the session</i> and asks iRacing to reload that car's texture. Those two settings tell iRacing not to load textures while you're driving — so any paint that arrives after you roll out never gets applied, and that car stays white for the whole session.</p>
+            <p>You get to pick one:</p>
+            <ul class="mini">
+              <li><b>Custom liveries matter more</b> — set <code>LoadTexturesWhenDriving=1</code> and <code>CacheSwap3HighResCars=1</code>. You give back a little of the mid-lap streaming benefit. Everything else in this guide still applies, and it's a small part of the total gain.</li>
+              <li><b>Smoothness matters more</b> — leave them at <code>0</code> and accept white cars, or race with Trading Paints Downloader closed so you're not waiting on downloads at all.</li>
+            </ul>
+            <p class="muted">Trading Paints documents this themselves: if cars stay white and never reload, <code>LoadTexturesWhenDriving</code> is the setting they tell you to change. It's a real trade-off, not a bug in either tool.</p>
+          </div>
         </div>
       </details>
       <details>
@@ -427,6 +437,19 @@
     <summary>A stutter every few minutes, like clockwork</summary>
     <div class="inner">
       <p>Scheduled-task cadence (Windows Update scans fire every ~5–7 min). Run <b>FullTrace</b> during a race, then <b>Scan-Stutter-Events</b> — it finds each stall in your trace and lists which task fired at that moment. The Each-Race routine silences the usual offenders.</p>
+    </div>
+  </details>
+  <details>
+    <summary>Lots of plain white cars since I followed this guide</summary>
+    <div class="inner">
+      <p>Step 6 is the cause, specifically <code>LoadTexturesWhenDriving=0</code> and <code>CacheSwap3HighResCars=0</code>.</p>
+      <p>Trading Paints downloads each opponent's livery <i>during</i> the session and asks iRacing to reload that car. Those settings stop iRacing loading textures while you drive, so anything that arrives late stays white — which is why you see <i>more</i> white cars rather than all of them. Paints that landed before the session finished loading are fine.</p>
+      <p><b>Fix:</b> close the sim completely, then in <span class="file">Documents\iRacing</span> set both back to <code>1</code>:</p>
+      <p><code>LoadTexturesWhenDriving=1</code><br><code>CacheSwap3HighResCars=1</code></p>
+      <p data-disp="vr">🥽 In VR that's your runtime's renderer file — <code>rendererDX11OpenXR.ini</code>, <code>rendererDX11Oculus.ini</code> or <code>rendererDX11OpenVR.ini</code>. Sort by date modified after a session; the one iRacing just touched is yours.</p>
+      <p data-disp="flat">The file is <code>rendererDX11.ini</code>.</p>
+      <p>iRacing rewrites these on exit, so it must be closed while you edit.</p>
+      <p class="muted">Nothing in the script kit affects Trading Paints — the pre-race quieting doesn't touch it, and Defender exclusions only ever add permissions. If white cars persist with both settings at <code>1</code>, it's a Trading Paints issue rather than anything here: check the Downloader is actually running, and that your firewall and antivirus allow it.</p>
     </div>
   </details>
   <details>

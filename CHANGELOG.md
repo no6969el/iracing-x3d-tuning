@@ -6,6 +6,36 @@ The project ships as a script kit plus a web guide at
 
 ---
 
+## Guide update — Trading Paints conflict documented
+*(documentation only — no script changes, no new release)*
+
+A user reported far more plain white cars than usual. Traced to Step 6 of the
+guide, not to anything in the script kit.
+
+`LoadTexturesWhenDriving=0` and `CacheSwap3HighResCars=0` stop iRacing loading
+textures while you're driving. Trading Paints works the opposite way: it fetches
+each opponent's livery *during* the session and asks iRacing to reload that car.
+So any paint arriving after you roll out is never applied and that car stays
+white for the session — which is why it shows up as *more* white cars rather than
+all of them. Paints that landed before the session finished loading are fine.
+
+Trading Paints documents `LoadTexturesWhenDriving` as the setting to change when
+cars stay white, so this is a genuine trade-off between the two tools rather than
+a fault in either.
+
+- Both table rows in Step 6 now carry a warning marker.
+- A trade-off callout after the table spells out the choice: liveries
+  (set both to `1`) or minimum mid-lap streaming (leave at `0`).
+- New troubleshooting entry, "Lots of plain white cars since I followed this
+  guide", with the fix and the correct renderer filename for VR or flatscreen.
+- It also states plainly that the script kit doesn't affect Trading Paints —
+  the pre-race quieting doesn't touch it and Defender exclusions only add
+  permissions — so nobody wastes time reinstalling the kit over this.
+
+Only `index.html` changed.
+
+---
+
 ## v3.1.0 — Name the culprit, and force it if you must (current)
 
 v3.0.0 disabled the update services properly, which holds on most machines. On
