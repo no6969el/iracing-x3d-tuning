@@ -24,9 +24,11 @@ Your chip is detected on first launch. If it gets it wrong, **CPU profile** in t
 
 ---
 
-**In this repo** (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it): `Apply-Baseline.bat` — one-shot optimizer · `Start-Tuning-Menu.bat` — guided menu with undo for everything · `scripts/` — the individual tools ([inventory](scripts/README.txt)) · [changelog](CHANGELOG.md).
+**In this repo** (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it): `Apply-Baseline.bat` — one-shot optimizer · `Start-Tuning-Menu.bat` — guided menu with undo for everything · `scripts/` — the individual tools ([inventory](scripts/README.txt)) · `Validate-Repo.ps1` / `Validate-Repo.bat` — local reference checker · [changelog](CHANGELOG.md).
 
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
+
+To verify this repo's local references and package files, run `Validate-Repo.ps1` or double-click `Validate-Repo.bat` from the kit folder.
 
 **Upgrading from v2.2.0 or earlier?** Replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
 

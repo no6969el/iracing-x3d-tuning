@@ -6,6 +6,15 @@ The project ships as a script kit plus a web guide at
 
 ---
 
+## Unreleased — repository maintenance
+
+- Added `Validate-Repo.ps1` and `Validate-Repo.bat` to verify local docs, scripts, and package references from the kit folder.
+- This is a repo validation utility for maintainers, not a runtime change for end users.
+
+---
+
+---
+
 ## Guide update — Trading Paints conflict documented
 *(documentation only — no script changes, no new release)*
 
