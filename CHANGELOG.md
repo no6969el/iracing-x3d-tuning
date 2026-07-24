@@ -6,7 +6,65 @@ The project ships as a script kit plus a web guide at
 
 ---
 
-## v3.0.0 — Race-Quiet that actually holds (current)
+## v3.1.0 — Name the culprit, and force it if you must (current)
+
+v3.0.0 disabled the update services properly, which holds on most machines. On
+some it didn't: users reported everything switching back on about ten minutes in,
+exactly as before. This release adds the tooling to find out *why* on a given
+machine, and an optional way through when the answer is Windows Update Medic.
+
+### Added
+- **`scripts\Trace-QuietReverts.ps1`** — read-only forensics answering "something
+  turned the quiet back on, what was it?" `-Verify` told you *that* something
+  reverted; this tells you *who*. It reads the kit's own log (filtered to
+  operations it was refused), Service Control Manager **event 7040** — the
+  definitive record of a service's start type being changed — the WaaSMedic
+  operational log, and the Task Scheduler log, then lays them out as a timeline
+  against the current state. Ends with a verdict pointing at one of four causes:
+  Medic survived, Medic ran anyway, an explicit change from something else
+  (Group Policy or MDM, which will win regardless), or a reboot with logging off.
+  **Run it elevated** — the WaaSMedic tasks are invisible to a normal user and
+  will look absent when they are not.
+- **`-UnlockMedic`** on `Pre-Race-Quiet` (opt-in, off by default). On some builds
+  `WaaSMedicSvc`'s registry key is owned by TrustedInstaller and refuses to be
+  disabled even as SYSTEM — so Medic keeps repairing the update stack mid-race.
+  This takes ownership of that one key, disables the service, verifies the write
+  actually took, and hands ownership straight back within the same run. The
+  original security descriptor is captured *before* anything changes and saved
+  both to the snapshot and to a separate `.sddl` file.
+- **`Post-Race-Restore` restores registry permissions**, verifies both the ACL
+  and the owner, falls back to the `.sddl` file if the snapshot is gone, and
+  **refuses to delete the snapshot** while any key remains unrestored — a
+  half-finished restore cannot be silently forgotten. If it can't finish it
+  prints the exact commands to fix it by hand, with your own descriptor filled in.
+- **`scripts-medic-unlock\`** — an optional replacement pair with the unlock on
+  by default, for handing to someone who has already confirmed Medic is their
+  problem and shouldn't have to remember a switch. Identical to the standard
+  scripts otherwise; `-NoUnlock` reverts to standard behaviour. Its README leads
+  with "you probably don't need this" and tells the reader to run
+  `Trace-QuietReverts` first.
+
+### Validated
+Confirmed on the machine that reported the problem. It was the TrustedInstaller
+case: `WaaSMedicSvc`'s registry key refused to be disabled even as SYSTEM, so
+Windows Update Medic kept repairing the update stack roughly every ten minutes,
+mid-session. `Trace-QuietReverts` identified it, the unlock cleared it, and the
+user reports the stutter is gone.
+
+That also exercises the ownership round trip end to end on a real machine —
+capture, take ownership, disable, verify, hand back — which had previously only
+been verified by inspection.
+
+### Notes
+The unlock is deliberately **not** the default in the main scripts. Most machines
+hold fine without it, and a kit that routinely reassigns ownership of system
+registry keys is a different proposition from one that flips documented settings.
+Keeping it opt-in, behind a diagnostic that proves it is necessary, is what keeps
+it defensible.
+
+---
+
+## v3.0.0 — Race-Quiet that actually holds
 
 **Major release.** Two breaking changes, both worth reading before you upgrade:
 `Post-Race-Restore` is now mandatory rather than tidy-up, and scripts can no

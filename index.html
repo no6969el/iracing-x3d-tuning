@@ -430,6 +430,20 @@
     </div>
   </details>
   <details>
+    <summary>Windows Update turns itself back on mid-race</summary>
+    <div class="inner">
+      <p>You ran the Each-Race routine, and part way through a session the update services come back — usually about ten minutes in, with a stutter as they do. Stopping a service isn't enough on its own: <b>Windows Update Medic</b> exists specifically to detect a tampered update stack and repair it.</p>
+      <p>Find out what did it. From an <b>elevated</b> PowerShell:</p>
+      <p><code>scripts\Trace-QuietReverts.ps1</code></p>
+      <p>It reads the Windows event logs that record a service being re-enabled — including Service Control Manager event 7040, the definitive record — and lays them out as a timeline. Run it elevated or the Medic tasks are invisible and will look absent when they aren't.</p>
+      <p>Two possible answers:</p>
+      <ul class="mini">
+        <li><b>Windows Update Medic, protected.</b> On some builds its registry key is owned by TrustedInstaller and refuses to be disabled even as SYSTEM. There's an optional replacement pair in <span class="file">scripts-medic-unlock\</span> that takes ownership of that one key, disables it, and hands ownership straight back. Read its README first — it's more invasive than anything else in the kit, and most people never need it.</li>
+        <li><b>Group Policy or an MDM/Intune profile.</b> Common on a work or managed machine. Nothing here will help; those settings get re-applied regardless. Check with <code>gpresult /h gp.html</code>.</li>
+      </ul>
+    </div>
+  </details>
+  <details>
     <summary>Random hitches, no pattern</summary>
     <div class="inner">
       <p>Usually a driver's DPC latency. Run <a href="https://www.resplendence.com/latencymon">LatencyMon</a> (free) while racing — it names the driver behind the spike. <code>nvlddmkm.sys</code> on CPU 0 means the GPU-interrupt fix reverted (an MSI-mode quirk) — re-run it from the menu and reboot. Also close RTSS/Afterburner while diagnosing.</p>

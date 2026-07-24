@@ -1,4 +1,37 @@
-# Release Notes — v3.0.0
+# Release Notes — v3.1.0
+
+## What's new in v3.1.0
+
+v3.0.0 disabled the Windows Update services properly instead of just stopping
+them, which holds on most machines. On some it didn't — everything switched back
+on about ten minutes in, exactly as before. Two additions for those machines:
+
+**A tool that names the culprit.** `scripts\Trace-QuietReverts.ps1` reads the
+Windows event logs that record a service being re-enabled — including Service
+Control Manager event 7040, the definitive record — and lays them out as a
+timeline next to what the kit did. Instead of "it came back," you get *what*
+brought it back and *when*. **Run it elevated**, or the Windows Update Medic
+tasks are invisible and will look absent when they aren't.
+
+**A way through when the answer is Medic.** On some builds `WaaSMedicSvc`'s
+registry key is owned by TrustedInstaller and refuses to be disabled even as
+SYSTEM — so Windows Update Medic keeps repairing the update stack mid-race.
+`Pre-Race-Quiet -UnlockMedic` takes ownership of that one key, disables the
+service, verifies it took, and hands ownership straight back in the same run.
+The original permissions are saved before anything changes, and
+`Post-Race-Restore` verifies they're back afterwards.
+
+There's also an optional `scripts-medic-unlock\` pair with that behaviour on by
+default, for handing to someone who's already confirmed it's their problem.
+
+**Only use it if you've confirmed you need it.** Run `Trace-QuietReverts` first —
+if it points at Group Policy or an MDM profile rather than Medic, the unlock
+won't help, because a managed machine re-applies those settings regardless.
+
+This was confirmed on the machine that originally reported the problem: Medic was
+the cause, the unlock cleared it, and the mid-race stutter is gone.
+
+---
 
 ## Read this first — two breaking changes
 

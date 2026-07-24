@@ -1,4 +1,4 @@
-iRacing X3D Tuning Kit  -  v3.0.0
+iRacing X3D Tuning Kit  -  v3.1.0
 ============================================================
 This is the complete kit. Nothing to merge, nothing to configure.
 
@@ -67,6 +67,22 @@ IMPORTANT  -  the per-session routine
   It restores from a snapshot of your real prior state, so anything you
   had already turned off stays off. Run Check-Quiet-Status any time to
   see which state you are in.
+
+IF THE QUIETING DOESN'T HOLD
+  If Windows Update switches itself back on part way through a
+  session, run this from an ELEVATED PowerShell:
+
+     scripts\Trace-QuietReverts.ps1
+
+  It reads the Windows event logs and tells you what re-enabled it,
+  rather than leaving you to guess. If it names Windows Update Medic
+  as protected, there is an optional replacement pair in
+  scripts-medic-unlock\ that forces the issue - read its README
+  first, it is more invasive than the rest of the kit.
+
+  If it points at Group Policy or a work/MDM profile instead, none
+  of this will help. A managed machine re-applies those settings no
+  matter what.
 
 IF WINDOWS BLOCKS THE SCRIPTS
   The .bat launchers already use -ExecutionPolicy Bypass, so this is

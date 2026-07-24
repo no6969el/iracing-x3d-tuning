@@ -32,6 +32,8 @@ Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is 
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
 >
+> 💡 **Quieting not holding?** If Windows Update switches itself back on mid-session, run `scripts/Trace-QuietReverts.ps1` **elevated** — it reads the Windows event logs and names what did it. If the answer is Windows Update Medic, there's an optional [medic-unlock edition](scripts-medic-unlock/README.txt) that forces it.
+>
 > ⚠️ **`Post-Race-Restore.ps1` is required, not optional.** Pre-race quieting *disables* the update services rather than stopping them — stopping didn't hold, because Windows Update Medic restarts them within about ten minutes. Nothing self-heals on reboot, so until you restore, the PC has no Windows Update and no fresh Defender definitions.
 
 Adapted for dual-CCD from the single-CCD guide by [rcsracing93](https://rcsracing93.github.io/iracing-stutter-fix) · MIT licensed · share freely.
