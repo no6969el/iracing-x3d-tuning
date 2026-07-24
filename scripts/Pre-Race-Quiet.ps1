@@ -33,8 +33,23 @@
       .\Pre-Race-Quiet.ps1 -KeepSearch     leave Windows Search alone
       .\Pre-Race-Quiet.ps1 -SkipDefender   leave Defender real-time alone
       .\Pre-Race-Quiet.ps1 -Deadman        auto-restore at next boot if you forget
-      .\Pre-Race-Quiet.ps1 -Force          re-snapshot over a stale state file
+      .\Pre-Race-Quiet.ps1 -Force          throw away the saved snapshot and
+                                           capture a new one (rarely wanted -
+                                           see RUNNING IT TWICE below)
       .\Pre-Race-Quiet.ps1 -NoSystem       don't use the SYSTEM helper
+
+    RUNNING IT TWICE
+    ----------------
+    Safe. If a snapshot already exists - meaning you quieted and haven't
+    restored yet - this re-applies the quieting from that snapshot and keeps
+    it. Anything Windows switched back on gets shut down again, and your
+    original startup types are preserved.
+
+    It deliberately does NOT re-capture in that situation: the machine is
+    already quieted, so a fresh snapshot would record "disabled" as the
+    original state and Post-Race-Restore would then leave the services off
+    permanently. -Force overrides this and should only be used if you have
+    already restored by hand.
 
     Self-elevates. Requires Tamper Protection OFF for the Defender part.
 #>
@@ -115,17 +130,36 @@ Write-Host ""
 Write-Host "================  PRE-RACE QUIET  ================" -ForegroundColor Cyan
 Write-Log "=== Pre-Race-Quiet v3.0.0 starting ===" 'Gray' -NoHost
 
-# ---- refuse to overwrite an un-restored snapshot ------------------
-if ((Test-Path $StateFile) -and -not $Force) {
-    Write-Host ""
-    Write-Host "  A previous session was never restored." -ForegroundColor Yellow
-    Write-Host "  $StateFile already exists." -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  Run Post-Race-Restore.ps1 first, or re-run this with -Force" -ForegroundColor Yellow
-    Write-Host "  to snapshot over it (you would lose the original state)." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Log "ABORT: stale state file present, -Force not supplied" 'Yellow' -NoHost
-    return
+# ---- an un-restored snapshot means we are already quiet ----------
+# Don't refuse and don't re-snapshot: the machine is currently quieted, so
+# capturing now would record the QUIETED state as "original" and a later
+# restore would leave the services disabled forever. Instead, re-apply using
+# the snapshot we already have. The original state is never lost.
+$ReQuiet     = $false
+$LoadedSnap  = $null
+if (Test-Path $StateFile) {
+    if ($Force) {
+        Write-Host ""
+        Write-Host "  -Force: discarding the previous snapshot." -ForegroundColor Yellow
+        Write-Host "  Only do this if you have already restored by hand, otherwise the" -ForegroundColor Yellow
+        Write-Host "  services' original startup types are lost and Post-Race-Restore" -ForegroundColor Yellow
+        Write-Host "  will fall back to Windows defaults." -ForegroundColor Yellow
+        Write-Log "-Force supplied: discarding existing snapshot" 'Yellow' -NoHost
+    } else {
+        try { $LoadedSnap = Get-Content $StateFile -Raw | ConvertFrom-Json } catch { $LoadedSnap = $null }
+        if ($LoadedSnap) {
+            $ReQuiet = $true
+            Write-Host ""
+            Write-Host "  Already quieted from an earlier session - re-applying." -ForegroundColor Cyan
+            Write-Host ("  Original state was saved {0} UTC and is being kept." -f $LoadedSnap.CreatedUtc) -ForegroundColor DarkGray
+            Write-Host "  Anything Windows switched back on will be shut down again." -ForegroundColor DarkGray
+            Write-Log "re-quiet from existing snapshot" 'Gray' -NoHost
+        } else {
+            Write-Host ""
+            Write-Host "  A state file exists but could not be read - starting fresh." -ForegroundColor Yellow
+            Write-Log "unreadable state file, re-snapshotting" 'Yellow' -NoHost
+        }
+    }
 }
 
 if ($KeepSearch) { $ServicesToQuiet = @($ServicesToQuiet | Where-Object { $_ -ne 'WSearch' }) }
@@ -134,9 +168,17 @@ if ($KeepSearch) { $ServicesToQuiet = @($ServicesToQuiet | Where-Object { $_ -ne
 #  1. SNAPSHOT  -  capture real prior state BEFORE touching anything
 # ================================================================
 Write-Host ""
-Write-Host "1. Snapshotting current state" -ForegroundColor White
+if ($ReQuiet) { Write-Host "1. Using the saved snapshot (not overwriting it)" -ForegroundColor White }
+else          { Write-Host "1. Snapshotting current state" -ForegroundColor White }
 
 $snapServices = @()
+if ($ReQuiet) {
+    $snapServices = @($LoadedSnap.Services)
+    $snapTasks    = @($LoadedSnap.Tasks)
+    $defenderWasOn = $LoadedSnap.DefenderWasOn
+    Write-Host ("  {0} service(s), {1} task(s) from the saved snapshot" -f $snapServices.Count, $snapTasks.Count) -ForegroundColor Green
+}
+else {
 foreach ($name in $ServicesToQuiet) {
     $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
     if (-not $svc) { Write-Log "service not present, skipping: $name" 'DarkGray'; continue }
@@ -201,6 +243,7 @@ try {
     Write-Log "ABORT: snapshot write failed" 'Red' -NoHost
     return
 }
+}   # end of fresh-snapshot branch
 
 # ================================================================
 #  2. SCHEDULED TASKS
