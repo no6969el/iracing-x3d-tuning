@@ -1,10 +1,10 @@
 $src = Get-Content "$PSScriptRoot/../Tuning-Menu.ps1" -Raw
 
 # pull the here-string that holds the XAML
-$start = $src.IndexOf('[xml]$XAML = @"')
+$start = $src.IndexOf('$XAML = @"')
 $end   = $src.IndexOf('"@', $start)
 if ($start -lt 0 -or $end -lt 0) { "FAIL: could not locate XAML block"; exit 1 }
-$xamlText = $src.Substring($start + '[xml]$XAML = @"'.Length, $end - $start - '[xml]$XAML = @"'.Length)
+$xamlText = $src.Substring($start + '$XAML = @"'.Length, $end - $start - '$XAML = @"'.Length)
 
 try { [xml]$x = $xamlText } catch { "FAIL: XAML is not well-formed XML -> $_"; exit 1 }
 "OK: XAML is well-formed XML"
