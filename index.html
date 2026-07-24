@@ -49,10 +49,15 @@
   footer{padding:32px 0 60px;color:var(--muted);text-align:center;font-size:.9rem}
 
   /* CPU toggle */
-  .cpu-toggle{display:inline-flex;background:var(--panel);border:1px solid var(--border);
-    border-radius:999px;padding:4px;margin:18px auto 0;gap:4px}
+  /* flex-wrap matters: at 5 chips this row is wider than a phone screen, and
+     without it the group overflows the viewport instead of stacking. Buttons
+     stay nowrap so a label never splits across "9900X3D" / "/" / "7900X3D". */
+  .cpu-toggle{display:inline-flex;flex-wrap:wrap;justify-content:center;
+    background:var(--panel);border:1px solid var(--border);
+    border-radius:999px;padding:4px;margin:18px auto 0;gap:4px;max-width:100%}
   .cpu-toggle button{background:transparent;border:none;color:var(--muted);font:inherit;
-    font-size:.92rem;font-weight:600;padding:8px 16px;border-radius:999px;cursor:pointer}
+    font-size:.92rem;font-weight:600;padding:8px 16px;border-radius:999px;cursor:pointer;
+    white-space:nowrap}
   .cpu-toggle button.on{background:var(--accent);color:#06121f}
   .cpu-note{font-size:.85rem;color:var(--muted);margin-top:8px}
   .toggles{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:18px}
@@ -110,6 +115,16 @@
 
   .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media(max-width:640px){.two{grid-template-columns:1fr}}
+
+  /* Once the chip group wraps to several rows a full pill radius looks odd,
+     and the default padding only fits one button per row on a phone. */
+  @media(max-width:760px){
+    .cpu-toggle{border-radius:18px;padding:5px;gap:5px}
+    .cpu-toggle button{font-size:.82rem;padding:7px 11px}
+  }
+  @media(max-width:400px){
+    .cpu-toggle button{font-size:.76rem;padding:6px 9px;letter-spacing:-.2px}
+  }
 
   /* Three columns on a phone gives ~100px each, which wraps to one word per
      line. Stack each row into a card instead; the header row is redundant once
