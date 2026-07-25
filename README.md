@@ -28,7 +28,7 @@ Your chip is detected on first launch. If it gets it wrong, **CPU profile** in t
 
 ### Bonus: iRacing Tuner Mini
 
-If you do not want the full troubleshooting workflow and just want the baseline fixes, use the lightweight launcher in [output/Small-Tuning-Menu.ps1](output/Small-Tuning-Menu.ps1) or [output/Start-Small-Tuning-Menu.bat](output/Start-Small-Tuning-Menu.bat). It keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**. This is a lower-profile companion tool rather than a major release update.
+If you do not want the full troubleshooting workflow and just want the baseline fixes, use the lightweight launcher in [mini-tuner/Small-Tuning-Menu.ps1](mini-tuner/Small-Tuning-Menu.ps1) or [mini-tuner/Start-Small-Tuning-Menu.bat](mini-tuner/Start-Small-Tuning-Menu.bat). It keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**. This is a lower-profile companion tool rather than a major release update.
 
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
 
