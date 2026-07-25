@@ -29,12 +29,12 @@ function Resolve-RepoPath {
     return Join-Path $baseDir $ref
 }
 
-function Is-ExternalReference {
+function Test-ExternalReference {
     param([string]$ref)
     return $ref -match '^(?:https?:|mailto:|file:|//)'
 }
 
-function Is-PlaceholderReference {
+function Test-PlaceholderReference {
     param([string]$ref)
     $lower = $ref.ToLowerInvariant()
     return $lower -in @(
@@ -52,7 +52,7 @@ function Find-BasenameInRepo {
     return Get-ChildItem -Path $repoRoot -Recurse -File -Filter $basename -ErrorAction SilentlyContinue
 }
 
-function Check-DocRefs {
+function Test-DocRefs {
     $docFiles = Get-ChildItem -Path $repoRoot -Recurse -Include *.md,*.html,*.txt -File
     $pattern = '([A-Za-z0-9_\\/\.-]+\.(?:md|html|txt|bat|ps1))'
 
@@ -60,7 +60,7 @@ function Check-DocRefs {
         $content = Get-Content -Path $file.FullName -Raw -ErrorAction Stop
         foreach ($match in [regex]::Matches($content, $pattern)) {
             $ref = $match.Groups[1].Value
-            if (Is-ExternalReference $ref -or Is-PlaceholderReference $ref) {
+            if (Test-ExternalReference $ref -or Test-PlaceholderReference $ref) {
                 continue
             }
 
@@ -88,7 +88,7 @@ function Check-DocRefs {
     }
 }
 
-function Check-ScriptDependencies {
+function Test-ScriptDependencies {
     $shared = Join-Path $repoRoot 'scripts\X3D-Profiles.ps1'
     if (-not (Test-Path -Path $shared -PathType Leaf)) {
         Add-Failure "Shared dependency 'scripts/X3D-Profiles.ps1' is missing."
@@ -106,7 +106,7 @@ function Check-ScriptDependencies {
     }
 }
 
-function Check-MedicUnlockPackage {
+function Test-MedicUnlockPackage {
     $zipPath = Join-Path $repoRoot 'scripts-medic-unlock.zip'
     if (-not (Test-Path -Path $zipPath -PathType Leaf)) {
         Add-Failure "Optional file 'scripts-medic-unlock.zip' is missing."
@@ -137,9 +137,9 @@ function Check-MedicUnlockPackage {
 }
 
 Write-Host "Validating repo references in: $repoRoot" -ForegroundColor Cyan
-Check-DocRefs
-Check-ScriptDependencies
-Check-MedicUnlockPackage
+Test-DocRefs
+Test-ScriptDependencies
+Test-MedicUnlockPackage
 
 if ($failures.Count -eq 0) {
     Write-Host "Validation complete: no missing references found." -ForegroundColor Green
