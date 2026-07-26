@@ -106,16 +106,19 @@ SUGGESTED FIRST-TIME ORDER
 PER-SESSION  -  READ THIS
 Before: Pre-Race-Quiet     After: Post-Race-Restore
 
-  Pre-Race-Quiet DISABLES the update services rather than just stopping
-  them. Stopping never held: a stopped service keeps its startup type,
-  so the first API call restarts it, and Windows Update Medic exists
-  specifically to repair a tampered update stack on a ~10 minute cycle.
-  Users were getting a stutter the moment it came back mid-race.
+   Pre-Race-Quiet DISABLES the update services rather than just stopping
+   them. Stopping never held: a stopped service keeps its startup type,
+   so the first API call restarts it, and Windows Update Medic exists
+   specifically to repair a tampered update stack on a ~10 minute cycle.
+   Users were getting a stutter the moment it came back mid-race.
 
-  Because it disables rather than stops, NOTHING SELF-HEALS ON REBOOT.
-  Post-Race-Restore is REQUIRED. Skip it and the machine has no Windows
-  Update - and no fresh Defender definitions, since those ride on the
-  same services.
+   Because it disables rather than stops, NOTHING SELF-HEALS ON REBOOT.
+   Post-Race-Restore is REQUIRED. Skip it and the machine has no Windows
+   Update - and no fresh Defender definitions, since those ride on the
+   same services.
+   
+    The kit now includes the medic unlock functionality as standard, so the
+    unlock behaviour is always available without needing a separate medic zip.
 
   Pre-Race-Quiet snapshots your real prior state to
   C:\ProgramData\RaceQuiet\state.json first, and Post-Race-Restore

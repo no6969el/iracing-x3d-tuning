@@ -30,6 +30,8 @@ Your chip is detected on first launch. If it gets it wrong, **CPU profile** in t
 
 If you do not want the full troubleshooting workflow and just want the baseline fixes, use the lightweight launcher in [mini-tuner/Small-Tuning-Menu.ps1](mini-tuner/Small-Tuning-Menu.ps1) or [mini-tuner/Start-Small-Tuning-Menu.bat](mini-tuner/Start-Small-Tuning-Menu.bat). It keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**. This is a lower-profile companion tool rather than a major release update.
 
+> ⚠️ **Note:** The `mini-tuner` folder is not included in the main ZIP download. It is only available in the GitHub repository and can be downloaded separately.
+
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
 
 To verify this repo's local references and package files, run `Validate-Repo.ps1` or double-click `Validate-Repo.bat` from the kit folder.
