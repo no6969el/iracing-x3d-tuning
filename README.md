@@ -38,6 +38,6 @@ To verify this repo's local references and package files, run `Validate-Repo.ps1
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
 > 
-> ⚠️ **`Post-Race-Restore.ps1` is required, not optional.** Pre-race quieting *disables* the update services for the racing session. This prevents Windows Update Medic from restarting them mid-race, which would cause stuttering. Post-Race-Restore is required to restore your system to its original state after racing.
+> ⚠️ **`Post-Race-Restore.ps1`** Pre-race quieting *disables* the update services for the racing session. This prevents Windows Update Medic from restarting them mid-race, which would cause stuttering. Post-Race-Restore is required to restore your system to its original state after racing.
 
 Adapted for dual-CCD from the single-CCD guide by [rcsracing93](https://rcsracing93.github.io/iracing-stutter-fix) · MIT licensed · share freely.
