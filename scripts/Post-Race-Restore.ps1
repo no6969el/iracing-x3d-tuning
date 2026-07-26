@@ -1,5 +1,5 @@
 <#
-    Post-Race-Restore.ps1                                     v3.1.0
+    Post-Race-Restore.ps1  -  MEDIC-UNLOCK EDITION            v3.0.0
     ================================================================
     Puts everything Pre-Race-Quiet touched back exactly as it was.
 
@@ -14,6 +14,17 @@
 
     If no snapshot exists (someone deleted it, or quieting was done by hand)
     it falls back to Windows defaults and says so loudly.
+
+    PAIRED WITH THE MEDIC-UNLOCK EDITION
+    ------------------------------------
+    That edition may have taken ownership of the WaaSMedicSvc registry key.
+    This script restores the original security descriptor and owner, verifies
+    both, and REFUSES to delete the snapshot while any key is still
+    unrestored - so a partial restore can't be silently forgotten. If it
+    cannot finish, it prints the exact commands to fix it by hand.
+
+    Identical to the standard edition otherwise. Either one restores either
+    kind of session correctly.
 
     USAGE
       .\Post-Race-Restore.ps1              normal run
@@ -97,8 +108,8 @@ if (-not $isAdmin) {
 }
 
 Write-Host ""
-Write-Host "===============  POST-RACE RESTORE  ===============" -ForegroundColor Cyan
-Write-Log "=== Post-Race-Restore v3.1.0 starting ===" 'Gray' -NoHost
+Write-Host "======  POST-RACE RESTORE (MEDIC-UNLOCK EDITION)  ======" -ForegroundColor Cyan
+Write-Log "=== Post-Race-Restore v3.0.0 starting ===" 'Gray' -NoHost
 
 # ---- load the snapshot -------------------------------------------
 $snap = $null

@@ -1,74 +1,56 @@
 <#
-    Pre-Race-Quiet.ps1                                        v3.1.0
+    Pre-Race-Quiet.ps1  -  MEDIC-UNLOCK EDITION               v3.0.0
     ================================================================
-    Silences the background work behind the classic periodic micro-stalls
-    (Windows Update scans, Update Orchestrator, Edge updates, PushToInstall,
-    Windows Search) and optionally turns off Defender real-time protection
-    for the session.
+    Same as the standard Pre-Race-Quiet, with ONE difference: it takes
+    ownership of the WaaSMedicSvc registry key by default, instead of
+    asking you to pass -UnlockMedic.
 
-    WHY THIS VERSION EXISTS
-    -----------------------
-    Earlier versions only STOPPED the services. A stopped service keeps its
-    startup type, so the first API call restarts it - and Windows Update
-    Medic (WaaSMedicSvc) exists specifically to detect a tampered-with update
-    stack and repair it, on roughly a 10-minute cadence. Users reported the
-    services coming back mid-race and stuttering when they did.
+    WHY THIS EXISTS
+    ---------------
+    On some Windows builds WaaSMedicSvc's registry key is owned by
+    TrustedInstaller and refuses to be disabled even when running as SYSTEM.
+    Windows Update Medic then keeps switching the update services back on,
+    roughly every ten minutes - mid-race, with a stutter each time.
 
-    This version:
-      * DISABLES the services (Start=4) instead of stopping them
-      * clears each service's failure/recovery actions, so a force-stop
-        can't trigger an auto-restart
-      * disables WaaSMedic\PerformRemediation, the task that drives the
-        ~10-minute revert
-      * snapshots the ACTUAL prior state first, so the restore puts things
-        back exactly as they were rather than guessing at defaults
+    The standard edition stops at that point and tells you. This edition
+    goes through: it takes ownership of that one key, disables the service,
+    and hands ownership straight back in the same run.
 
-    >>> BECAUSE THIS SURVIVES A REBOOT, Post-Race-Restore.ps1 IS REQUIRED. <<<
-    Leaving it un-restored means no Windows Update and - since Defender
-    signature updates ride on wuauserv/BITS - stale virus definitions.
+    USE THIS ONLY IF you have confirmed Medic is the problem. Run
+    Trace-QuietReverts.ps1 first - if it reports
+        "WaaSMedicSvc: stopped, but could NOT disable (protected)"
+    then this edition is what you want. Otherwise use the standard one.
+
+    WHAT IT TOUCHES
+    ---------------
+    HKLM\SYSTEM\CurrentControlSet\Services\WaaSMedicSvc  -  owner and
+    permissions, briefly. The original security descriptor is saved to the
+    snapshot AND to a separate .sddl file before anything is changed, and
+    permissions are handed back within the same run - the key is only in a
+    modified state for a few seconds, not for the length of your session.
+
+    Post-Race-Restore re-verifies the owner and permissions afterwards, and
+    refuses to delete the snapshot while any key is still unrestored.
+
+    >>> Post-Race-Restore.ps1 IS REQUIRED. <<<
+    Services are disabled, not stopped - nothing self-heals on reboot.
+    Until you restore, this PC has no Windows Update and, since Defender
+    signature updates ride the same services, no fresh definitions.
 
     USAGE
-      .\Pre-Race-Quiet.ps1                 normal run
-      .\Pre-Race-Quiet.ps1 -Verify         re-check after 3 min that nothing came back
-      .\Pre-Race-Quiet.ps1 -KeepSearch     leave Windows Search alone
-      .\Pre-Race-Quiet.ps1 -SkipDefender   leave Defender real-time alone
-      .\Pre-Race-Quiet.ps1 -Deadman        auto-restore at next boot if you forget
-      .\Pre-Race-Quiet.ps1 -UnlockMedic    LAST RESORT - see below
-      .\Pre-Race-Quiet.ps1 -Force          throw away the saved snapshot and
-                                           capture a new one (rarely wanted -
-                                           see RUNNING IT TWICE below)
-      .\Pre-Race-Quiet.ps1 -NoSystem       don't use the SYSTEM helper
-
-    -UnlockMedic  (last resort, opt-in, off by default)
-    ------------------------------------------------------------------
-    On some builds WaaSMedicSvc's registry key is owned by TrustedInstaller
-    and refuses to be disabled even as SYSTEM. While Medic runs it will keep
-    switching Windows Update back on, roughly every ten minutes.
-
-    -UnlockMedic takes ownership of that ONE key, grants Administrators
-    write access, disables the service, and hands ownership straight back.
-    Post-Race-Restore puts the original permissions back byte-for-byte from
-    a saved SDDL string.
-
-    Only use it if Trace-QuietReverts.ps1 has shown you that WaaSMedicSvc is
-    the thing undoing your session. It is more invasive than anything else in
-    this kit. The original security descriptor is saved to the snapshot AND
-    to a separate .sddl file next to it, so it can be restored by hand if
-    something goes wrong - the command to do that is printed if a restore
-    ever fails.
+      .\Pre-Race-Quiet.ps1              quiet + unlock Medic (the point of this edition)
+      .\Pre-Race-Quiet.ps1 -Verify      wait 3 min afterwards, report anything that came back
+      .\Pre-Race-Quiet.ps1 -NoUnlock    behave like the standard edition
+      .\Pre-Race-Quiet.ps1 -KeepSearch  leave Windows Search alone
+      .\Pre-Race-Quiet.ps1 -SkipDefender  leave Defender real-time alone
+      .\Pre-Race-Quiet.ps1 -Deadman     auto-restore at next boot if you forget
+      .\Pre-Race-Quiet.ps1 -Force       discard the saved snapshot (rarely wanted)
 
     RUNNING IT TWICE
     ----------------
-    Safe. If a snapshot already exists - meaning you quieted and haven't
-    restored yet - this re-applies the quieting from that snapshot and keeps
-    it. Anything Windows switched back on gets shut down again, and your
-    original startup types are preserved.
-
-    It deliberately does NOT re-capture in that situation: the machine is
-    already quieted, so a fresh snapshot would record "disabled" as the
-    original state and Post-Race-Restore would then leave the services off
-    permanently. -Force overrides this and should only be used if you have
-    already restored by hand.
+    Safe. An existing snapshot means you quieted and haven't restored, so it
+    re-applies from that snapshot and keeps it. Your original startup types
+    and permissions are preserved.
 
     Self-elevates. Requires Tamper Protection OFF for the Defender part.
 #>
@@ -82,8 +64,11 @@ param(
     [switch]$Verify,
     [int]   $VerifyDelay = 180,
     [switch]$Deadman,
-    [switch]$UnlockMedic
+    [switch]$NoUnlock
 )
+
+# This variant unlocks the Medic key by default. -NoUnlock turns it off.
+$UnlockMedic = -not $NoUnlock
 
 # ================================================================
 #  EDIT HERE if you want to trim what gets quieted.
@@ -229,7 +214,7 @@ if (-not $isAdmin) {
     if ($NoSystem)     { $argList += '-NoSystem' }
     if ($Verify)       { $argList += @('-Verify','-VerifyDelay',$VerifyDelay) }
     if ($Deadman)      { $argList += '-Deadman' }
-    if ($UnlockMedic)  { $argList += '-UnlockMedic' }
+    if ($NoUnlock)     { $argList += '-NoUnlock' }
     try   { Start-Process powershell.exe -Verb RunAs -ArgumentList $argList }
     catch { Write-Host "Elevation cancelled - nothing was changed." -ForegroundColor Yellow }
     return
@@ -238,8 +223,14 @@ if (-not $isAdmin) {
 if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
 
 Write-Host ""
-Write-Host "================  PRE-RACE QUIET  ================" -ForegroundColor Cyan
-Write-Log "=== Pre-Race-Quiet v3.1.0 starting ===" 'Gray' -NoHost
+Write-Host "========  PRE-RACE QUIET (MEDIC-UNLOCK EDITION)  ========" -ForegroundColor Cyan
+if ($UnlockMedic) {
+    Write-Host "  Medic unlock is ON. If WaaSMedicSvc refuses to disable, this" -ForegroundColor Yellow
+    Write-Host "  will take ownership of its registry key, disable it, and hand" -ForegroundColor Yellow
+    Write-Host "  ownership straight back. Original permissions are saved first." -ForegroundColor Yellow
+    Write-Host "  Run with -NoUnlock to behave like the standard edition." -ForegroundColor DarkGray
+}
+Write-Log "=== Pre-Race-Quiet v3.0.0 starting ===" 'Gray' -NoHost
 
 # ---- an un-restored snapshot means we are already quiet ----------
 # Don't refuse and don't re-snapshot: the machine is currently quieted, so
@@ -334,7 +325,7 @@ if (-not $SkipDefender -and (Get-Command Get-MpComputerStatus -ErrorAction Silen
 
 $snapshot = [pscustomobject]@{
     SchemaVersion = 1
-    Tool          = 'Pre-Race-Quiet v3.1.0'
+    Tool          = 'Pre-Race-Quiet v3.0.0'
     CreatedUtc    = (Get-Date).ToUniversalTime().ToString('s')
     Machine       = $env:COMPUTERNAME
     Services      = $snapServices
