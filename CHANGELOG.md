@@ -15,7 +15,7 @@ The project ships as a script kit plus a web guide at
 
 ## Unreleased — bonus mini tuner
 
-- Added a lightweight companion tool, `output/Small-Tuning-Menu.ps1`, plus `output/Start-Small-Tuning-Menu.bat`, for users who want the baseline fixes without the full troubleshooting workflow.
+- Added a lightweight companion tool, `mini-tuner/Small-Tuning-Menu.ps1`, plus `mini-tuner/Start-Small-Tuning-Menu.bat`, for users who want the baseline fixes without the full troubleshooting workflow.
 - The mini launcher keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**.
 - This is a lower-profile companion addition rather than a major release update.
 

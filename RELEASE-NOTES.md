@@ -16,13 +16,11 @@ tasks are invisible and will look absent when they aren't.
 **A way through when the answer is Medic.** On some builds `WaaSMedicSvc`'s
 registry key is owned by TrustedInstaller and refuses to be disabled even as
 SYSTEM — so Windows Update Medic keeps repairing the update stack mid-race.
-`Pre-Race-Quiet -UnlockMedic` takes ownership of that one key, disables the
-service, verifies it took, and hands ownership straight back in the same run.
-The original permissions are saved before anything changes, and
-`Post-Race-Restore` verifies they're back afterwards.
+The kit now includes the medic unlock functionality as standard, so the unlock
+behaviour is always available.
 
-There's also an optional `scripts-medic-unlock\` pair with that behaviour on by
-default, for handing to someone who's already confirmed it's their problem.
+There's no longer a separate `scripts-medic-unlock\` pair needed, as the
+medic unlock functionality is now built into the standard scripts.
 
 **Only use it if you've confirmed you need it.** Run `Trace-QuietReverts` first —
 if it points at Group Policy or an MDM profile rather than Medic, the unlock

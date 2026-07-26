@@ -76,9 +76,7 @@ IF THE QUIETING DOESN'T HOLD
 
   It reads the Windows event logs and tells you what re-enabled it,
   rather than leaving you to guess. If it names Windows Update Medic
-  as protected, there is an optional replacement pair in
-  scripts-medic-unlock\ that forces the issue - read its README
-  first, it is more invasive than the rest of the kit.
+  as protected, the kit now includes the medic unlock functionality as standard.
 
   If it points at Group Policy or a work/MDM profile instead, none
   of this will help. A managed machine re-applies those settings no
