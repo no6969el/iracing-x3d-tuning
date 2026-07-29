@@ -42,8 +42,6 @@ If you do not want the full troubleshooting workflow and just want the baseline 
 
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
 
-To verify this repo's local references and package files, run `Validate-Repo.ps1` or double-click `Validate-Repo.bat` from the kit folder.
-
 **Upgrading?** From v3.1.0 or earlier, replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
