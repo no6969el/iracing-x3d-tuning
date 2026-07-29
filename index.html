@@ -376,7 +376,8 @@
         <li><input type="checkbox" class="save" id="s5a"><span><b>Quick check:</b> <span class="file">Start-Tuning-Menu.bat</span> → Troubleshoot → <b>Preflight-Check</b>. Green <b>READY</b> = every fix is live.</span></li>
         <li><input type="checkbox" class="save" id="s5b"><span><b>Real proof:</b> run <b>FullTrace</b> (menu → Troubleshoot, or press <kbd>T</kbd> at the end of Apply-Baseline). Race ~10 minutes, press <kbd>Ctrl+C</kbd>, open the CSV from your Desktop.</span></li>
       </ul>
-      <p><b>What good looks like:</b> no skipped seconds in the timestamp column. A jump like <code>12:04:40 → 12:04:42</code> is a stall — none means zero system-wide hiccups.</p>
+      <p><b>What good looks like:</b> <code>hardfaults_s</code> at or near zero once you’re driving, <code>tot_dpc</code> and <code>tot_int</code> in the low single digits, <code>gpu_util</code> steady with no collapses, and your power plan unchanged from the first row to the last. The live console keeps every line grey when all of that holds.</p>
+      <div class="callout"><b>About skipped seconds.</b> Earlier versions of this guide said any gap in the timestamp column — a jump like <code>12:04:40 → 12:04:42</code> — was a system-wide stall. Measurement showed that is too strong: the tracer’s own sampling can occasionally overrun its one-second budget on a perfectly healthy machine, and v3.2.0 makes that much rarer. Treat a gap as a lead, not a verdict. It’s a real stall when the rows either side of it back it up — raised <code>tot_dpc</code>/<code>tot_int</code>, a <code>hardfaults_s</code> spike, or <code>gpu_util</code> falling off a cliff. A bare 2-second gap with clean counters on both sides is the logger, not your PC.</div>
       <details>
         <summary>Reading the rest of the CSV (for the curious)</summary>
         <div class="inner">
@@ -385,7 +386,14 @@
             <li><code>ccd0_cpu</code> vs <code>ccd1_cpu</code> — CCD0 busier = the sim is on the V-Cache die where it belongs.</li>
             <li><code>cpu0_int</code> low, <code>freqcore_int</code> higher — GPU interrupts moved off the sim's core.</li>
             <li><code>gpu_util</code> — steady, no collapses to single digits.</li>
-            <li><code>hardfaults_s</code> — near zero while racing (bursts during <em>loading</em> are normal).</li>
+            <li><code>hardfaults_s</code> — near zero while racing (bursts during <em>loading</em> are normal). Above 50/sec the console line turns red.</li>
+            <li><code>tot_dpc</code> / <code>tot_int</code> — whole-system DPC and interrupt time. Low single digits is healthy; this is what corroborates a suspected stall.</li>
+            <li><code>gpu_volt_mv</code> — GPU core voltage in millivolts. The number you actually want when testing an undervolt — clocks alone can’t tell you whether a curve is doing anything.</li>
+            <li><code>gpu_power_w</code> with <code>gpu_gclk</code> — read them together. More MHz at the same watts is what a good undervolt buys you.</li>
+            <li><code>volt_limit</code> / <code>power_limit</code> / <code>temp_limit</code> — which limiter is holding the card back, shown live as <code>VOLT</code>/<code>PWR</code>/<code>TEMP</code>. Power or temperature limited turns the line yellow.</li>
+            <li><code>fan_pct</code> / <code>fan_rpm</code> — a lazy fan curve shows up here first, as a slow temperature climb and a sagging clock.</li>
+            <li><code>pcie_bus_pct</code> — PCIe bus load. Sustained near 100% alongside low <code>vram_used_mb</code> means assets are streaming over the bus instead of sitting in VRAM.</li>
+            <li><span class="muted">Voltage, fan RPM, memory temperature, framerate and the limiter flags come from MSI Afterburner’s shared memory — start Afterburner first or they stay blank.</span></li>
           </ul>
         </div>
       </details>
@@ -477,7 +485,8 @@
   <details>
     <summary>A stutter every few minutes, like clockwork</summary>
     <div class="inner">
-      <p>Scheduled-task cadence (Windows Update scans fire every ~5–7 min). Run <b>FullTrace</b> during a race, then <b>Scan-Stutter-Events</b> — it finds each stall in your trace and lists which task fired at that moment. The Each-Race routine silences the usual offenders.</p>
+      <p>Scheduled-task cadence (Windows Update scans fire every ~5–7 min). Run <b>FullTrace</b> during a race, then <b>Scan-Stutter-Events</b> — it finds each candidate in your trace and lists which task fired at that moment. The Each-Race routine silences the usual offenders.</p>
+      <p class="muted">Check the candidates before chasing them. A gap with a <code>hardfaults_s</code> spike or raised <code>tot_dpc</code> beside it is worth pursuing; one with clean counters either side and no scheduled task nearby is most likely the tracer’s own sampling, not a stutter. Repeated pagefault spikes under green flag, with free RAM steady, point at something touching disk mid-race rather than at memory pressure.</p>
     </div>
   </details>
   <details>
@@ -536,7 +545,7 @@
   <details>
     <summary>Every script in the kit — what it touches</summary>
     <div class="inner">
-      <p><b>Diagnostics (read-only):</b> FullTrace (1&nbsp;Hz CSV: per-CCD load, CPU0 vs frequency-core interrupt/DPC, GPU util/power/clocks/throttle, sim &amp; VR CPU, pagefaults, power plan — timestamp gaps = stalls caught live), Preflight-Check, Scan-Stutter-Events, Watch-TimerResolution.</p>
+      <p><b>Diagnostics (read-only):</b> FullTrace (1&nbsp;Hz CSV, 39 columns: per-CCD load, CPU0 vs frequency-core interrupt/DPC, GPU util/power/clocks/throttle plus core voltage, fan, VRAM, PCIe load, P-state and the active limiter flags, sim &amp; VR CPU, pagefaults, free RAM, power plan — colour-coded live, and timestamp gaps flagged for corroboration rather than taken as proof of a stall). Afterburner-sourced sensors need MSI Afterburner running; anything unavailable stays blank. Then Preflight-Check, Scan-Stutter-Events, Watch-TimerResolution.</p>
       <p><b>Fixes (each reversible):</b> Enable-GlobalTimerResolution (<code>GlobalTimerResolutionRequests=1</code> under <code>HKLM\...\Session Manager\kernel</code>), Set-GPU-IRQ-Affinity (DevicePolicy=4 + AssignmentSetOverride on the NVIDIA device), Set-NIC-USB-IRQ-Affinity (same, PCI NICs + USB hosts, spread over cores <b data-cpu="nic">17–19</b>), Add-Defender-Exclusions, Apply-Guide-Extras (USB suspend, Game Bar/DVR), Pre-Race-Quiet / Post-Race-Restore (Update/Search tasks + services, optional Defender realtime — needs Tamper Protection off), Repair-PerfCounters (lodctr /R both arches + WMIADAP), Enable-DiagnosticLogs.</p>
       <p><b>HAGS</b> (Hardware-Accelerated GPU Scheduling) is deliberately not scripted — it's a genuine toss-up on newer cards. Test both ways.</p>
       <p>Full inventory with admin flags: <span class="file">scripts\README.txt</span> · <a href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">browse the source</a>.</p>
