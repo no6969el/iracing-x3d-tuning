@@ -53,7 +53,104 @@ Only `index.html` changed.
 
 ---
 
-## v3.1.0 — Name the culprit, and force it if you must (current)
+## v3.2.0 — FullTrace can see the GPU properly, and stops crying wolf (current)
+
+Undervolt tuning on the target rig ran into the limits of the tracer. Six sessions
+were logged across three different curves — one of which hard-crashed the machine
+mid-race — and the CSV could not answer the one question that mattered: what
+voltage was the card actually running at? This release closes that gap, fixes two
+things the tracer was reporting wrongly, and retires a diagnostic claim the data
+no longer supports.
+
+### Added
+- **GPU core voltage, fan, PCIe bus load and the active limiter now appear on the
+  console line**, not only in the CSV. The original single-line layout is
+  otherwise unchanged. Everything still reaches the CSV regardless of what the
+  console shows.
+- **Line colouring.** Grey is normal. Yellow means the power plan drifted from
+  whatever was active on the first sample, or the GPU is power/temperature
+  limited. Red means hard pagefaults above 50/sec. Red wins over yellow — a
+  paging storm deserves more of your attention than a power cap.
+- **Fifteen new CSV columns**, appended after the original twenty-four so existing
+  traces and spreadsheets still parse unchanged: `gpu_volt_mv`, `fan_pct`,
+  `mem_ctrl_util`, `vram_used_mb`, `mem_temp_c`, `gpu_fps`, `gpu_frametime_ms`,
+  `pstate`, `volt_limit`, `power_limit`, `temp_limit`, `noload_limit`, `fan_rpm`,
+  `pcie_bus_pct`, `fb_usage_pct`. The Afterburner-sourced ones need MSI
+  Afterburner running; anything your card does not expose stays blank rather than
+  failing the row.
+
+### Fixed
+- **`gpu_volt_mv` logged a constant `1` on every row of every trace.** Afterburner
+  publishes core voltage in volts on some cards and millivolts on others, and the
+  column assumed millivolts — so `1.05 V` rounded to `1`, and 826 consecutive
+  samples recorded the same meaningless number. The value is now unit-detected by
+  magnitude rather than trusting the units string, which is not reliably
+  populated. Anyone who traced an undervolt on an earlier build was logging a
+  constant, not a measurement.
+- **The limiter display read `idle` in the middle of a race.** Afterburner's
+  "No load limit" flag and nvidia-smi's `0x1` throttle reason are both asserted
+  whenever nothing else binds, including at 90%+ GPU utilisation. Taken at face
+  value that printed `idle` for the majority of a session under full load. `idle`
+  is now shown only when the GPU genuinely is idle; above 50% utilisation it
+  falls through to `--`.
+- **The power-plan warning was hardcoded to Bitsum Highest Performance.** Correct
+  for dual-CCD rigs, wrong for every single-CCD owner the guide tells to stay on
+  Balanced — they would have seen every line flagged yellow. It now captures the
+  plan active on the first sample and warns only when it *changes* mid-session,
+  which is both chip-neutral and a closer match to the real failure mode
+  (ParkControl or Dynamic Boost flipping the plan mid-race).
+
+### Changed — a timestamp gap is no longer treated as proof of a stall
+The guide has said since the first release that a skipped second in the trace is a
+system-wide freeze. Measured across six sessions on one machine, that does not
+hold. Gaps appeared at a near-constant **~2 per 10 minutes in every session** —
+regardless of load, of which undervolt curve was applied, or of whether the
+machine went on to crash — and were **always exactly 2.0 seconds**, never longer.
+A genuine stall would vary in length and cluster with load. The rows either side
+of every gap showed `tot_dpc` and `tot_int` at 0–1% and `hardfaults_s` at zero.
+
+The cause was this script. Each iteration spawned `nvidia-smi` **twice** and
+`powercfg` once, on top of three CIM queries and a process enumeration — three
+process creations every second. When that work exceeded the one-second budget the
+sleep was skipped and the next timestamp landed two seconds later.
+
+- **One `nvidia-smi` call per sample instead of two.** The throttle-reason field
+  was queried separately only because drivers disagree on its name
+  (`clocks_throttle_reasons.active` versus `clocks_event_reasons.active`). That
+  name is now resolved once at startup and folded into the main query.
+- **`powercfg` is polled every tenth sample rather than every one.** The plan
+  cannot change without something actively changing it, and a switch is still
+  caught within ten seconds.
+- **Guide and script header corrected.** A gap is now described as worth
+  investigating rather than as proof, and counts as a stall only when the
+  surrounding rows corroborate it — raised DPC or interrupt time, a
+  `hardfaults_s` spike, or a GPU utilisation collapse. `Scan-Stutter-Events` is
+  unchanged and still useful; it was the interpretation of a bare gap that was
+  overstated.
+
+### Validated
+- Parses clean under AST validation; brace and paren balance verified. No
+  PowerShell 7-only syntax or cmdlets.
+- Voltage unit detection exercised across both representations (`1.05` → 1050 mV,
+  `1050` → 1050 mV) and the blank case.
+- Limiter and colour logic replayed against real captured trace rows: a
+  6%-utilisation row correctly reads `idle`, 86–94% racing rows read `PWR` or
+  `--` where the previous build read `idle`, and the row carrying a 22,599/sec
+  pagefault spike correctly renders red.
+- The per-core safe accessor from v2.2.0 — a CPU missing from the counter set
+  must not kill the loop — is retained unchanged.
+
+### Known gaps
+`gpu_fps` and `gpu_frametime_ms` stayed blank across all six validation sessions:
+RTSS was not hooking the OpenXR runtime on the test rig. That also means stutter
+detection still has no direct measure and must be inferred from the other
+columns. `mem_temp_c` was likewise unavailable on the test card. All three log
+correctly where the sensor exists; none has been confirmed on hardware that
+exposes it.
+
+---
+
+## v3.1.0 — Name the culprit, and force it if you must
 
 v3.0.0 disabled the update services properly, which holds on most machines. On
 some it didn't: users reported everything switching back on about ten minutes in,
@@ -620,5 +717,9 @@ Before any tool existed, the core theory and measurement method were worked out.
   and `Unblock-File` the kit once after unzipping.
 - **As of v2.2.0 all CPU detection lives in `scripts\X3D-Profiles.ps1`.** Don't
   delete it and don't mix script versions across releases — six scripts depend on it.
+- **As of v3.2.0 a timestamp gap in a FullTrace CSV is not on its own proof of a
+  stall.** Earlier entries below describe it that way; that guidance is superseded.
+  Corroborate a gap against `tot_dpc` / `tot_int` / `hardfaults_s` before treating
+  it as a system freeze.
 - Every settings-changing script has an undo or is reversible; review before running
   on another PC.
