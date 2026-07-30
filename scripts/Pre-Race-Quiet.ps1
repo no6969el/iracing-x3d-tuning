@@ -1,5 +1,5 @@
 <#
-    Pre-Race-Quiet.ps1  -  MEDIC-UNLOCK EDITION               v3.0.0
+    Pre-Race-Quiet.ps1  -  MEDIC-UNLOCK EDITION               v3.2.5
     ================================================================
     Same as the standard Pre-Race-Quiet, with ONE difference: it takes
     ownership of the WaaSMedicSvc registry key by default, instead of
@@ -94,7 +94,26 @@ $TasksToDisable = @(
     @{ Path='\Microsoft\Windows\InstallService\';               Name='ScanForUpdatesAsUser' },
     @{ Path='\Microsoft\Windows\PushToInstall\';                Name='LoginCheck' },
     @{ Path='\Microsoft\Windows\PushToInstall\';                Name='Registration' },
-    @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\';  Name='ReconcileLanguageResources' }
+    @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\';  Name='ReconcileLanguageResources' },
+
+    # ---- Added after a field trace showed these firing mid-session ----
+    # 14 launches in a 17-minute window on an 8-core X3D rig, none of
+    # them covered above. The two UpdateOrchestrator entries both run
+    # usoclient.exe; the rest are telemetry/flighting and cost nothing
+    # to hold off for the length of a race.
+    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Work' },
+    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Start Oobe Expedite Work' },
+    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';     Name='ReconcileFeatures' },
+    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';     Name='UsageDataReceiver' },
+    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';     Name='UsageDataFlushing' },
+    @{ Path='\Microsoft\Windows\Flighting\OneSettings\';       Name='RefreshCache' },
+    @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
+    @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
+    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';          Name='InitialConfiguration' }
+
+    # Security maintenance (Secure Boot DBX + TPM). Fires rarely and is
+    # short. Uncomment only if you have traced it hitting a session.
+    # ,@{ Path='\Microsoft\Windows\PI\'; Name='Secure-Boot-Update' }
 )
 
 # ================================================================
@@ -230,7 +249,7 @@ if ($UnlockMedic) {
     Write-Host "  ownership straight back. Original permissions are saved first." -ForegroundColor Yellow
     Write-Host "  Run with -NoUnlock to behave like the standard edition." -ForegroundColor DarkGray
 }
-Write-Log "=== Pre-Race-Quiet v3.0.0 starting ===" 'Gray' -NoHost
+Write-Log "=== Pre-Race-Quiet v3.2.5 starting ===" 'Gray' -NoHost
 
 # ---- an un-restored snapshot means we are already quiet ----------
 # Don't refuse and don't re-snapshot: the machine is currently quieted, so
@@ -279,6 +298,38 @@ if ($ReQuiet) {
     $snapTasks    = @($LoadedSnap.Tasks)
     $defenderWasOn = $LoadedSnap.DefenderWasOn
     Write-Host ("  {0} service(s), {1} task(s) from the saved snapshot" -f $snapServices.Count, $snapTasks.Count) -ForegroundColor Green
+
+    # The curated list can grow between releases. A task in $TasksToDisable
+    # that this snapshot has never heard of was never touched by the earlier
+    # run, so whatever state it is in NOW is its original state. Capture it,
+    # append it, and re-save. Without this a re-quiet silently skips every
+    # task added since the snapshot was written, and Post-Race-Restore has no
+    # record of them to put back.
+    $knownTasks = @{}
+    foreach ($k in $snapTasks) { $knownTasks[([string]$k.Path + [string]$k.Name)] = $true }
+    $addedTasks = @()
+    foreach ($t in $TasksToDisable) {
+        if ($knownTasks.ContainsKey($t.Path + $t.Name)) { continue }
+        $obj = Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue
+        if (-not $obj) { continue }
+        $addedTasks += [pscustomobject]@{ Path = $t.Path; Name = $t.Name; State = [string]$obj.State }
+        Write-Log ("new since snapshot, captured as {0}: {1}{2}" -f $obj.State, $t.Path, $t.Name) 'DarkGray'
+    }
+    if ($addedTasks.Count -gt 0) {
+        $snapTasks = @($snapTasks) + $addedTasks
+        Write-Host ("  + {0} task(s) added to the list since that snapshot - captured now" -f $addedTasks.Count) -ForegroundColor Yellow
+        try {
+            $LoadedSnap.Tasks = $snapTasks
+            $LoadedSnap | ConvertTo-Json -Depth 6 | Out-File -FilePath $StateFile -Encoding utf8 -ErrorAction Stop
+            Write-Host "  snapshot updated so the restore knows about them" -ForegroundColor Green
+            Write-Log ("snapshot extended with {0} newly-listed task(s)" -f $addedTasks.Count) 'Green' -NoHost
+        } catch {
+            Write-Host "  WARNING: could not update the snapshot file." -ForegroundColor Red
+            Write-Host "  Those tasks will be disabled, but Post-Race-Restore will not know" -ForegroundColor Red
+            Write-Host "  to re-enable them. Re-enable them by hand after your session." -ForegroundColor Red
+            Write-Log "FAILED to re-save snapshot after extension" 'Red' -NoHost
+        }
+    }
 }
 else {
 foreach ($name in $ServicesToQuiet) {
@@ -325,7 +376,7 @@ if (-not $SkipDefender -and (Get-Command Get-MpComputerStatus -ErrorAction Silen
 
 $snapshot = [pscustomobject]@{
     SchemaVersion = 1
-    Tool          = 'Pre-Race-Quiet v3.0.0'
+    Tool          = 'Pre-Race-Quiet v3.2.5'
     CreatedUtc    = (Get-Date).ToUniversalTime().ToString('s')
     Machine       = $env:COMPUTERNAME
     Services      = $snapServices

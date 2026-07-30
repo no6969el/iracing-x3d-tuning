@@ -1,5 +1,5 @@
 <#
-    Check-Quiet-Status.ps1                                    v3.0.0
+    Check-Quiet-Status.ps1                                    v3.2.5
     ---------------------------------------------------------------
     READ-ONLY. Shows whether "race quiet" is active right now.
     No admin needed. Changes nothing.
@@ -12,6 +12,10 @@
     It also tells you whether an un-restored snapshot is sitting in
     C:\ProgramData\RaceQuiet, which is the definitive answer to
     "am I still quieted?"
+
+    v3.2.5 checks all 20 tasks the kit disables, not a subset, and the
+    verdict now requires EVERY visible one to be off. Anything still live
+    is listed by full path so you know exactly what to chase.
 #>
 
 function State($label,$good,$goodText,$badText){
@@ -70,28 +74,59 @@ foreach($s in 'WaaSMedicSvc','UsoSvc','wuauserv','bits','DoSvc','WSearch'){
 Write-Host ""
 Write-Host "  Scheduled tasks:" -ForegroundColor Gray
 $tasks = @(
+    # Must match $TasksToDisable in Pre-Race-Quiet.ps1 and $fallback in
+    # Post-Race-Restore.ps1. If you add a task there, add it here too or
+    # this screen will report "race ready" while that task is still live.
     @{ Path='\Microsoft\Windows\WaaSMedic\';                   Name='PerformRemediation' },
     @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Scan' },
     @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Scan Static Task' },
     @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Universal Orchestrator Start' },
     @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Report policies' },
+    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='UUS Failover Task' },
+    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Work' },
+    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Start Oobe Expedite Work' },
     @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdates' },
+    @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdatesAsUser' },
     @{ Path='\Microsoft\Windows\PushToInstall\';               Name='LoginCheck' },
-    @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\'; Name='ReconcileLanguageResources' }
+    @{ Path='\Microsoft\Windows\PushToInstall\';               Name='Registration' },
+    @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\'; Name='ReconcileLanguageResources' },
+    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='ReconcileFeatures' },
+    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataReceiver' },
+    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataFlushing' },
+    @{ Path='\Microsoft\Windows\Flighting\OneSettings\';      Name='RefreshCache' },
+    @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
+    @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
+    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' }
 )
-$tasksDisabled = 0; $tasksSeen = 0; $medicOn = $false
+
+# Not every task exists on every build. Windows 10 has no WindowsAI\Settings,
+# some builds have no Flighting tasks. A task that isn't there can't fire, so
+# it is counted separately and never held against the verdict.
+$tasksDisabled = 0; $tasksSeen = 0; $tasksMissing = 0; $medicOn = $false
+$stillOn = @()
 foreach($t in $tasks){
     $obj = Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue
-    if(-not $obj){ continue }
+    if(-not $obj){ $tasksMissing++; continue }
     $tasksSeen++
     $disabled = ($obj.State -eq 'Disabled')
     if($disabled){ $tasksDisabled++ }
-    elseif($t.Name -eq 'PerformRemediation'){ $medicOn = $true }
+    else {
+        $stillOn += $t
+        if($t.Name -eq 'PerformRemediation'){ $medicOn = $true }
+    }
     State $t.Name $disabled "disabled" ("enabled (" + $obj.State + ")")
 }
+
+Write-Host ""
 if ($tasksSeen -eq 0) {
     Write-Host "           none visible - run this from an ELEVATED prompt;" -ForegroundColor DarkGray
     Write-Host "           the WaaSMedic tasks are hidden from a normal user." -ForegroundColor DarkGray
+} else {
+    $col = if ($tasksDisabled -eq $tasksSeen) { 'Green' } else { 'Yellow' }
+    Write-Host ("           {0} of {1} disabled" -f $tasksDisabled, $tasksSeen) -ForegroundColor $col
+    if ($tasksMissing -gt 0) {
+        Write-Host ("           {0} not present on this Windows build (nothing to do)" -f $tasksMissing) -ForegroundColor DarkGray
+    }
 }
 
 # --- Defender ---
@@ -106,12 +141,13 @@ else { Write-Host "           Real-time protection: unknown" -ForegroundColor Da
 # --- verdict ---
 Write-Host ""
 Write-Host "  ====================================================" -ForegroundColor Cyan
-if($svcQuiet -and $tasksSeen -gt 0 -and $tasksDisabled -ge 1){
+$allTasksOff = ($tasksSeen -gt 0 -and $tasksDisabled -eq $tasksSeen)
+if($svcQuiet -and $allTasksOff){
     if ($anyManual) {
         Write-Host "  QUIET, BUT NOT LOCKED DOWN." -ForegroundColor Yellow
         Write-Host "  Some services are stopped yet still set to Manual/Automatic," -ForegroundColor Yellow
         Write-Host "  so Windows can restart them mid-race. Re-run Pre-Race-Quiet" -ForegroundColor Yellow
-        Write-Host "  (v3.0.0 or later) to disable them properly." -ForegroundColor Yellow
+        Write-Host "  (v3.2.5 or later) to disable them properly." -ForegroundColor Yellow
     } else {
         Write-Host "  RACE-QUIET is ACTIVE - the scans are paused. Good to race." -ForegroundColor Green
     }
@@ -121,6 +157,12 @@ if($svcQuiet -and $tasksSeen -gt 0 -and $tasksDisabled -ge 1){
         Write-Host "    task that re-enables Windows Update about 10 minutes after" -ForegroundColor Yellow
         Write-Host "    you quiet it. Re-run Pre-Race-Quiet as admin." -ForegroundColor Yellow
     }
+} elseif ($svcQuiet -and $tasksSeen -gt 0) {
+    Write-Host "  PARTLY QUIET - the services are down but tasks are still live." -ForegroundColor Yellow
+    Write-Host ("  {0} of {1} scheduled task(s) can still fire mid-race:" -f ($tasksSeen - $tasksDisabled), $tasksSeen) -ForegroundColor Yellow
+    foreach ($o in $stillOn) { Write-Host ("     {0}{1}" -f $o.Path, $o.Name) -ForegroundColor Yellow }
+    Write-Host "  Re-run Pre-Race-Quiet AS ADMIN. If any of these survive that," -ForegroundColor Yellow
+    Write-Host "  run Trace-QuietReverts.ps1 elevated to find out what is holding them." -ForegroundColor Yellow
 } else {
     Write-Host "  NOT quieted - background scans can fire during a race." -ForegroundColor Yellow
     Write-Host "  Run Pre-Race-Quiet before you drive (then Post-Race-Restore after)." -ForegroundColor Yellow

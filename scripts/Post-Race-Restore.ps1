@@ -1,5 +1,5 @@
 <#
-    Post-Race-Restore.ps1  -  MEDIC-UNLOCK EDITION            v3.0.0
+    Post-Race-Restore.ps1  -  MEDIC-UNLOCK EDITION            v3.2.5
     ================================================================
     Puts everything Pre-Race-Quiet touched back exactly as it was.
 
@@ -109,7 +109,7 @@ if (-not $isAdmin) {
 
 Write-Host ""
 Write-Host "======  POST-RACE RESTORE (MEDIC-UNLOCK EDITION)  ======" -ForegroundColor Cyan
-Write-Log "=== Post-Race-Restore v3.0.0 starting ===" 'Gray' -NoHost
+Write-Log "=== Post-Race-Restore v3.2.5 starting ===" 'Gray' -NoHost
 
 # ---- load the snapshot -------------------------------------------
 $snap = $null
@@ -278,7 +278,19 @@ if ($taskList.Count -eq 0) {
         @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdatesAsUser' },
         @{ Path='\Microsoft\Windows\PushToInstall\';               Name='LoginCheck' },
         @{ Path='\Microsoft\Windows\PushToInstall\';               Name='Registration' },
-        @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\'; Name='ReconcileLanguageResources' }
+        @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\'; Name='ReconcileLanguageResources' },
+        # Keep in step with $TasksToDisable in Pre-Race-Quiet.ps1 and $tasks
+        # in Check-Quiet-Status.ps1. All three lists must agree.
+        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Work' },
+        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Start Oobe Expedite Work' },
+        @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='ReconcileFeatures' },
+        @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataReceiver' },
+        @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataFlushing' },
+        @{ Path='\Microsoft\Windows\Flighting\OneSettings\';      Name='RefreshCache' },
+        @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
+        @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
+        @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' },
+        @{ Path='\Microsoft\Windows\PI\';                          Name='Secure-Boot-Update' }
     )
     foreach ($f in $fallback) { $taskList += [pscustomobject]@{ Path=$f.Path; Name=$f.Name; State='Ready' } }
     foreach ($e in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'MicrosoftEdgeUpdateTaskMachine*' })) {
@@ -286,13 +298,25 @@ if ($taskList.Count -eq 0) {
     }
 }
 
+$haveSnap = ($null -ne $snap -and @($snap.Tasks).Count -gt 0)
+
 $failedTasks = @()
 foreach ($t in $taskList) {
     if ($t.State -eq 'Disabled') {
         Write-Log ("leaving disabled (it was already off before): {0}{1}" -f $t.Path, $t.Name) 'DarkGray'
         continue
     }
-    if (-not (Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue)) { continue }
+    if (-not (Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue)) {
+        # Not visible from here. If the snapshot says we disabled it then it
+        # DOES exist and is merely hidden from this context - protected tasks
+        # report "no matching objects" rather than access denied. Hand it to
+        # the SYSTEM helper instead of walking away and leaving it off.
+        if ($haveSnap) {
+            $failedTasks += $t
+            Write-Log ("not visible here, will retry as SYSTEM: {0}{1}" -f $t.Path, $t.Name) 'DarkGray'
+        }
+        continue
+    }
     try {
         Enable-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction Stop | Out-Null
         Write-Log ("enabled task: {0}{1}" -f $t.Path, $t.Name) 'Green'
