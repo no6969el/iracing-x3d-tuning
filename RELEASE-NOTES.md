@@ -1,3 +1,89 @@
+# Release Notes — v3.2.5
+
+## What's new in v3.2.5
+
+The first trace this kit has ever received from a machine it wasn't written on.
+An 8-core X3D rig, someone else's build, someone else's install. In a 17-minute
+window **14 scheduled tasks fired**, and **none of them were on the disable
+list**. Two ran `usoclient.exe`, about ten minutes apart.
+
+Nothing in the existing list was wrong. It was built outward from the Windows
+Update stack and it stopped there. The telemetry and flighting tasks Windows runs
+in the same breath as updates had simply never been in scope, because every trace
+until now came from one machine.
+
+**Nine tasks added to the pre-race disable list.** Two `UpdateOrchestrator`
+entries (`Schedule Work`, `Start Oobe Expedite Work`), four `Flighting` tasks
+(`ReconcileFeatures`, `UsageDataReceiver`, `UsageDataFlushing`,
+`OneSettings\RefreshCache`), plus `Windows Error Reporting\QueueReporting`,
+`DeviceDirectoryClient\RegisterUserDevice` and
+`WindowsAI\Settings\InitialConfiguration`. All telemetry or update scheduling.
+None of them do anything you need while you're driving, and all nine are put back
+by `Post-Race-Restore` like everything else.
+
+**`Check-Quiet-Status` was giving false all-clears.** It checked 8 of the 11
+tasks the kit disabled, and its verdict passed if a single one was off. A machine
+with the update tasks quieted and everything else live got a green
+"RACE-QUIET is ACTIVE — good to race." It now checks all 20 and requires every
+visible one to be off. The middle case gets its own result — **PARTLY QUIET** —
+which lists each task still enabled by full path so you know what to chase.
+
+**Restore could strand a task in the off position.** Two ways. The no-snapshot
+fallback list still held the old 11, so a lost snapshot meant the nine new tasks
+had nothing to re-enable them. And a task hidden from the restoring context was
+skipped in silence — protected tasks report "no matching objects" rather than
+access denied, so the check read that as "not on this machine" and moved on,
+leaving a task the kit had switched off switched off for good. Both fixed.
+
+**A re-quiet would have skipped the new tasks entirely.** Caught on live
+hardware. If an un-restored snapshot exists, `Pre-Race-Quiet` re-applies from it
+instead of re-snapshotting — which is right, because capturing a quieted machine
+would record the quiet as "original." But it meant the task list came from the
+snapshot, so a machine quieted under v3.2.0 would never pick up the nine
+additions however many times you re-ran it. A re-quiet now captures anything new
+to the list at its current state, appends it to the snapshot, and re-saves.
+
+### One thing left switched off on purpose
+
+`PI\Secure-Boot-Update` is in `Pre-Race-Quiet.ps1` but commented out. It carries
+Secure Boot DBX revocations and TPM maintenance. It fires rarely and it's short,
+so the trade isn't worth making by default. Uncomment it only if you've traced it
+landing inside one of your sessions. `Post-Race-Restore` re-enables it either
+way.
+
+### Upgrading
+
+Replace `scripts\Pre-Race-Quiet.ps1`, `scripts\Post-Race-Restore.ps1` and
+`scripts\Check-Quiet-Status.ps1`. If you use the `scripts-medic-unlock\`
+edition, replace its copies too — this release changes the same code in both.
+
+**If you have an un-restored snapshot right now**, either path works:
+
+- Run `Post-Race-Restore`, then `Pre-Race-Quiet`. Cleanest — you get a fresh
+  snapshot covering all 20 tasks.
+- Or just re-run `Pre-Race-Quiet`. It will spot the tasks missing from your
+  snapshot, capture their real prior state, add them, and re-save.
+
+**Do not use `-Force` to get there.** That discards the snapshot without
+restoring, so your services' original startup types are lost and the restore
+falls back to Windows defaults.
+
+Restoring an old snapshot with the new script is fine. Restoring a *new*
+snapshot with an *old* script is not — the old fallback list doesn't know about
+the nine additions.
+
+### Honest gaps
+
+This build has been parse-checked, cross-checked and simulation-tested, but it
+has not run on live hardware yet. Which of the nine tasks accept
+`Disable-ScheduledTask` from an elevated prompt, which need the SYSTEM hop, and
+which refuse both is unmeasured. `RaceQuiet.log` records the outcome per task —
+read it after your first run. `WindowsAI\Settings\InitialConfiguration` and
+`PI\Secure-Boot-Update` are the likeliest to be TrustedInstaller-owned, and the
+SYSTEM hop solves permission, not ownership.
+
+---
+
 # Release Notes — v3.1.0
 
 ## What's new in v3.1.0
@@ -16,11 +102,13 @@ tasks are invisible and will look absent when they aren't.
 **A way through when the answer is Medic.** On some builds `WaaSMedicSvc`'s
 registry key is owned by TrustedInstaller and refuses to be disabled even as
 SYSTEM — so Windows Update Medic keeps repairing the update stack mid-race.
-The kit now includes the medic unlock functionality as standard, so the unlock
-behaviour is always available.
+`Pre-Race-Quiet -UnlockMedic` takes ownership of that one key, disables the
+service, verifies it took, and hands ownership straight back in the same run.
+The original permissions are saved before anything changes, and
+`Post-Race-Restore` verifies they're back afterwards.
 
-There's no longer a separate `scripts-medic-unlock\` pair needed, as the
-medic unlock functionality is now built into the standard scripts.
+There's also an optional `scripts-medic-unlock\` pair with that behaviour on by
+default, for handing to someone who's already confirmed it's their problem.
 
 **Only use it if you've confirmed you need it.** Run `Trace-QuietReverts` first —
 if it points at Group Policy or an MDM profile rather than Medic, the unlock

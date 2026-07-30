@@ -38,11 +38,13 @@ GPU voltage, fan RPM, memory temperature, framerate and the limiter flags come f
 
 If you do not want the full troubleshooting workflow and just want the baseline fixes, use the lightweight launcher in [mini-tuner/Small-Tuning-Menu.ps1](mini-tuner/Small-Tuning-Menu.ps1) or [mini-tuner/Start-Small-Tuning-Menu.bat](mini-tuner/Start-Small-Tuning-Menu.bat). It keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**. This is a lower-profile companion tool rather than a major release update.
 
-> ⚠️ **Note:** The `mini-tuner` folder is included in the main ZIP download. It is also in the listed files.
+> ⚠️ **Note:** The `mini-tuner` folder is not included in the main ZIP download. It is only available in the GitHub repository and can be downloaded separately.
 
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
 
-**Upgrading?** From v3.1.0 or earlier, replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
+To verify this repo's local references and package files, run `Validate-Repo.ps1` or double-click `Validate-Repo.bat` from the kit folder.
+
+**Upgrading?** From v3.2.0 or earlier, replace `scripts/Pre-Race-Quiet.ps1`, `scripts/Post-Race-Restore.ps1` and `scripts/Check-Quiet-Status.ps1` — v3.2.5 adds nine scheduled tasks to the pre-race disable list and fixes a status screen that could report "race ready" while tasks were still live. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.1.0 or earlier, also replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
 > 

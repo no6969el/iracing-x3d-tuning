@@ -53,7 +53,138 @@ Only `index.html` changed.
 
 ---
 
-## v3.2.0 — FullTrace can see the GPU properly, and stops crying wolf (current)
+## v3.2.5 — the quiet list was incomplete, and the status screen agreed with it (current)
+
+A trace came in from another user's machine — an 8-core X3D rig, not the
+development box. In a 17-minute window, **14 scheduled tasks launched**. Not one
+of them was on the kit's disable list. Two of them ran `usoclient.exe`, roughly
+ten minutes apart.
+
+The list had been built from the Windows Update stack outward. Everything in it
+was correct; it just stopped short. The telemetry and flighting tasks Windows
+runs alongside updates were never in scope, and nobody had looked because there
+had been no trace from a machine other than the one it was written on.
+
+Worse, `Check-Quiet-Status` only checked 8 of the 11 tasks the kit disabled, and
+its verdict passed if **one** was off. On a machine with the update tasks quieted
+and everything else live, it printed "RACE-QUIET is ACTIVE — good to race." That
+is the failure mode that matters most: a green light over a machine that will
+still stutter.
+
+### Added — nine tasks now disabled before a race
+
+| Task | Why |
+| --- | --- |
+| `UpdateOrchestrator\Schedule Work` | Runs `usoclient.exe`. Observed firing mid-session. |
+| `UpdateOrchestrator\Start Oobe Expedite Work` | Runs `usoclient.exe` on the expedited-update path. |
+| `Flighting\FeatureConfig\ReconcileFeatures` | Reconciles staged feature rollout with Microsoft. |
+| `Flighting\FeatureConfig\UsageDataReceiver` | Feature-usage telemetry. Fired three times in 17 minutes. |
+| `Flighting\FeatureConfig\UsageDataFlushing` | Flushes buffered telemetry to disk and network. |
+| `Flighting\OneSettings\RefreshCache` | Pulls Microsoft's remote config blob, writes registry. |
+| `Windows Error Reporting\QueueReporting` | Compresses and uploads queued crash dumps. |
+| `DeviceDirectoryClient\RegisterUserDevice` | Device registration call-out. |
+| `WindowsAI\Settings\InitialConfiguration` | Windows AI / Copilot settings initialisation. |
+
+All nine are telemetry or update scheduling. None of them do anything you need
+during a race, and all nine are restored afterwards like everything else.
+
+`PI\Secure-Boot-Update` is present in `Pre-Race-Quiet.ps1` but **commented out**.
+It carries Secure Boot DBX revocations and TPM maintenance, it fires rarely, and
+it is short. Uncomment it only if you have traced it landing inside a session.
+`Post-Race-Restore` re-enables it either way, so uncommenting is a one-way door
+only until the next restore.
+
+### Fixed — the status screen no longer passes a machine that isn't ready
+
+- **`Check-Quiet-Status` now checks all 20 tasks**, not 8. `UUS Failover Task`,
+  `ScanForUpdatesAsUser` and `Registration` had been missing since they were
+  added to `Pre-Race-Quiet`.
+- **The verdict now requires every visible task to be off.** It previously
+  passed on one. A new **PARTLY QUIET** result covers the middle case: services
+  down, tasks still live. It lists every task still enabled by full path and
+  points at `Trace-QuietReverts.ps1` if re-running as admin doesn't clear them.
+- **Tasks absent from the Windows build are counted separately** and never held
+  against the verdict. Windows 10 has no `WindowsAI\Settings`; some builds have
+  no `Flighting` tasks. The screen now says "4 not present on this Windows build"
+  instead of quietly shrinking the denominator.
+
+### Fixed — a re-quiet would have skipped every new task
+
+Found on live hardware, not in review. `Check-Quiet-Status` reported
+**11 of 19 disabled** on a machine holding a snapshot written by v3.2.0.
+
+When an un-restored snapshot exists, `Pre-Race-Quiet` deliberately re-applies
+from it rather than re-snapshotting — capturing a quieted machine would record
+the quieted state as "original" and strand the services off forever. Correct.
+But it also meant the task list came from the *snapshot*, not from
+`$TasksToDisable`, so a machine quieted under v3.2.0 would never pick up the
+nine additions no matter how many times you re-ran it.
+
+A re-quiet now compares the saved snapshot against the current list. Any task
+the snapshot has never heard of was never touched by the earlier run, so its
+present state **is** its original state — it is captured, appended, and the
+snapshot is re-saved so `Post-Race-Restore` knows to put it back. A task you had
+already disabled yourself is captured as `Disabled` and stays off on restore, as
+it always has. If the snapshot can't be re-saved the run says so in red rather
+than disabling tasks it can't account for.
+
+### Fixed — restore could leave a task disabled forever
+
+- **`Post-Race-Restore`'s no-snapshot fallback list** still held the old 11. If
+  the snapshot was missing or discarded, the nine new tasks would never be
+  re-enabled by anything. The fallback now carries all 21, including
+  `Secure-Boot-Update`.
+- **A task hidden from the restoring context is no longer skipped in silence.**
+  Protected tasks report "no matching objects" rather than access denied, so the
+  old check read that as "not on this machine" and walked away — leaving a task
+  the kit had disabled switched off permanently. When the snapshot says the kit
+  disabled it, it is now handed to the SYSTEM helper instead. Without a snapshot
+  the behaviour is unchanged, because there is no evidence the task ever existed.
+
+### Validated
+
+- All three scripts parse clean (PowerShell AST).
+- The task list in `Pre-Race-Quiet`, `Post-Race-Restore` and
+  `Check-Quiet-Status` cross-checked programmatically: **identical, 20 entries,
+  no duplicates**, with `Secure-Boot-Update` present only in the restore
+  fallback, by design.
+- `Check-Quiet-Status` verdict exercised against five simulated states — all
+  disabled, partly disabled, tasks missing from the build, services stopped but
+  still Manual, nothing quieted. Each produced the correct result; the
+  tasks-missing case correctly still reports race-ready.
+- The restore loop's new branch tested both ways: with a snapshot a hidden task
+  is handed to the SYSTEM helper, without one it is skipped as before.
+- Snapshot extension tested against a stale snapshot: newly-listed tasks are
+  captured at their true current state, a task already disabled by the user is
+  recorded as `Disabled` and left off by the restore, and a task absent from the
+  build is skipped.
+- **Confirmed on live hardware.** A 9800X3D-class machine holding a v3.2.0
+  snapshot reported `PARTLY QUIET - 11 of 19 disabled` and named all eight live
+  tasks by path. That is the new status screen doing exactly its job: the old one
+  would have printed "RACE-QUIET is ACTIVE" over the same machine.
+
+### Not validated
+
+- No live-hardware run of this build yet. The nine tasks are drawn from an
+  observed trace, but whether each one accepts `Disable-ScheduledTask` from an
+  elevated prompt, needs the SYSTEM hop, or refuses both has not been measured.
+  `RaceQuiet.log` names each outcome per task — read it after the first run.
+- `WindowsAI\Settings\InitialConfiguration` and `PI\Secure-Boot-Update` are the
+  likeliest to be TrustedInstaller-owned. The SYSTEM hop solves permission, not
+  ownership. If either reports `SYSTEM FAIL`, it needs the same ownership round
+  trip the Medic key gets, against a different target — a scheduled task lives in
+  both `System32\Tasks\` and the `TaskCache\Tree` registry hive.
+
+### Known gap, unchanged
+
+The three task lists are maintained separately and must agree by hand. They agree
+today and each carries a comment naming the other two. A shared module would
+remove the risk; it was left alone here because this release should not be
+reshaping how the scripts load each other.
+
+---
+
+## v3.2.0 — FullTrace can see the GPU properly, and stops crying wolf
 
 Undervolt tuning on the target rig ran into the limits of the tracer. Six sessions
 were logged across three different curves — one of which hard-crashed the machine

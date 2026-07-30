@@ -445,7 +445,7 @@
             <tr><td>Vertical Sync</td><td>Off</td></tr>
             <tr><td>Threaded Optimization</td><td>On</td></tr>
             <tr><td>Shader Cache Size</td><td>Unlimited</td></tr>
-            <tr><td>Anisotropic Filtering</td><td>(16x reported to have issues BUT for me its much higher quality image in VR.  Just look at the graffiti on the floor in Nurburgring, one time with application controlled and another with forced 16x)</td></tr>
+            <tr><td>Anisotropic Filtering</td><td><b>Your call.</b> 16x is reported to cause issues, so the safe default is <b>Application-controlled</b> — but on my rig forcing <b>16x</b> gives a noticeably sharper image in VR. Look at the graffiti on the tarmac at the N&uuml;rburgring: once with application-controlled, once with 16x forced. Try both and keep what looks better to you.</td></tr>
           </table>
           <p>Also <b>disable the GeForce/NVIDIA App in-game overlay</b> — DirectX hooks and DPC load for no benefit. Same goes for RTSS / MSI Afterburner: notorious stutter sources, close them unless you truly need them.</p>
         </div>
@@ -466,7 +466,7 @@
   </div>
 
   <div class="callout">
-    <b>Every race from now on:</b> the menu's <b>Each-Race routine</b> quiets Windows Update/Search (and optionally Defender) before you drive and restores everything after. Optional, but it removes the last periodic stall source. <span class="muted">(Pre-Race-Quiet / Post-Race-Restore — don't skip the restore.)</span>
+    <b>Every race from now on:</b> the menu's <b>Each-Race routine</b> quiets Windows Update/Search (and optionally Defender) before you drive and restores everything after. Optional, but it removes the last periodic stall source. <span class="muted">(Pre-Race-Quiet / Post-Race-Restore — don't skip the restore.)</span> <b>v3.2.5</b> disables 20 scheduled tasks rather than 11: a trace from a reader's machine caught nine more firing mid-session, including two that run <code>usoclient.exe</code>. Run <b>Check-Quiet-Status</b> after quieting — it now fails a machine unless <i>every</i> task is off, and names any that aren't.
   </div>
 </section>
 
