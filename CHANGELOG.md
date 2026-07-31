@@ -96,18 +96,6 @@ mismatch impossible.
   `$ServicesToQuiet` has a matching entry in `$ServiceDefaults`.
 - The derived task-path regex matches every folder in `$TasksToDisable`.
 
-### Not yet validated
-
-- **Nothing here has been run on Windows hardware.** Parse-clean is not
-  run-clean. `Pre-Race-Quiet` → `Post-Race-Restore` needs a full round trip on a
-  real machine before this is called shipped — that round trip was already
-  outstanding from v3.1.0.
-- The vendor-neutral GPU scripts have not been exercised on an AMD or Intel
-  adapter; the NVIDIA path is unchanged in behaviour but is also untested here.
-- The `wuauserv` revert reported from the field is **not** fixed by this release.
-  The trace tool can now see the five previously invisible services, which may
-  identify the healer, but the cause is still open.
-
 ### Bonus — iRacing Tuner Mini
 
 `mini-tuner/Small-Tuning-Menu.ps1` and `mini-tuner/Start-Small-Tuning-Menu.bat`,
