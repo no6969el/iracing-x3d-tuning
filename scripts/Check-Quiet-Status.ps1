@@ -1,5 +1,5 @@
 <#
-    Check-Quiet-Status.ps1                                    v3.2.5
+    Check-Quiet-Status.ps1                                    v3.3.0
     ---------------------------------------------------------------
     READ-ONLY. Shows whether "race quiet" is active right now.
     No admin needed. Changes nothing.
@@ -13,9 +13,14 @@
     C:\ProgramData\RaceQuiet, which is the definitive answer to
     "am I still quieted?"
 
-    v3.2.5 checks all 20 tasks the kit disables, not a subset, and the
-    verdict now requires EVERY visible one to be off. Anything still live
-    is listed by full path so you know exactly what to chase.
+    v3.3.0 adds the five services and nineteen tasks that an xperf
+    HARD_FAULTS trace showed firing during a real session - chiefly the
+    Microsoft Store's app auto-update, which was the largest single
+    non-kernel source of hard faults and which v3.2.5 did not cover.
+    It also reports the Store auto-download policy.
+
+    The verdict requires EVERY visible task to be off. Anything still
+    live is listed by full path so you know exactly what to chase.
 #>
 
 function State($label,$good,$goodText,$badText){
@@ -47,7 +52,9 @@ Write-Host ""
 Write-Host "  Services:" -ForegroundColor Gray
 $svcQuiet = $true
 $anyManual = $false
-foreach($s in 'WaaSMedicSvc','UsoSvc','wuauserv','bits','DoSvc','WSearch'){
+# Must mirror $ServicesToQuiet in Pre-Race-Quiet.ps1.
+foreach($s in 'WaaSMedicSvc','UsoSvc','wuauserv','bits','DoSvc','WSearch',
+              'InstallService','edgeupdate','edgeupdatem','PcaSvc','TabletInputService'){
     $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
     if(-not $svc){ Write-Host "           $s not present on this build" -ForegroundColor DarkGray; continue }
 
@@ -96,7 +103,27 @@ $tasks = @(
     @{ Path='\Microsoft\Windows\Flighting\OneSettings\';      Name='RefreshCache' },
     @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
     @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
-    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' }
+    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' },
+    # ---- added v3.3.0 ----
+    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Automatic App Update' },
+    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Scheduled Start' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='Microsoft Compatibility Appraiser' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='ProgramDataUpdater' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='StartupAppTask' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='PcaPatchDbTask' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='MareBackup' },
+    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='Consolidator' },
+    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='UsbCeip' },
+    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClient' },
+    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClientOnScenarioDownload' },
+    @{ Path='\Microsoft\Windows\Defrag\';                   Name='ScheduledDefrag' },
+    @{ Path='\Microsoft\Windows\DiskCleanup\';              Name='SilentCleanup' },
+    @{ Path='\Microsoft\Windows\DiskFootprint\';            Name='Diagnostics' },
+    @{ Path='\Microsoft\Windows\Chkdsk\';                   Name='ProactiveScan' },
+    @{ Path='\Microsoft\Windows\Maintenance\';              Name='WinSAT' },
+    @{ Path='\Microsoft\Windows\Servicing\';                Name='StartComponentCleanup' },
+    @{ Path='\Microsoft\Windows\Registry\';                 Name='RegIdleBackup' },
+    @{ Path='\Microsoft\Windows\StateRepository\';          Name='MaintenanceTasks' }
 )
 
 # Not every task exists on every build. Windows 10 has no WindowsAI\Settings,
@@ -129,6 +156,27 @@ if ($tasksSeen -eq 0) {
     }
 }
 
+# --- Microsoft Store auto-download policy ---
+Write-Host ""
+Write-Host "  Microsoft Store:" -ForegroundColor Gray
+$storeVal = $null
+try { $storeVal = [int](Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name 'AutoDownload' -ErrorAction Stop).AutoDownload } catch { }
+$storeQuiet = ($storeVal -eq 2)
+if ($storeQuiet) { Write-Host "  [quiet]  App auto-download: disabled by policy" -ForegroundColor Green }
+elseif ($null -eq $storeVal) { Write-Host "  [ on  ]  App auto-download: no policy set (Store may update mid-race)" -ForegroundColor Yellow }
+else { Write-Host ("  [ on  ]  App auto-download: policy value {0}" -f $storeVal) -ForegroundColor Yellow }
+
+# --- noisy user apps seen faulting in the reference trace ---
+$noisy = @('Telegram','MOZA Pit House','msedgewebview2')
+$running = @()
+foreach ($n in $noisy) { if (@(Get-Process -Name $n -ErrorAction SilentlyContinue).Count -gt 0) { $running += $n } }
+if ($running.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  Background apps:" -ForegroundColor Gray
+    foreach ($r in $running) { Write-Host ("  [ on  ]  {0} is running" -f $r) -ForegroundColor Yellow }
+    Write-Host "           Close them, or run Pre-Race-Quiet -CloseApps" -ForegroundColor DarkGray
+}
+
 # --- Defender ---
 Write-Host ""
 Write-Host "  Defender:" -ForegroundColor Gray
@@ -142,12 +190,17 @@ else { Write-Host "           Real-time protection: unknown" -ForegroundColor Da
 Write-Host ""
 Write-Host "  ====================================================" -ForegroundColor Cyan
 $allTasksOff = ($tasksSeen -gt 0 -and $tasksDisabled -eq $tasksSeen)
-if($svcQuiet -and $allTasksOff){
+if($svcQuiet -and $allTasksOff -and -not $storeQuiet){
+    Write-Host "  QUIET, EXCEPT THE STORE." -ForegroundColor Yellow
+    Write-Host "  Services and tasks are down, but Store app auto-download is not" -ForegroundColor Yellow
+    Write-Host "  disabled. That was the single largest non-kernel source of hard" -ForegroundColor Yellow
+    Write-Host "  faults in the reference trace - 829 of them. Re-run Pre-Race-Quiet." -ForegroundColor Yellow
+} elseif($svcQuiet -and $allTasksOff){
     if ($anyManual) {
         Write-Host "  QUIET, BUT NOT LOCKED DOWN." -ForegroundColor Yellow
         Write-Host "  Some services are stopped yet still set to Manual/Automatic," -ForegroundColor Yellow
         Write-Host "  so Windows can restart them mid-race. Re-run Pre-Race-Quiet" -ForegroundColor Yellow
-        Write-Host "  (v3.2.5 or later) to disable them properly." -ForegroundColor Yellow
+        Write-Host "  (v3.3.0 or later) to disable them properly." -ForegroundColor Yellow
     } else {
         Write-Host "  RACE-QUIET is ACTIVE - the scans are paused. Good to race." -ForegroundColor Green
     }

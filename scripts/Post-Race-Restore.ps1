@@ -1,5 +1,5 @@
 <#
-    Post-Race-Restore.ps1  -  MEDIC-UNLOCK EDITION            v3.2.5
+    Post-Race-Restore.ps1  -  MEDIC-UNLOCK EDITION            v3.3.0
     ================================================================
     Puts everything Pre-Race-Quiet touched back exactly as it was.
 
@@ -53,6 +53,12 @@ $Defaults = @{
     'bits'         = 3
     'DoSvc'        = 2
     'WSearch'      = 2
+    # ---- added v3.3.0, must mirror $ServicesToQuiet in Pre-Race-Quiet ----
+    'InstallService'     = 3
+    'edgeupdate'         = 2
+    'edgeupdatem'        = 3
+    'PcaSvc'             = 2
+    'TabletInputService' = 3
 }
 
 function Write-Log {
@@ -109,7 +115,7 @@ if (-not $isAdmin) {
 
 Write-Host ""
 Write-Host "======  POST-RACE RESTORE (MEDIC-UNLOCK EDITION)  ======" -ForegroundColor Cyan
-Write-Log "=== Post-Race-Restore v3.2.5 starting ===" 'Gray' -NoHost
+Write-Log "=== Post-Race-Restore v3.3.0 starting ===" 'Gray' -NoHost
 
 # ---- load the snapshot -------------------------------------------
 $snap = $null
@@ -290,7 +296,27 @@ if ($taskList.Count -eq 0) {
         @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
         @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
         @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' },
-        @{ Path='\Microsoft\Windows\PI\';                          Name='Secure-Boot-Update' }
+        @{ Path='\Microsoft\Windows\PI\';                          Name='Secure-Boot-Update' },
+        # ---- added v3.3.0 ----
+        @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Automatic App Update' },
+        @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Scheduled Start' },
+        @{ Path='\Microsoft\Windows\Application Experience\';   Name='Microsoft Compatibility Appraiser' },
+        @{ Path='\Microsoft\Windows\Application Experience\';   Name='ProgramDataUpdater' },
+        @{ Path='\Microsoft\Windows\Application Experience\';   Name='StartupAppTask' },
+        @{ Path='\Microsoft\Windows\Application Experience\';   Name='PcaPatchDbTask' },
+        @{ Path='\Microsoft\Windows\Application Experience\';   Name='MareBackup' },
+        @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='Consolidator' },
+        @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='UsbCeip' },
+        @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClient' },
+        @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClientOnScenarioDownload' },
+        @{ Path='\Microsoft\Windows\Defrag\';                   Name='ScheduledDefrag' },
+        @{ Path='\Microsoft\Windows\DiskCleanup\';              Name='SilentCleanup' },
+        @{ Path='\Microsoft\Windows\DiskFootprint\';            Name='Diagnostics' },
+        @{ Path='\Microsoft\Windows\Chkdsk\';                   Name='ProactiveScan' },
+        @{ Path='\Microsoft\Windows\Maintenance\';              Name='WinSAT' },
+        @{ Path='\Microsoft\Windows\Servicing\';                Name='StartComponentCleanup' },
+        @{ Path='\Microsoft\Windows\Registry\';                 Name='RegIdleBackup' },
+        @{ Path='\Microsoft\Windows\StateRepository\';          Name='MaintenanceTasks' }
     )
     foreach ($f in $fallback) { $taskList += [pscustomobject]@{ Path=$f.Path; Name=$f.Name; State='Ready' } }
     foreach ($e in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'MicrosoftEdgeUpdateTaskMachine*' })) {
@@ -385,6 +411,49 @@ if (-not $shouldReenable) {
 }
 
 # ================================================================
+#  3b. MICROSOFT STORE AUTO-DOWNLOAD                        v3.3.0
+# ================================================================
+Write-Host ""
+Write-Host "3b. Microsoft Store auto-download" -ForegroundColor White
+$storeKey  = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
+$storeFile = Join-Path $StateDir 'storepolicy.json'
+$storeDone = $false
+if (Test-Path $storeFile) {
+    try {
+        $sp = Get-Content $storeFile -Raw | ConvertFrom-Json
+        if (-not $sp.KeyExisted) {
+            # We created the key. Remove it entirely, but only if it holds
+            # nothing except the value we added - never delete someone else's
+            # policy settings that arrived in the meantime.
+            if (Test-Path $storeKey) {
+                Remove-ItemProperty -Path $storeKey -Name 'AutoDownload' -Force -ErrorAction SilentlyContinue
+                $remaining = @(Get-Item -Path $storeKey).Property
+                if ($remaining.Count -eq 0 -and @(Get-ChildItem -Path $storeKey -ErrorAction SilentlyContinue).Count -eq 0) {
+                    Remove-Item -Path $storeKey -Force -ErrorAction Stop
+                    Write-Log "Store policy key removed (we created it)" 'Green'
+                } else {
+                    Write-Log "AutoDownload removed; key kept because it holds other values" 'Green'
+                }
+            }
+        } elseif ($null -eq $sp.Value) {
+            Remove-ItemProperty -Path $storeKey -Name 'AutoDownload' -Force -ErrorAction SilentlyContinue
+            Write-Log "AutoDownload value removed (it did not exist before)" 'Green'
+        } else {
+            Set-ItemProperty -Path $storeKey -Name 'AutoDownload' -Value ([int]$sp.Value) -Type DWord -ErrorAction Stop
+            Write-Log ("AutoDownload restored to {0}" -f $sp.Value) 'Green'
+        }
+        Remove-Item $storeFile -Force -ErrorAction SilentlyContinue
+        $storeDone = $true
+    } catch {
+        Write-Log ("could not restore the Store policy: {0}" -f $_.Exception.Message) 'Yellow'
+        Write-Log ("original state is still recorded in {0}" -f $storeFile) 'Yellow'
+    }
+} else {
+    Write-Log "no Store policy was captured - nothing to undo" 'DarkGray'
+    $storeDone = $true
+}
+
+# ================================================================
 #  4. TIDY UP
 # ================================================================
 & schtasks.exe /Delete /TN 'RaceQuiet-Deadman' /F 2>&1 | Out-Null
@@ -392,6 +461,8 @@ if (-not $shouldReenable) {
 $leftover = @(Get-ChildItem -Path $StateDir -Filter '*.sddl' -ErrorAction SilentlyContinue)
 if ($leftover.Count -gt 0) {
     Write-Log ("KEEPING the snapshot - {0} key(s) still have modified permissions" -f $leftover.Count) 'Red'
+} elseif (-not $storeDone) {
+    Write-Log "KEEPING the snapshot - the Store auto-download policy is not restored yet" 'Red'
 } elseif (Test-Path $StateFile) {
     try { Remove-Item $StateFile -Force -ErrorAction Stop; Write-Log "snapshot consumed" 'DarkGray' }
     catch { Write-Log "could not delete the snapshot - delete $StateFile by hand" 'Yellow' }

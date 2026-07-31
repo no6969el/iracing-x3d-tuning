@@ -1,5 +1,5 @@
 <#
-    Pre-Race-Quiet.ps1  -  MEDIC-UNLOCK EDITION               v3.2.5
+    Pre-Race-Quiet.ps1  -  MEDIC-UNLOCK EDITION               v3.3.0
     ================================================================
     Same as the standard Pre-Race-Quiet, with ONE difference: it takes
     ownership of the WaaSMedicSvc registry key by default, instead of
@@ -20,6 +20,38 @@
     Trace-QuietReverts.ps1 first - if it reports
         "WaaSMedicSvc: stopped, but could NOT disable (protected)"
     then this edition is what you want. Otherwise use the standard one.
+
+    WHAT CHANGED IN v3.3.0
+    ----------------------
+    Everything added in this version came from an xperf HARD_FAULTS trace
+    of one real 25-minute session - kernel-level, with filenames, not
+    inference. It is a single reference machine (Win11, 64 GB, NVMe), so
+    treat the numbers as an example of WHAT to look for rather than as
+    universal truth; the processes involved are stock Windows components
+    that exist on every install. 4,712 hard faults were captured:
+
+        1,729  System (4)              $Mft, $UsnJrnl - NTFS metadata
+          829  backgroundTaskHost.exe  WinStore.App.dll  (Microsoft Store)
+          251  MicrosoftEdgeUpdate.exe
+          245  SearchHost.exe          Start-menu web components
+          222  MOZA Pit House.exe
+          201  TabTip.exe              touch keyboard
+          170  ctfmon.exe
+          152  TextInputHost.exe
+          130  MarvinsAIRARefactored.exe
+          120  Trading Paints.exe
+           14  iRacingSim64DX11.exe    <-- the sim
+
+    The sim was responsible for 0.3% of them. Total iRacing content
+    faulting for the whole session was 17 events on tracks.dat and
+    porsche9922cup.dat, all during track load, which is exactly where
+    you want them.
+
+    So this kit is aimed correctly, but v3.2.5 was missing the biggest
+    single offender: the Microsoft Store deciding to update apps mid-race.
+    Added in v3.3.0: InstallService, edgeupdate/edgeupdatem, PcaSvc,
+    TabletInputService, 19 more scheduled tasks, and the Store
+    auto-download policy.
 
     WHAT IT TOUCHES
     ---------------
@@ -42,6 +74,9 @@
       .\Pre-Race-Quiet.ps1 -Verify      wait 3 min afterwards, report anything that came back
       .\Pre-Race-Quiet.ps1 -NoUnlock    behave like the standard edition
       .\Pre-Race-Quiet.ps1 -KeepSearch  leave Windows Search alone
+      .\Pre-Race-Quiet.ps1 -KeepTouchKeyboard  leave TabletInputService alone (VR keyboard)
+      .\Pre-Race-Quiet.ps1 -KeepStore   leave the Store auto-download policy alone
+      .\Pre-Race-Quiet.ps1 -CloseApps   also close Telegram / MOZA Pit House / webview hosts
       .\Pre-Race-Quiet.ps1 -SkipDefender  leave Defender real-time alone
       .\Pre-Race-Quiet.ps1 -Deadman     auto-restore at next boot if you forget
       .\Pre-Race-Quiet.ps1 -Force       discard the saved snapshot (rarely wanted)
@@ -64,7 +99,10 @@ param(
     [switch]$Verify,
     [int]   $VerifyDelay = 180,
     [switch]$Deadman,
-    [switch]$NoUnlock
+    [switch]$NoUnlock,
+    [switch]$KeepTouchKeyboard,
+    [switch]$KeepStore,
+    [switch]$CloseApps
 )
 
 # This variant unlocks the Medic key by default. -NoUnlock turns it off.
@@ -80,7 +118,24 @@ $ServicesToQuiet = @(
     'wuauserv',       # Windows Update
     'bits',           # Background Intelligent Transfer (update downloads)
     'DoSvc',          # Delivery Optimization
-    'WSearch'         # Windows Search  (skipped with -KeepSearch)
+    'WSearch',        # Windows Search  (skipped with -KeepSearch)
+
+    # ---- Added v3.3.0 from an xperf HARD_FAULTS trace ----------------
+    # 25-minute Nordschleife session, 4,712 hard faults captured WITH
+    # filenames (kernel HARD_FAULTS+FILENAME providers, not inference).
+    # iRacingSim64DX11.exe accounted for 14 of them. The five services
+    # below accounted for 1,547 between them - two orders of magnitude
+    # more than the sim itself.
+    'InstallService',      # Store install/update engine.  Drove backgroundTaskHost.exe
+                           # faulting 829 times on WinStore.App.dll (15.9 MB) mid-race.
+    'edgeupdate',          # MicrosoftEdgeUpdate.exe, 251 faults. The scheduled tasks
+    'edgeupdatem',         # were already handled; the SERVICES were not.
+    'PcaSvc',              # Program Compatibility Assistant -> Amcache.hve, 101 faults
+    'TabletInputService'   # touch keyboard: TabTip 201 + TextInputHost 152 + ctfmon 170.
+                           # Skipped with -KeepTouchKeyboard if you use it in VR.
+                           # NOTE: absent on Windows 11 24H2 and later - the service was
+                           # retired and TabTip is shell-launched instead. The script
+                           # skips it harmlessly there; TabTip is handled in 4c instead.
 )
 
 $TasksToDisable = @(
@@ -109,7 +164,32 @@ $TasksToDisable = @(
     @{ Path='\Microsoft\Windows\Flighting\OneSettings\';       Name='RefreshCache' },
     @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
     @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
-    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';          Name='InitialConfiguration' }
+    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';          Name='InitialConfiguration' },
+
+    # ---- Added v3.3.0 from the same HARD_FAULTS trace ----------------
+    # Store app auto-update was the single largest non-kernel faulter.
+    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Automatic App Update' },
+    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Scheduled Start' },
+    # Application Experience wrote Amcache.hve during the session.
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='Microsoft Compatibility Appraiser' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='ProgramDataUpdater' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='StartupAppTask' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='PcaPatchDbTask' },
+    @{ Path='\Microsoft\Windows\Application Experience\';   Name='MareBackup' },
+    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='Consolidator' },
+    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='UsbCeip' },
+    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClient' },
+    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClientOnScenarioDownload' },
+    # Heavy maintenance. Any of these landing mid-race is a guaranteed
+    # hitch, and none of them need to run in the next 45 minutes.
+    @{ Path='\Microsoft\Windows\Defrag\';                   Name='ScheduledDefrag' },
+    @{ Path='\Microsoft\Windows\DiskCleanup\';              Name='SilentCleanup' },
+    @{ Path='\Microsoft\Windows\DiskFootprint\';            Name='Diagnostics' },
+    @{ Path='\Microsoft\Windows\Chkdsk\';                   Name='ProactiveScan' },
+    @{ Path='\Microsoft\Windows\Maintenance\';              Name='WinSAT' },
+    @{ Path='\Microsoft\Windows\Servicing\';                Name='StartComponentCleanup' },
+    @{ Path='\Microsoft\Windows\Registry\';                 Name='RegIdleBackup' },
+    @{ Path='\Microsoft\Windows\StateRepository\';          Name='MaintenanceTasks' }
 
     # Security maintenance (Secure Boot DBX + TPM). Fires rarely and is
     # short. Uncomment only if you have traced it hitting a session.
@@ -234,6 +314,9 @@ if (-not $isAdmin) {
     if ($Verify)       { $argList += @('-Verify','-VerifyDelay',$VerifyDelay) }
     if ($Deadman)      { $argList += '-Deadman' }
     if ($NoUnlock)     { $argList += '-NoUnlock' }
+    if ($KeepTouchKeyboard) { $argList += '-KeepTouchKeyboard' }
+    if ($KeepStore)    { $argList += '-KeepStore' }
+    if ($CloseApps)    { $argList += '-CloseApps' }
     try   { Start-Process powershell.exe -Verb RunAs -ArgumentList $argList }
     catch { Write-Host "Elevation cancelled - nothing was changed." -ForegroundColor Yellow }
     return
@@ -249,7 +332,7 @@ if ($UnlockMedic) {
     Write-Host "  ownership straight back. Original permissions are saved first." -ForegroundColor Yellow
     Write-Host "  Run with -NoUnlock to behave like the standard edition." -ForegroundColor DarkGray
 }
-Write-Log "=== Pre-Race-Quiet v3.2.5 starting ===" 'Gray' -NoHost
+Write-Log "=== Pre-Race-Quiet v3.3.0 starting ===" 'Gray' -NoHost
 
 # ---- an un-restored snapshot means we are already quiet ----------
 # Don't refuse and don't re-snapshot: the machine is currently quieted, so
@@ -283,7 +366,8 @@ if (Test-Path $StateFile) {
     }
 }
 
-if ($KeepSearch) { $ServicesToQuiet = @($ServicesToQuiet | Where-Object { $_ -ne 'WSearch' }) }
+if ($KeepSearch)        { $ServicesToQuiet = @($ServicesToQuiet | Where-Object { $_ -ne 'WSearch' }) }
+if ($KeepTouchKeyboard) { $ServicesToQuiet = @($ServicesToQuiet | Where-Object { $_ -ne 'TabletInputService' }) }
 
 # ================================================================
 #  1. SNAPSHOT  -  capture real prior state BEFORE touching anything
@@ -376,7 +460,7 @@ if (-not $SkipDefender -and (Get-Command Get-MpComputerStatus -ErrorAction Silen
 
 $snapshot = [pscustomobject]@{
     SchemaVersion = 1
-    Tool          = 'Pre-Race-Quiet v3.2.5'
+    Tool          = 'Pre-Race-Quiet v3.3.0'
     CreatedUtc    = (Get-Date).ToUniversalTime().ToString('s')
     Machine       = $env:COMPUTERNAME
     Services      = $snapServices
@@ -559,6 +643,115 @@ if (-not $SkipDefender) {
         } catch { Write-Log "could not disable (Tamper Protection on?)" 'Yellow' }
     } else {
         Write-Log "Defender cmdlets unavailable - skipped" 'DarkGray'
+    }
+}
+
+# ================================================================
+#  4b. MICROSOFT STORE AUTO-DOWNLOAD                        v3.3.0
+# ================================================================
+#  Disabling InstallService stops the engine, but the Store app can still
+#  be woken by its background task. This policy value is what actually
+#  stops it deciding to update apps while you are on track.
+#
+#  Original state goes to its own file rather than into the snapshot, so
+#  the schema and the re-quiet path are untouched. Post-Race-Restore
+#  looks for it the same way it looks for the .sddl files.
+if (-not $KeepStore) {
+    Write-Host ""
+    Write-Host "4b. Microsoft Store auto-download" -ForegroundColor White
+    $storeKey  = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
+    $storeFile = Join-Path $StateDir 'storepolicy.json'
+    try {
+        if (-not (Test-Path $storeFile)) {
+            $hadKey = Test-Path $storeKey
+            $hadVal = $null
+            if ($hadKey) {
+                $pv = Get-ItemProperty -Path $storeKey -Name 'AutoDownload' -ErrorAction SilentlyContinue
+                if ($null -ne $pv) { $hadVal = [int]$pv.AutoDownload }
+            }
+            [pscustomobject]@{ KeyExisted = $hadKey; Value = $hadVal } |
+                ConvertTo-Json | Out-File -FilePath $storeFile -Encoding utf8 -ErrorAction Stop
+            Write-Log ("captured original Store policy: keyExisted={0} value={1}" -f $hadKey, $hadVal) 'DarkGray'
+        } else {
+            Write-Log "Store policy already captured from an earlier run - keeping it" 'DarkGray'
+        }
+        if (-not (Test-Path $storeKey)) { New-Item -Path $storeKey -Force | Out-Null }
+        Set-ItemProperty -Path $storeKey -Name 'AutoDownload' -Value 2 -Type DWord -ErrorAction Stop
+        Write-Log "Store app auto-download: OFF for this session" 'Green'
+    } catch {
+        Write-Log ("could not set the Store policy: {0}" -f $_.Exception.Message) 'Yellow'
+    }
+}
+
+# ================================================================
+#  4c. NOISY USER APPS                                      v3.3.0
+# ================================================================
+#  These are not services and are not restored automatically - closing
+#  an app you launched is your call, and there is no safe way to put a
+#  user session back exactly as it was. By default this only REPORTS.
+#  Pass -CloseApps to actually close them.
+#
+#  Two tiers. Safe=$true means -CloseApps may close it: chat clients and
+#  shell components that respawn on demand. Safe=$false is REPORT ONLY and
+#  is never closed even with -CloseApps - wheelbase and headset software
+#  can own force-feedback profiles or a runtime the sim needs, and killing
+#  it mid-setup breaks people's rigs. Those are listed so the user can
+#  decide for themselves.
+$NoisyApps = @(
+    # --- chat / background clients: safe to close ---
+    @{ Name='Telegram';       Safe=$true;  Why='chat client' },
+    @{ Name='Discord';        Safe=$true;  Why='chat client (close only if not using voice)' },
+    @{ Name='Slack';          Safe=$true;  Why='chat client' },
+    @{ Name='WhatsApp';       Safe=$true;  Why='chat client' },
+    @{ Name='Signal';         Safe=$true;  Why='chat client' },
+    @{ Name='Spotify';        Safe=$true;  Why='streams and caches to disk' },
+    @{ Name='msedgewebview2'; Safe=$true;  Why='webview host, wakes with Store/Edge activity' },
+    # --- shell components: respawn on demand, safe to close ---
+    @{ Name='TabTip';         Safe=$true;  Why='touch keyboard, respawns when needed' },
+    @{ Name='TextInputHost';  Safe=$true;  Why='text input host, respawns when needed' },
+    # --- report only: never auto-closed ---
+    @{ Name='SearchHost';     Safe=$false; Why='shell component - respawns instantly, closing achieves nothing' },
+    @{ Name='MOZA Pit House'; Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='FanaLab';        Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='TrueDrive';      Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='SimPro Manager'; Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='lghub';          Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='lghub_agent';    Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='RaceHub';        Safe=$false; Why='wheelbase software - may hold your FFB profile' },
+    @{ Name='MSIAfterburner'; Safe=$false; Why='monitoring - you may want its overlay' },
+    @{ Name='RTSS';           Safe=$false; Why='frame limiter - closing it can change your frame pacing' },
+    @{ Name='HWiNFO64';       Safe=$false; Why='monitoring - you may be logging with it' }
+)
+$found = @()
+foreach ($a in $NoisyApps) {
+    $procs = @(Get-Process -Name $a.Name -ErrorAction SilentlyContinue)
+    if ($procs.Count -gt 0) {
+        $found += [pscustomobject]@{ Name=$a.Name; Why=$a.Why; Count=$procs.Count; Safe=$a.Safe }
+    }
+}
+if ($found.Count -gt 0) {
+    Write-Host ""
+    Write-Host "4c. Background apps worth closing before you drive" -ForegroundColor White
+    foreach ($f in $found) {
+        $tag = if ($f.Safe) { ' ' } else { '*' }
+        Write-Host ("   {0} {1,-18} running ({2})  - {3}" -f $tag, $f.Name, $f.Count, $f.Why) -ForegroundColor Yellow
+    }
+    if (@($found | Where-Object { -not $_.Safe }).Count -gt 0) {
+        Write-Host "     * report only - never closed automatically, your call" -ForegroundColor DarkGray
+    }
+    if ($CloseApps) {
+        foreach ($f in $found) {
+            if (-not $f.Safe) { Write-Log ("left running (report only): {0}" -f $f.Name) 'DarkGray'; continue }
+            try {
+                Stop-Process -Name $f.Name -Force -ErrorAction Stop
+                Write-Log ("closed: {0}" -f $f.Name) 'Green'
+            } catch {
+                Write-Log ("could not close {0}: {1}" -f $f.Name, $_.Exception.Message) 'Yellow'
+            }
+        }
+        Write-Host "     Closed apps are NOT reopened by Post-Race-Restore - relaunch what you want." -ForegroundColor DarkGray
+    } else {
+        Write-Host "     Reporting only. Pass -CloseApps to close the unmarked ones." -ForegroundColor DarkGray
     }
 }
 
