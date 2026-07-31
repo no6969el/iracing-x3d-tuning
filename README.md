@@ -1,4 +1,4 @@
-# iRacing Tuning — Ryzen X3D + NVIDIA
+# iRacing Tuning — Ryzen X3D + NVIDIA     (If you like this project give it a STAR!)
 
 Zero hiccups in iRacing on Ryzen X3D — **every X3D AMD has shipped**, from the 6-core 5600X3D to the dual-cached 9950X3D2. Six steps, measured on a real rig, all reversible. The guide and menus detect your chip and only ever show the fixes that are safe for it.
 
