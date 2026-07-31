@@ -466,7 +466,7 @@
   </div>
 
   <div class="callout">
-    <b>Every race from now on:</b> the menu's <b>Each-Race routine</b> quiets Windows Update/Search (and optionally Defender) before you drive and restores everything after. Optional, but it removes the last periodic stall source. <span class="muted">(Pre-Race-Quiet / Post-Race-Restore — don't skip the restore.)</span> <b>v3.2.5</b> disables 20 scheduled tasks rather than 11: a trace from a reader's machine caught nine more firing mid-session, including two that run <code>usoclient.exe</code>. Run <b>Check-Quiet-Status</b> after quieting — it now fails a machine unless <i>every</i> task is off, and names any that aren't.
+    <b>Every race from now on:</b> the menu's <b>Each-Race routine</b> quiets Windows Update/Search (and optionally Defender) before you drive and restores everything after. Optional, but it removes the last periodic stall source. <span class="muted">(Pre-Race-Quiet / Post-Race-Restore — don't skip the restore.)</span> <b>v3.3.0</b> disables 39 scheduled tasks and 11 services. A reader's trace first caught nine extra tasks firing mid-session, including two that run <code>usoclient.exe</code>; an xperf HARD_FAULTS trace then found the Microsoft Store's app auto-update was the largest single non-kernel source of hard faults in a real session. Run <b>Check-Quiet-Status</b> after quieting — it now fails a machine unless <i>every</i> task is off, and names any that aren't.
   </div>
 </section>
 
@@ -511,7 +511,7 @@
       <p>It reads the Windows event logs that record a service being re-enabled — including Service Control Manager event 7040, the definitive record — and lays them out as a timeline. Run it elevated or the Medic tasks are invisible and will look absent when they aren't.</p>
       <p>Two possible answers:</p>
       <ul class="mini">
-        <li><b>Windows Update Medic, protected.</b> On some builds its registry key is owned by TrustedInstaller and refuses to be disabled even as SYSTEM. There's an optional replacement pair in <span class="file">scripts-medic-unlock\</span> that takes ownership of that one key, disables it, and hands ownership straight back. Read its README first — it's more invasive than anything else in the kit, and most people never need it.</li>
+        <li><b>Windows Update Medic, protected.</b> On some builds its registry key is owned by TrustedInstaller and refuses to be disabled even as SYSTEM. Since v3.3.0 the fix is built in: <span class="file">Pre-Race-Quiet</span> takes ownership of that one key, disables the service, and hands ownership straight back in the same run. The original permissions are saved before anything changes, and <span class="file">Post-Race-Restore</span> verifies they came back. Pass <code>-NoUnlock</code> to skip it.</li>
         <li><b>Group Policy or an MDM/Intune profile.</b> Common on a work or managed machine. Nothing here will help; those settings get re-applied regardless. Check with <code>gpresult /h gp.html</code>.</li>
       </ul>
     </div>
@@ -546,7 +546,7 @@
     <summary>Every script in the kit — what it touches</summary>
     <div class="inner">
       <p><b>Diagnostics (read-only):</b> FullTrace (1&nbsp;Hz CSV, 39 columns: per-CCD load, CPU0 vs frequency-core interrupt/DPC, GPU util/power/clocks/throttle plus core voltage, fan, VRAM, PCIe load, P-state and the active limiter flags, sim &amp; VR CPU, pagefaults, free RAM, power plan — colour-coded live, and timestamp gaps flagged for corroboration rather than taken as proof of a stall). Afterburner-sourced sensors need MSI Afterburner running; anything unavailable stays blank. Then Preflight-Check, Scan-Stutter-Events, Watch-TimerResolution.</p>
-      <p><b>Fixes (each reversible):</b> Enable-GlobalTimerResolution (<code>GlobalTimerResolutionRequests=1</code> under <code>HKLM\...\Session Manager\kernel</code>), Set-GPU-IRQ-Affinity (DevicePolicy=4 + AssignmentSetOverride on the NVIDIA device), Set-NIC-USB-IRQ-Affinity (same, PCI NICs + USB hosts, spread over cores <b data-cpu="nic">17–19</b>), Add-Defender-Exclusions, Apply-Guide-Extras (USB suspend, Game Bar/DVR), Pre-Race-Quiet / Post-Race-Restore (Update/Search tasks + services, optional Defender realtime — needs Tamper Protection off), Repair-PerfCounters (lodctr /R both arches + WMIADAP), Enable-DiagnosticLogs.</p>
+      <p><b>Fixes (each reversible):</b> Enable-GlobalTimerResolution (<code>GlobalTimerResolutionRequests=1</code> under <code>HKLM\...\Session Manager\kernel</code>), Set-GPU-IRQ-Affinity (DevicePolicy=4 + AssignmentSetOverride on the display adapter — NVIDIA, AMD or Intel), Set-NIC-USB-IRQ-Affinity (same, PCI NICs + USB hosts, spread over cores <b data-cpu="nic">17–19</b>), Add-Defender-Exclusions, Apply-Guide-Extras (USB suspend, Game Bar/DVR), Pre-Race-Quiet / Post-Race-Restore (Update/Search tasks + services, optional Defender realtime — needs Tamper Protection off), Repair-PerfCounters (lodctr /R both arches + WMIADAP), Enable-DiagnosticLogs.</p>
       <p><b>HAGS</b> (Hardware-Accelerated GPU Scheduling) is deliberately not scripted — it's a genuine toss-up on newer cards. Test both ways.</p>
       <p>Full inventory with admin flags: <span class="file">scripts\README.txt</span> · <a href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">browse the source</a>.</p>
     </div>

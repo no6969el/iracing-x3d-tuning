@@ -1,4 +1,4 @@
-iRacing X3D Tuning Kit  -  v3.1.0
+iRacing X3D Tuning Kit  -  v3.3.0
 ============================================================
 This is the complete kit. Nothing to merge, nothing to configure.
 
@@ -46,6 +46,7 @@ FOLDER LAYOUT  -  keep this structure intact
   Apply-Baseline.ps1
   scripts\                     <- all the individual tools
       X3D-Profiles.ps1         <- shared CPU detection, don't delete
+      Kit-Common.ps1           <- what gets quieted, don't delete
       README.txt               <- what every script does
   tests\                       <- development only, safe to delete
   RELEASE-NOTES.md             <- what changed in this version
@@ -75,10 +76,15 @@ IF THE QUIETING DOESN'T HOLD
      scripts\Trace-QuietReverts.ps1
 
   It reads the Windows event logs and tells you what re-enabled it,
-  rather than leaving you to guess. If it names Windows Update Medic
-  as protected, there is an optional replacement pair in
-  scripts-medic-unlock\ that forces the issue - read its README
-  first, it is more invasive than the rest of the kit.
+  rather than leaving you to guess. As of v3.3.0 it watches all 11
+  services the kit disables, not the 6 it used to - if you traced this
+  on an older version, run it again; it can now see more.
+
+  The Medic unlock is built in as standard, so there is no separate
+  folder to fetch. If Trace-QuietReverts names Windows Update Medic as
+  protected, Pre-Race-Quiet already takes ownership of that one registry
+  key, disables the service and hands ownership straight back in the
+  same run. Pass -NoUnlock if you would rather it did not.
 
   If it points at Group Policy or a work/MDM profile instead, none
   of this will help. A managed machine re-applies those settings no
@@ -90,21 +96,25 @@ IF WINDOWS BLOCKS THE SCRIPTS
   the ZIP -> Properties -> tick Unblock, THEN extract. Doing it on the
   zip handles every file at once.
 
-WHAT CHANGED IN v3.0.0
-  Pre-Race-Quiet now DISABLES the update services instead of stopping
-  them. Stopping didn't hold - Windows Update Medic restarted them about
-  ten minutes later, mid-race. It also clears their auto-restart settings
-  and snapshots your real prior state so the restore is exact.
+WHAT CHANGED IN v3.3.0
+  Everything the kit disables now lives in ONE file, scripts\Kit-Common.ps1.
+  Pre-Race-Quiet, Post-Race-Restore, Check-Quiet-Status and
+  Trace-QuietReverts all read it. Before this the lists were copy-pasted
+  across four scripts each and had already drifted apart once - v3.2.5
+  shipped a status screen that reported "race ready" while services it
+  did not know about were still running.
 
-  Every X3D AMD has shipped is now supported, including the 6-core
-  parts (5500X3D, 5600X3D, 7500X3D, 7600X3D) that had no option at all
-  before, plus the 7700X3D, 9850X3D, the dual-cached 9950X3D2, and the
-  mobile HX3D chips. Non-X3D CPUs are supported for the general fixes.
+  Trace-QuietReverts was watching 6 services while the quiet script
+  disabled 11, so five could revert without it ever saying so. Fixed.
 
-  Fixed a real bug: on a 6-core chip the old code aimed interrupts at
-  CPU 8 and CPUs 9-11. With SMT off those don't exist, so it wrote
-  affinity masks pointing at nothing. Targets are now validated against
-  the CPUs Windows actually reports and can never be out of range.
+  The quiet list also grew, from an xperf HARD_FAULTS trace of a real
+  25-minute session. 4,712 hard faults, of which the sim itself
+  accounted for 14. The Microsoft Store deciding to update apps mid-race
+  was the largest single non-kernel source. Now 11 services and 39
+  scheduled tasks.
+
+  GPU interrupt steering works on NVIDIA, AMD and Intel now, detected by
+  PCI vendor ID - no more swapping files by hand for an AMD card.
 
   Full detail in RELEASE-NOTES.md.
 

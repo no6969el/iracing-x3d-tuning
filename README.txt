@@ -79,7 +79,7 @@ Set-NIC-USB-IRQ-Affinity.ps1   Steer NIC + USB interrupts off CPU 0. Reboot. (AD
 Undo-NIC-USB-IRQ-Affinity.ps1  Revert the above. Reboot.                     (ADMIN)
 Pre-Race-Quiet.ps1             Before racing: DISABLES the update services
                                (incl. Update Medic), clears their recovery
-                               actions, disables 20 scheduled tasks, and
+                               actions, disables 39 scheduled tasks, and
                                turns off Defender real-time. Snapshots prior
                                state first. Self-elevates. See PER-SESSION.  (ADMIN)
 Post-Race-Restore.ps1          After racing: REQUIRED. Replays the snapshot
@@ -91,6 +91,10 @@ Undo-Guide-Extras.ps1          Revert the above.                             (AD
 --- UTILITY ---
 X3D-Profiles.ps1         Shared CPU detection. Not run directly - every other
                          script loads it. Don't delete it.                (n/a)
+Kit-Common.ps1           Shared kit version + the service and task lists that
+                         Pre-Race-Quiet disables. Not run directly; the quiet,
+                         restore, status and trace scripts all read it, so it
+                         is the ONE place to edit what gets quieted.      (n/a)
 Create-Launchers.ps1     Make a .lnk next to every .ps1 (admin ones auto-elevate). (no admin)
 
 SUGGESTED FIRST-TIME ORDER
@@ -146,9 +150,16 @@ Before: Pre-Race-Quiet     After: Post-Race-Restore
   never held against the verdict - Windows 10 has no WindowsAI\Settings,
   and some builds have no Flighting tasks.
 
-WHAT GETS DISABLED BEFORE A RACE  (v3.2.5)
-  Services (6): WaaSMedicSvc, UsoSvc, wuauserv, bits, DoSvc, WSearch
-  Tasks (20):
+WHAT GETS DISABLED BEFORE A RACE  (v3.3.0)
+  The authoritative list is scripts\Kit-Common.ps1 - one file that
+  Pre-Race-Quiet, Post-Race-Restore, Check-Quiet-Status and
+  Trace-QuietReverts all read. If this section and that file ever
+  disagree, the file is right.
+
+  Services (11): WaaSMedicSvc, UsoSvc, wuauserv, bits, DoSvc, WSearch,
+     InstallService, edgeupdate, edgeupdatem, PcaSvc, TabletInputService
+
+  Tasks (39):
      WaaSMedic\PerformRemediation
      UpdateOrchestrator\Schedule Scan, Schedule Scan Static Task,
        Universal Orchestrator Start, Report policies, UUS Failover Task,
@@ -162,12 +173,27 @@ WHAT GETS DISABLED BEFORE A RACE  (v3.2.5)
      Windows Error Reporting\QueueReporting
      DeviceDirectoryClient\RegisterUserDevice
      WindowsAI\Settings\InitialConfiguration
+     WindowsUpdate\Automatic App Update, Scheduled Start
+     Application Experience\Microsoft Compatibility Appraiser,
+       ProgramDataUpdater, StartupAppTask, PcaPatchDbTask, MareBackup
+     Customer Experience Improvement Program\Consolidator, UsbCeip
+     Feedback\Siuf\DmClient, DmClientOnScenarioDownload
+     Defrag\ScheduledDefrag
+     DiskCleanup\SilentCleanup
+     DiskFootprint\Diagnostics
+     Chkdsk\ProactiveScan
+     Maintenance\WinSAT
+     Servicing\StartComponentCleanup
+     Registry\RegIdleBackup
+     StateRepository\MaintenanceTasks
    + any MicrosoftEdgeUpdateTaskMachine* tasks found
 
   PI\Secure-Boot-Update is in the list but COMMENTED OUT. It carries
   Secure Boot revocations and TPM maintenance. Uncomment it only if you
-  have traced it firing inside a session. Post-Race-Restore re-enables
-  it either way.
+  have traced it firing inside a session.
+  (Before v3.3.0, Post-Race-Restore's no-snapshot fallback re-enabled it
+  even though the quiet had never disabled it. Both now read one list,
+  so a restore can only ever touch what the quiet actually touched.)
 
   Everything above is captured to the snapshot before it is touched, and
   anything you already had disabled stays disabled on restore.

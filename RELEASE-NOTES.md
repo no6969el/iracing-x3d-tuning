@@ -1,3 +1,48 @@
+# Release Notes — v3.3.0
+
+## What's new in v3.3.0
+
+Two fixes, both the same shape: a fact that lived in more than one place drifted,
+and nothing was watching.
+
+**The quiet list is now one list.** `$ServicesToQuiet` and `$TasksToDisable` used
+to be copy-pasted across four scripts each, under hand-written "must mirror
+Pre-Race-Quiet" comments. They are now in `scripts/Kit-Common.ps1`, which
+`Pre-Race-Quiet`, `Post-Race-Restore`, `Check-Quiet-Status` and
+`Trace-QuietReverts` all read. One place to edit; nothing left to keep in step.
+
+**`Trace-QuietReverts` could only see half of what it was watching.** It tracked
+six services while the quiet script disabled eleven, so five could revert without
+the forensic tool ever naming them. Its scheduled-task filter had the same
+problem. Both are derived from the shared list now.
+
+**The quiet list also grew,** from an xperf HARD_FAULTS trace of a real
+25-minute session: 4,712 hard faults, of which the sim itself accounted for 14
+and five untouched services accounted for 1,547. Added `InstallService`,
+`edgeupdate`, `edgeupdatem`, `PcaSvc`, `TabletInputService`, 19 scheduled tasks
+and the Store auto-download policy.
+
+**GPU interrupt steering works on any vendor now** — NVIDIA, AMD or Intel, by PCI
+vendor ID. The old manual file-swap folder is gone.
+
+### Read this first — one breaking change
+
+`scripts/Kit-Common.ps1` is new and required. The four race-quiet scripts refuse
+to run without it, so copy the whole `scripts/` folder rather than individual
+files. Run `Post-Race-Restore` on your current version **before** upgrading.
+
+### Honest gaps
+
+Nothing in v3.3.0 has been run on Windows hardware yet — the scripts parse clean,
+which is not the same thing. The `Post-Race-Restore` full round trip is still
+outstanding, and the `wuauserv` revert reported from the field is **not** fixed
+by this release; the trace tool can simply now see the services that were
+previously invisible to it.
+
+Full detail in the [changelog](CHANGELOG.md).
+
+---
+
 # Release Notes — v3.2.5
 
 ## What's new in v3.2.5

@@ -6,20 +6,116 @@ The project ships as a script kit plus a web guide at
 
 ---
 
-## Unreleased — repository maintenance
+## v3.3.0 — one list, and a trace tool that could only see half of it (current)
 
-- Added `Validate-Repo.ps1` and `Validate-Repo.bat` to verify local docs, scripts, and package references from the kit folder.
-- This is a repo validation utility for maintainers, not a runtime change for end users.
+Two root causes, both the same shape: **a fact that lived in more than one place
+drifted, and nothing was watching.**
 
----
+The first was measured. An xperf HARD_FAULTS trace of a real 25-minute
+Nordschleife session — kernel providers, with filenames, not inference —
+captured 4,712 hard faults. `iRacingSim64DX11.exe` accounted for **14** of them.
+Five services the kit was not touching accounted for **1,547**, led by the
+Microsoft Store deciding to update apps mid-race (829 faults on
+`WinStore.App.dll` alone). The kit was aimed correctly and still missing the
+largest single non-kernel offender.
 
-## Unreleased — bonus mini tuner
+The second was structural, and it is the more important one. The service list
+lived in four separate copies and the task list in four more, each with a
+hand-written *"must mirror Pre-Race-Quiet"* comment above it. Those comments were
+an admission that the lists drift — and v3.2.5's own entry, immediately below,
+is that drift shipping as a bug. This release removes the duplication rather
+than adding another comment asking people to be careful.
 
-- Added a lightweight companion tool, `mini-tuner/Small-Tuning-Menu.ps1`, plus `mini-tuner/Start-Small-Tuning-Menu.bat`, for users who want the baseline fixes without the full troubleshooting workflow.
-- The mini launcher keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**.
-- This is a lower-profile companion addition rather than a major release update.
+### Breaking
 
----
+- **`scripts/Kit-Common.ps1` is new and required.** `Pre-Race-Quiet`,
+  `Post-Race-Restore`, `Check-Quiet-Status` and `Trace-QuietReverts` all
+  dot-source it and will refuse to run without it. Copy the whole `scripts/`
+  folder; a partial upgrade will not work. Run `Post-Race-Restore` on your
+  current version **before** swapping files.
+
+### Fixed — `Trace-QuietReverts` was blind to five services
+
+`$Watched` was six hand-typed service names. `Pre-Race-Quiet` disables eleven.
+The five added by the hard-faults work could revert without the forensic tool
+ever mentioning them — and its scheduled-task filter was a six-folder regex
+against a list that had grown to 22 folders.
+
+Both are now derived from the shared list, so the trace cannot fall behind what
+the quiet script does. If you have been chasing the `wuauserv` revert, re-run
+this: it can now see things it previously could not.
+
+### Fixed — a restore could enable a task the quiet never disabled
+
+`PI\Secure-Boot-Update` was commented out in `Pre-Race-Quiet` but present in
+`Post-Race-Restore`'s no-snapshot fallback. A fallback restore therefore turned
+**on** a task the kit had never turned off. One shared list makes that class of
+mismatch impossible.
+
+### What's new
+
+- **One place to edit what gets quieted.** `Kit-Common.ps1` holds `$KitVersion`,
+  `$ServicesToQuiet` (11), `$TasksToDisable` (39) and the no-snapshot restore
+  defaults. All four race-quiet scripts read it. The provenance comments — which
+  trace, how many faults, why each entry earned its place — moved with the data.
+- **Added to the quiet list** from the HARD_FAULTS trace: `InstallService`,
+  `edgeupdate`, `edgeupdatem`, `PcaSvc`, `TabletInputService`, 19 further
+  scheduled tasks, and the Store auto-download policy. `-KeepTouchKeyboard`
+  leaves `TabletInputService` alone if you use the touch keyboard in VR.
+- **GPU interrupt steering is now vendor-neutral.** `Set-GPU-IRQ-Affinity` and
+  its undo detect the display adapter by PCI vendor ID (NVIDIA `VEN_10DE`, AMD
+  `VEN_1002`, Intel `VEN_8086`) instead of assuming NVIDIA. The interrupt-affinity
+  policy attaches to the device instance, not the driver, so the mechanism was
+  always identical across vendors. This replaces the manual file-swap that the
+  `AMD Related Optimizer files/` folder used to require; that folder is gone.
+- **The undo is gentler.** It removes only `DevicePolicy` and
+  `AssignmentSetOverride`, then deletes the key only if nothing else is left,
+  rather than removing the key outright. Running it when no policy was applied
+  now reports "nothing to undo" instead of doing nothing silently.
+- **`$KitVersion` drives the banners.** Runtime version strings and the snapshot's
+  `Tool` field read from one constant. Four files previously claimed four
+  different versions.
+- **`.gitattributes`** pins text files to CRLF. Four of the most-edited scripts
+  had drifted to LF against the project's own convention.
+
+### Documentation
+
+- `README.txt`'s "what gets disabled" inventory said 6 services and 20 tasks
+  under a v3.2.5 heading. It now matches the shipped lists (11 and 39) and points
+  at `Kit-Common.ps1` as authoritative.
+- Removed the `Validate-Repo.ps1` / `Validate-Repo.bat` references from
+  `README.md`. They were listed twice and announced in this changelog, but the
+  files have never existed in the repository.
+- `index.html` no longer describes the GPU fix as NVIDIA-only, and the
+  each-race note now says 39 tasks / 11 services instead of v3.2.5's 20 and 6.
+
+### Validated
+
+- All 28 scripts parse clean under PowerShell 7 AST parsing (Linux sandbox).
+- The shared lists resolve to 11 services and 39 tasks, and every service in
+  `$ServicesToQuiet` has a matching entry in `$ServiceDefaults`.
+- The derived task-path regex matches every folder in `$TasksToDisable`.
+
+### Not yet validated
+
+- **Nothing here has been run on Windows hardware.** Parse-clean is not
+  run-clean. `Pre-Race-Quiet` → `Post-Race-Restore` needs a full round trip on a
+  real machine before this is called shipped — that round trip was already
+  outstanding from v3.1.0.
+- The vendor-neutral GPU scripts have not been exercised on an AMD or Intel
+  adapter; the NVIDIA path is unchanged in behaviour but is also untested here.
+- The `wuauserv` revert reported from the field is **not** fixed by this release.
+  The trace tool can now see the five previously invisible services, which may
+  identify the healer, but the cause is still open.
+
+### Bonus — iRacing Tuner Mini
+
+`mini-tuner/Small-Tuning-Menu.ps1` and `mini-tuner/Start-Small-Tuning-Menu.bat`,
+for people who want the baseline fixes without the full troubleshooting
+workflow. It keeps the initial CPU detection, then offers **Optimize My PC**, the
+before/after race routine, **Defender Exclusions** and **Guide Extras**. A
+lower-profile companion rather than a headline feature. Not included in the main
+ZIP download — GitHub repository only.
 
 ---
 
@@ -53,7 +149,7 @@ Only `index.html` changed.
 
 ---
 
-## v3.2.5 — the quiet list was incomplete, and the status screen agreed with it (current)
+## v3.2.5 — the quiet list was incomplete, and the status screen agreed with it
 
 A trace came in from another user's machine — an 8-core X3D rig, not the
 development box. In a 17-minute window, **14 scheduled tasks launched**. Not one
@@ -603,7 +699,7 @@ separate dies; the console output labels this correctly while logging.
 
 ---
 
-## v2.1.0 — Race-Quiet that actually holds
+## v2.1.0 — Disable, don’t stop: the first Race-Quiet fix
 
 Field report: `wuauserv` and `UsoSvc` came back on their own roughly 10 minutes
 after `Pre-Race-Quiet` ran, so background update scans resumed mid-session.
