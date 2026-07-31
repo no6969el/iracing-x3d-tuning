@@ -1,1 +1,0 @@
-Replace these files to switch from Nvidia optimization to the AMD version.
