@@ -1,9 +1,9 @@
 <#
-    Steer NVIDIA GPU interrupts away from the sim's core
+    Steer GPU interrupts away from the sim's core  (NVIDIA + AMD + Intel)
     ---------------------------------------------------------------
-    iRacing's sim thread favors CPU 0, and NVIDIA's GPU interrupts
-    (nvlddmkm) also default toward CPU 0 - they collide and cause DPC
-    spikes. This steers the GPU's interrupt handling elsewhere:
+    iRacing's sim thread favors CPU 0, and the GPU's interrupts also
+    default toward CPU 0 - they collide and cause DPC spikes. This steers
+    the GPU's interrupt handling elsewhere:
 
       * Dual-CCD  -> the first CPU of the SECOND CCD, off the die the
                      sim is pinned to (16 on a 16-core, 12 on a 12-core).
@@ -13,6 +13,12 @@
     The target comes from X3D-Profiles.ps1, which knows every X3D SKU
     and validates the answer against the CPUs Windows actually reports.
     It can never point at a processor that does not exist.
+
+    VENDOR-NEUTRAL: the interrupt-affinity policy attaches to the device
+    instance, not the driver, so the mechanism is identical for any GPU.
+    This script finds the active display adapter by PCI vendor ID:
+        NVIDIA = VEN_10DE   AMD = VEN_1002   Intel = VEN_8086
+    If more than one dedicated GPU is present it steers all of them.
 
     MUST run as Administrator. Reboot afterward, then verify with LatencyMon.
     Reversible with Undo-GPU-IRQ-Affinity.ps1.
@@ -57,9 +63,26 @@ if (-not $admin) { Write-Host "ERROR: right-click PowerShell and Run as Administ
 $mask  = ([uint64]1) -shl $TargetCore
 $bytes = [System.BitConverter]::GetBytes($mask)      # KAFFINITY, group 0
 
-# --- find NVIDIA display device(s) ---
-$gpus = Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match 'VEN_10DE' }
-if (-not $gpus) { Write-Host "ERROR: no active NVIDIA display device found." -ForegroundColor Red; return }
+# --- find the dedicated GPU(s), any vendor ------------------------
+# Vendor ID -> friendly label + the driver name LatencyMon will show.
+$Vendors = @{
+    'VEN_10DE' = @{ Name = 'NVIDIA'; Driver = 'nvlddmkm' }
+    'VEN_1002' = @{ Name = 'AMD';    Driver = 'amdkmdag' }
+    'VEN_8086' = @{ Name = 'Intel';  Driver = 'igdkmd64' }
+}
+
+$all  = Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue
+$gpus = $all | Where-Object { $id = $_.InstanceId; ($Vendors.Keys | Where-Object { $id -match $_ }) }
+
+if (-not $gpus) {
+    Write-Host "ERROR: no active display adapter with a recognized vendor ID (NVIDIA/AMD/Intel) was found." -ForegroundColor Red
+    if ($all) {
+        Write-Host "  Display adapters Windows reports:" -ForegroundColor DarkGray
+        foreach ($d in $all) { Write-Host ("    - {0}  [{1}]" -f $d.FriendlyName, $d.InstanceId) -ForegroundColor DarkGray }
+        Write-Host "  If your GPU is above, tell the kit author its VEN_XXXX id so it can be added." -ForegroundColor DarkGray
+    }
+    return
+}
 
 if ($Simulated) {
     Write-Host ""
@@ -67,8 +90,12 @@ if ($Simulated) {
 }
 
 foreach ($g in $gpus) {
+    # identify the vendor for this specific adapter (for label + driver hint)
+    $venKey = ($Vendors.Keys | Where-Object { $g.InstanceId -match $_ } | Select-Object -First 1)
+    $ven    = $Vendors[$venKey]
+
     Write-Host ""
-    Write-Host "GPU : $($g.FriendlyName)" -ForegroundColor Cyan
+    Write-Host ("GPU : {0}  ({1})" -f $g.FriendlyName, $ven.Name) -ForegroundColor Cyan
     Write-Host "  Instance: $($g.InstanceId)"
     $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($g.InstanceId)\Device Parameters\Interrupt Management\Affinity Policy"
 
@@ -82,7 +109,7 @@ foreach ($g in $gpus) {
         New-ItemProperty -Path $key -Name 'DevicePolicy' -PropertyType DWord -Value 4 -Force | Out-Null
         # AssignmentSetOverride = processor mask
         New-ItemProperty -Path $key -Name 'AssignmentSetOverride' -PropertyType Binary -Value $bytes -Force | Out-Null
-        Write-Host ("  -> GPU interrupts pinned to CPU {0} (mask 0x{1:X})" -f $TargetCore, $mask) -ForegroundColor Green
+        Write-Host ("  -> GPU interrupts pinned to CPU {0} (mask 0x{1:X})  [verify driver '{2}' in LatencyMon]" -f $TargetCore, $mask, $ven.Driver) -ForegroundColor Green
     } catch {
         Write-Host "  ERROR writing registry (permissions?): $_" -ForegroundColor Red
     }
@@ -93,6 +120,6 @@ if ($Simulated) {
     Write-Host "Dry run complete - no changes were made." -ForegroundColor Magenta
 } else {
     Write-Host "Done. REBOOT for it to take effect, then run LatencyMon and confirm" -ForegroundColor Yellow
-    Write-Host "nvlddmkm ISRs/DPCs now land on CPU $TargetCore instead of CPU 0." -ForegroundColor Yellow
+    Write-Host "the GPU driver's ISRs/DPCs now land on CPU $TargetCore instead of CPU 0." -ForegroundColor Yellow
     Write-Host "If it reverts after reboot (MSI-mode quirk), re-run this each session." -ForegroundColor DarkGray
 }

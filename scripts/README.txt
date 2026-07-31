@@ -91,6 +91,10 @@ Undo-Guide-Extras.ps1          Revert the above.                             (AD
 --- UTILITY ---
 X3D-Profiles.ps1         Shared CPU detection. Not run directly - every other
                          script loads it. Don't delete it.                (n/a)
+Kit-Common.ps1           Shared kit version + the service and task lists that
+                         Pre-Race-Quiet disables. Not run directly; the quiet,
+                         restore, status and trace scripts all read it, so it
+                         is the ONE place to edit what gets quieted.      (n/a)
 Create-Launchers.ps1     Make a .lnk next to every .ps1 (admin ones auto-elevate). (no admin)
 
 SUGGESTED FIRST-TIME ORDER

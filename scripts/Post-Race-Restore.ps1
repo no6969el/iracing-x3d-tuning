@@ -44,22 +44,22 @@ $StateFile = Join-Path $StateDir 'state.json'
 $LogFile   = Join-Path $StateDir 'RaceQuiet.log'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 
-# Windows defaults, used only when there is no snapshot to replay.
-# 2 = Automatic, 3 = Manual, 4 = Disabled
-$Defaults = @{
-    'wuauserv'     = 3
-    'UsoSvc'       = 2
-    'WaaSMedicSvc' = 3
-    'bits'         = 3
-    'DoSvc'        = 2
-    'WSearch'      = 2
-    # ---- added v3.3.0, must mirror $ServicesToQuiet in Pre-Race-Quiet ----
-    'InstallService'     = 3
-    'edgeupdate'         = 2
-    'edgeupdatem'        = 3
-    'PcaSvc'             = 2
-    'TabletInputService' = 3
+# The service list, the task list and the fallback startup types all come
+# from Kit-Common.ps1, which Pre-Race-Quiet reads too. Nothing to keep in
+# step by hand - edit them there.
+$common = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+if (-not (Test-Path $common)) {
+    Write-Host ""
+    Write-Host "  scripts\Kit-Common.ps1 is missing - re-unzip the kit." -ForegroundColor Red
+    Write-Host "  Without it this script cannot tell what needs restoring." -ForegroundColor Red
+    Write-Host ""
+    return
 }
+. $common
+# Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
+
+# Windows defaults, used only when there is no snapshot to replay.
+$Defaults = $ServiceDefaults
 
 function Write-Log {
     param([string]$Msg, [string]$Color = 'Gray', [switch]$NoHost)
@@ -115,7 +115,7 @@ if (-not $isAdmin) {
 
 Write-Host ""
 Write-Host "======  POST-RACE RESTORE (MEDIC-UNLOCK EDITION)  ======" -ForegroundColor Cyan
-Write-Log "=== Post-Race-Restore v3.3.0 starting ===" 'Gray' -NoHost
+Write-Log ("=== Post-Race-Restore v{0} starting ===" -f $KitVersion) 'Gray' -NoHost
 
 # ---- load the snapshot -------------------------------------------
 $snap = $null
@@ -273,51 +273,11 @@ if ($snap) { $taskList = @($snap.Tasks) }
 
 if ($taskList.Count -eq 0) {
     # no snapshot: re-enable the standard set by name
-    $fallback = @(
-        @{ Path='\Microsoft\Windows\WaaSMedic\';                   Name='PerformRemediation' },
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Scan' },
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Scan Static Task' },
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Universal Orchestrator Start' },
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Report policies' },
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='UUS Failover Task' },
-        @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdates' },
-        @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdatesAsUser' },
-        @{ Path='\Microsoft\Windows\PushToInstall\';               Name='LoginCheck' },
-        @{ Path='\Microsoft\Windows\PushToInstall\';               Name='Registration' },
-        @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\'; Name='ReconcileLanguageResources' },
-        # Keep in step with $TasksToDisable in Pre-Race-Quiet.ps1 and $tasks
-        # in Check-Quiet-Status.ps1. All three lists must agree.
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Work' },
-        @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Start Oobe Expedite Work' },
-        @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='ReconcileFeatures' },
-        @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataReceiver' },
-        @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataFlushing' },
-        @{ Path='\Microsoft\Windows\Flighting\OneSettings\';      Name='RefreshCache' },
-        @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
-        @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
-        @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' },
-        @{ Path='\Microsoft\Windows\PI\';                          Name='Secure-Boot-Update' },
-        # ---- added v3.3.0 ----
-        @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Automatic App Update' },
-        @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Scheduled Start' },
-        @{ Path='\Microsoft\Windows\Application Experience\';   Name='Microsoft Compatibility Appraiser' },
-        @{ Path='\Microsoft\Windows\Application Experience\';   Name='ProgramDataUpdater' },
-        @{ Path='\Microsoft\Windows\Application Experience\';   Name='StartupAppTask' },
-        @{ Path='\Microsoft\Windows\Application Experience\';   Name='PcaPatchDbTask' },
-        @{ Path='\Microsoft\Windows\Application Experience\';   Name='MareBackup' },
-        @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='Consolidator' },
-        @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='UsbCeip' },
-        @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClient' },
-        @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClientOnScenarioDownload' },
-        @{ Path='\Microsoft\Windows\Defrag\';                   Name='ScheduledDefrag' },
-        @{ Path='\Microsoft\Windows\DiskCleanup\';              Name='SilentCleanup' },
-        @{ Path='\Microsoft\Windows\DiskFootprint\';            Name='Diagnostics' },
-        @{ Path='\Microsoft\Windows\Chkdsk\';                   Name='ProactiveScan' },
-        @{ Path='\Microsoft\Windows\Maintenance\';              Name='WinSAT' },
-        @{ Path='\Microsoft\Windows\Servicing\';                Name='StartComponentCleanup' },
-        @{ Path='\Microsoft\Windows\Registry\';                 Name='RegIdleBackup' },
-        @{ Path='\Microsoft\Windows\StateRepository\';          Name='MaintenanceTasks' }
-    )
+    # Same list Pre-Race-Quiet disables, from Kit-Common.ps1.
+    # (Before v3.3.0 this copy also carried PI\Secure-Boot-Update, which
+    #  the quiet script never disables - so a fallback restore could turn
+    #  ON a task the kit had never turned off. Sharing one list fixes it.)
+    $fallback = $TasksToDisable
     foreach ($f in $fallback) { $taskList += [pscustomobject]@{ Path=$f.Path; Name=$f.Name; State='Ready' } }
     foreach ($e in @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'MicrosoftEdgeUpdateTaskMachine*' })) {
         $taskList += [pscustomobject]@{ Path=$e.TaskPath; Name=$e.TaskName; State='Ready' }

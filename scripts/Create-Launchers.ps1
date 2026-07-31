@@ -21,7 +21,7 @@ $wsh = New-Object -ComObject WScript.Shell
 $made = 0
 
 # Skip this script, the shared library (never run directly), and the dev tests.
-$skipNames = @('Create-Launchers.ps1','X3D-Profiles.ps1')
+$skipNames = @('Create-Launchers.ps1','X3D-Profiles.ps1','Kit-Common.ps1')
 Get-ChildItem -Path $root -Recurse -Filter *.ps1 |
     Where-Object { $skipNames -notcontains $_.Name -and $_.FullName -notmatch '\\tests\\' } |
     ForEach-Object {

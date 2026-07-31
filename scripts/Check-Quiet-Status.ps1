@@ -32,6 +32,19 @@ $StateFile = Join-Path $env:ProgramData 'RaceQuiet\state.json'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $StartName = @{ 0='Boot'; 1='System'; 2='Automatic'; 3='Manual'; 4='Disabled' }
 
+# The service and task lists come from Kit-Common.ps1, the same file
+# Pre-Race-Quiet reads. This screen can no longer disagree with what the
+# quiet script actually does - which is exactly the v3.2.5 bug.
+$common = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+if (-not (Test-Path $common)) {
+    Write-Host ""
+    Write-Host "  scripts\Kit-Common.ps1 is missing - re-unzip the kit." -ForegroundColor Red
+    Write-Host ""
+    return
+}
+. $common
+# Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
+
 Write-Host ""
 Write-Host "  ================  RACE-QUIET STATUS  ================" -ForegroundColor Cyan
 Write-Host ""
@@ -52,9 +65,7 @@ Write-Host ""
 Write-Host "  Services:" -ForegroundColor Gray
 $svcQuiet = $true
 $anyManual = $false
-# Must mirror $ServicesToQuiet in Pre-Race-Quiet.ps1.
-foreach($s in 'WaaSMedicSvc','UsoSvc','wuauserv','bits','DoSvc','WSearch',
-              'InstallService','edgeupdate','edgeupdatem','PcaSvc','TabletInputService'){
+foreach($s in $ServicesToQuiet){
     $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
     if(-not $svc){ Write-Host "           $s not present on this build" -ForegroundColor DarkGray; continue }
 
@@ -80,51 +91,7 @@ foreach($s in 'WaaSMedicSvc','UsoSvc','wuauserv','bits','DoSvc','WSearch',
 # --- scheduled tasks ---
 Write-Host ""
 Write-Host "  Scheduled tasks:" -ForegroundColor Gray
-$tasks = @(
-    # Must match $TasksToDisable in Pre-Race-Quiet.ps1 and $fallback in
-    # Post-Race-Restore.ps1. If you add a task there, add it here too or
-    # this screen will report "race ready" while that task is still live.
-    @{ Path='\Microsoft\Windows\WaaSMedic\';                   Name='PerformRemediation' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Scan' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Scan Static Task' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Universal Orchestrator Start' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Report policies' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='UUS Failover Task' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Work' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Start Oobe Expedite Work' },
-    @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdates' },
-    @{ Path='\Microsoft\Windows\InstallService\';              Name='ScanForUpdatesAsUser' },
-    @{ Path='\Microsoft\Windows\PushToInstall\';               Name='LoginCheck' },
-    @{ Path='\Microsoft\Windows\PushToInstall\';               Name='Registration' },
-    @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\'; Name='ReconcileLanguageResources' },
-    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='ReconcileFeatures' },
-    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataReceiver' },
-    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';    Name='UsageDataFlushing' },
-    @{ Path='\Microsoft\Windows\Flighting\OneSettings\';      Name='RefreshCache' },
-    @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
-    @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
-    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';         Name='InitialConfiguration' },
-    # ---- added v3.3.0 ----
-    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Automatic App Update' },
-    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Scheduled Start' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='Microsoft Compatibility Appraiser' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='ProgramDataUpdater' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='StartupAppTask' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='PcaPatchDbTask' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='MareBackup' },
-    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='Consolidator' },
-    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='UsbCeip' },
-    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClient' },
-    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClientOnScenarioDownload' },
-    @{ Path='\Microsoft\Windows\Defrag\';                   Name='ScheduledDefrag' },
-    @{ Path='\Microsoft\Windows\DiskCleanup\';              Name='SilentCleanup' },
-    @{ Path='\Microsoft\Windows\DiskFootprint\';            Name='Diagnostics' },
-    @{ Path='\Microsoft\Windows\Chkdsk\';                   Name='ProactiveScan' },
-    @{ Path='\Microsoft\Windows\Maintenance\';              Name='WinSAT' },
-    @{ Path='\Microsoft\Windows\Servicing\';                Name='StartComponentCleanup' },
-    @{ Path='\Microsoft\Windows\Registry\';                 Name='RegIdleBackup' },
-    @{ Path='\Microsoft\Windows\StateRepository\';          Name='MaintenanceTasks' }
-)
+$tasks = $TasksToDisable
 
 # Not every task exists on every build. Windows 10 has no WindowsAI\Settings,
 # some builds have no Flighting tasks. A task that isn't there can't fire, so
@@ -200,7 +167,7 @@ if($svcQuiet -and $allTasksOff -and -not $storeQuiet){
         Write-Host "  QUIET, BUT NOT LOCKED DOWN." -ForegroundColor Yellow
         Write-Host "  Some services are stopped yet still set to Manual/Automatic," -ForegroundColor Yellow
         Write-Host "  so Windows can restart them mid-race. Re-run Pre-Race-Quiet" -ForegroundColor Yellow
-        Write-Host "  (v3.3.0 or later) to disable them properly." -ForegroundColor Yellow
+        Write-Host ("  (v{0} or later) to disable them properly." -f $KitVersion) -ForegroundColor Yellow
     } else {
         Write-Host "  RACE-QUIET is ACTIVE - the scans are paused. Good to race." -ForegroundColor Green
     }

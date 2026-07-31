@@ -1,5 +1,5 @@
 <#
-    Trace-QuietReverts.ps1                                    v3.1.0
+    Trace-QuietReverts.ps1                                    v3.3.0
     ================================================================
     READ-ONLY forensics. Answers one question:
 
@@ -41,7 +41,24 @@ $StateFile = Join-Path $StateDir 'state.json'
 $LogFile   = Join-Path $StateDir 'RaceQuiet.log'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $StartName = @{ 0='Boot'; 1='System'; 2='Automatic'; 3='Manual'; 4='Disabled' }
-$Watched   = @('WaaSMedicSvc','UsoSvc','wuauserv','bits','DoSvc','WSearch')
+
+# What to watch comes from Kit-Common.ps1 - the same list Pre-Race-Quiet
+# disables. Until v3.3.0 this was six hand-typed service names while the
+# quiet script disabled eleven, so the five added in v3.3.0 could revert
+# without this tool ever mentioning them. A forensic tool that cannot see
+# half of what it is meant to be watching is worse than no tool.
+$common = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+if (-not (Test-Path $common)) {
+    Write-Host ""
+    Write-Host "  scripts\Kit-Common.ps1 is missing - re-unzip the kit." -ForegroundColor Red
+    Write-Host ""
+    return
+}
+. $common
+# Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
+
+$Watched      = $ServicesToQuiet
+$TaskPattern  = Get-QuietTaskPathPattern
 
 $out = New-Object System.Collections.ArrayList
 function Say { param($t,$c='Gray') Write-Host $t -ForegroundColor $c; [void]$out.Add($t) }
@@ -162,7 +179,9 @@ try {
     foreach ($e in $ev) {
         $p = ''
         try { $p = [string]$e.Properties[0].Value } catch { }
-        if ($p -match 'UpdateOrchestrator|WaaSMedic|InstallService|PushToInstall|WindowsUpdate|Search') {
+        # Derived from $TasksToDisable, so it covers every folder the kit
+        # touches rather than the six that used to be typed in here.
+        if ($p -match $TaskPattern) {
             Say ("     {0:HH:mm:ss}  {1}" -f $e.TimeCreated, $p) 'Yellow'
             $tasks++
         }

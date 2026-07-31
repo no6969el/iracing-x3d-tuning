@@ -109,92 +109,23 @@ param(
 $UnlockMedic = -not $NoUnlock
 
 # ================================================================
-#  EDIT HERE if you want to trim what gets quieted.
-#  Order matters: Medic first so it can't react to the rest.
+#  WHAT GETS QUIETED
+#  The lists live in Kit-Common.ps1 so that this script, the restore,
+#  the status screen and the trace all read the same one. EDIT THEM
+#  THERE - editing them here would only affect this script.
 # ================================================================
-$ServicesToQuiet = @(
-    'WaaSMedicSvc',   # Update Medic - the thing that undoes all of this
-    'UsoSvc',         # Update Orchestrator
-    'wuauserv',       # Windows Update
-    'bits',           # Background Intelligent Transfer (update downloads)
-    'DoSvc',          # Delivery Optimization
-    'WSearch',        # Windows Search  (skipped with -KeepSearch)
+$common = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+if (-not (Test-Path $common)) {
+    Write-Host ""
+    Write-Host "  scripts\Kit-Common.ps1 is missing - re-unzip the kit." -ForegroundColor Red
+    Write-Host "  It holds the service and task lists this script needs." -ForegroundColor Red
+    Write-Host ""
+    return
+}
+. $common
+# Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
 
-    # ---- Added v3.3.0 from an xperf HARD_FAULTS trace ----------------
-    # 25-minute Nordschleife session, 4,712 hard faults captured WITH
-    # filenames (kernel HARD_FAULTS+FILENAME providers, not inference).
-    # iRacingSim64DX11.exe accounted for 14 of them. The five services
-    # below accounted for 1,547 between them - two orders of magnitude
-    # more than the sim itself.
-    'InstallService',      # Store install/update engine.  Drove backgroundTaskHost.exe
-                           # faulting 829 times on WinStore.App.dll (15.9 MB) mid-race.
-    'edgeupdate',          # MicrosoftEdgeUpdate.exe, 251 faults. The scheduled tasks
-    'edgeupdatem',         # were already handled; the SERVICES were not.
-    'PcaSvc',              # Program Compatibility Assistant -> Amcache.hve, 101 faults
-    'TabletInputService'   # touch keyboard: TabTip 201 + TextInputHost 152 + ctfmon 170.
-                           # Skipped with -KeepTouchKeyboard if you use it in VR.
-                           # NOTE: absent on Windows 11 24H2 and later - the service was
-                           # retired and TabTip is shell-launched instead. The script
-                           # skips it harmlessly there; TabTip is handled in 4c instead.
-)
 
-$TasksToDisable = @(
-    @{ Path='\Microsoft\Windows\WaaSMedic\';                    Name='PerformRemediation' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';           Name='Schedule Scan' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';           Name='Schedule Scan Static Task' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';           Name='Universal Orchestrator Start' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';           Name='Report policies' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';           Name='UUS Failover Task' },
-    @{ Path='\Microsoft\Windows\InstallService\';               Name='ScanForUpdates' },
-    @{ Path='\Microsoft\Windows\InstallService\';               Name='ScanForUpdatesAsUser' },
-    @{ Path='\Microsoft\Windows\PushToInstall\';                Name='LoginCheck' },
-    @{ Path='\Microsoft\Windows\PushToInstall\';                Name='Registration' },
-    @{ Path='\Microsoft\Windows\LanguageComponentsInstaller\';  Name='ReconcileLanguageResources' },
-
-    # ---- Added after a field trace showed these firing mid-session ----
-    # 14 launches in a 17-minute window on an 8-core X3D rig, none of
-    # them covered above. The two UpdateOrchestrator entries both run
-    # usoclient.exe; the rest are telemetry/flighting and cost nothing
-    # to hold off for the length of a race.
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Schedule Work' },
-    @{ Path='\Microsoft\Windows\UpdateOrchestrator\';          Name='Start Oobe Expedite Work' },
-    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';     Name='ReconcileFeatures' },
-    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';     Name='UsageDataReceiver' },
-    @{ Path='\Microsoft\Windows\Flighting\FeatureConfig\';     Name='UsageDataFlushing' },
-    @{ Path='\Microsoft\Windows\Flighting\OneSettings\';       Name='RefreshCache' },
-    @{ Path='\Microsoft\Windows\Windows Error Reporting\';     Name='QueueReporting' },
-    @{ Path='\Microsoft\Windows\DeviceDirectoryClient\';       Name='RegisterUserDevice' },
-    @{ Path='\Microsoft\Windows\WindowsAI\Settings\';          Name='InitialConfiguration' },
-
-    # ---- Added v3.3.0 from the same HARD_FAULTS trace ----------------
-    # Store app auto-update was the single largest non-kernel faulter.
-    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Automatic App Update' },
-    @{ Path='\Microsoft\Windows\WindowsUpdate\';            Name='Scheduled Start' },
-    # Application Experience wrote Amcache.hve during the session.
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='Microsoft Compatibility Appraiser' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='ProgramDataUpdater' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='StartupAppTask' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='PcaPatchDbTask' },
-    @{ Path='\Microsoft\Windows\Application Experience\';   Name='MareBackup' },
-    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='Consolidator' },
-    @{ Path='\Microsoft\Windows\Customer Experience Improvement Program\'; Name='UsbCeip' },
-    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClient' },
-    @{ Path='\Microsoft\Windows\Feedback\Siuf\';           Name='DmClientOnScenarioDownload' },
-    # Heavy maintenance. Any of these landing mid-race is a guaranteed
-    # hitch, and none of them need to run in the next 45 minutes.
-    @{ Path='\Microsoft\Windows\Defrag\';                   Name='ScheduledDefrag' },
-    @{ Path='\Microsoft\Windows\DiskCleanup\';              Name='SilentCleanup' },
-    @{ Path='\Microsoft\Windows\DiskFootprint\';            Name='Diagnostics' },
-    @{ Path='\Microsoft\Windows\Chkdsk\';                   Name='ProactiveScan' },
-    @{ Path='\Microsoft\Windows\Maintenance\';              Name='WinSAT' },
-    @{ Path='\Microsoft\Windows\Servicing\';                Name='StartComponentCleanup' },
-    @{ Path='\Microsoft\Windows\Registry\';                 Name='RegIdleBackup' },
-    @{ Path='\Microsoft\Windows\StateRepository\';          Name='MaintenanceTasks' }
-
-    # Security maintenance (Secure Boot DBX + TPM). Fires rarely and is
-    # short. Uncomment only if you have traced it hitting a session.
-    # ,@{ Path='\Microsoft\Windows\PI\'; Name='Secure-Boot-Update' }
-)
 
 # ================================================================
 $StateDir  = Join-Path $env:ProgramData 'RaceQuiet'
@@ -332,7 +263,7 @@ if ($UnlockMedic) {
     Write-Host "  ownership straight back. Original permissions are saved first." -ForegroundColor Yellow
     Write-Host "  Run with -NoUnlock to behave like the standard edition." -ForegroundColor DarkGray
 }
-Write-Log "=== Pre-Race-Quiet v3.3.0 starting ===" 'Gray' -NoHost
+Write-Log ("=== Pre-Race-Quiet v{0} starting ===" -f $KitVersion) 'Gray' -NoHost
 
 # ---- an un-restored snapshot means we are already quiet ----------
 # Don't refuse and don't re-snapshot: the machine is currently quieted, so
@@ -460,7 +391,7 @@ if (-not $SkipDefender -and (Get-Command Get-MpComputerStatus -ErrorAction Silen
 
 $snapshot = [pscustomobject]@{
     SchemaVersion = 1
-    Tool          = 'Pre-Race-Quiet v3.3.0'
+    Tool          = ('Pre-Race-Quiet v{0}' -f $KitVersion)
     CreatedUtc    = (Get-Date).ToUniversalTime().ToString('s')
     Machine       = $env:COMPUTERNAME
     Services      = $snapServices
