@@ -133,6 +133,49 @@ $StateFile = Join-Path $StateDir 'state.json'
 $LogFile   = Join-Path $StateDir 'RaceQuiet.log'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 
+# ================================================================
+#  Speed helpers
+# ================================================================
+#  Get-ScheduledTask is a CIM call into the Task Scheduler service.
+#  Asking for 39 tasks one at a time meant 39 round trips, plus a
+#  40th that enumerated every task on the box to find the Edge
+#  updaters. One call returns the lot, so we fetch once and look up
+#  in memory. On a laptop at low clocks this was most of the wait.
+$script:TaskIndex = $null
+function Get-TaskIndex {
+    param([switch]$Refresh)
+    if ($Refresh) { $script:TaskIndex = $null }
+    if ($null -ne $script:TaskIndex) { return $script:TaskIndex }
+    $idx = @{}
+    foreach ($t in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+        $idx[([string]$t.TaskPath + [string]$t.TaskName)] = $t
+    }
+    $script:TaskIndex = $idx
+    return $idx
+}
+function Find-Task {
+    param([string]$Path, [string]$Name)
+    return (Get-TaskIndex)[($Path + $Name)]
+}
+
+#  Per-phase timings, so "it felt slow" can be answered from the log
+#  instead of guessed at. Costs nothing; writes to RaceQuiet.log only.
+$script:PhaseName = $null
+$script:PhaseSw   = $null
+$script:PhaseAll  = [System.Diagnostics.Stopwatch]::StartNew()
+function Start-Phase {
+    param([string]$Name)
+    if ($script:PhaseSw) { Stop-Phase }
+    $script:PhaseName = $Name
+    $script:PhaseSw   = [System.Diagnostics.Stopwatch]::StartNew()
+}
+function Stop-Phase {
+    if (-not $script:PhaseSw) { return }
+    $script:PhaseSw.Stop()
+    Write-Log ("timing  {0,-28} {1,7:N0} ms" -f $script:PhaseName, $script:PhaseSw.Elapsed.TotalMilliseconds) 'DarkGray' -NoHost
+    $script:PhaseSw = $null
+}
+
 function Write-Log {
     param([string]$Msg, [string]$Color = 'Gray', [switch]$NoHost)
     $line = ("{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Msg)
@@ -325,7 +368,7 @@ if ($ReQuiet) {
     $addedTasks = @()
     foreach ($t in $TasksToDisable) {
         if ($knownTasks.ContainsKey($t.Path + $t.Name)) { continue }
-        $obj = Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue
+        $obj = Find-Task $t.Path $t.Name
         if (-not $obj) { continue }
         $addedTasks += [pscustomobject]@{ Path = $t.Path; Name = $t.Name; State = [string]$obj.State }
         Write-Log ("new since snapshot, captured as {0}: {1}{2}" -f $obj.State, $t.Path, $t.Name) 'DarkGray'
@@ -372,21 +415,39 @@ foreach ($name in $ServicesToQuiet) {
     Write-Log ("captured {0}: Start={1} running={2} recovery={3}" -f $name, $start, ($svc.Status -eq 'Running'), [bool]$faB64) 'DarkGray'
 }
 
+Start-Phase 'read scheduled tasks'
+Write-Progress -Activity 'Pre-Race-Quiet' -Status 'Reading the scheduled task list' -PercentComplete 5
+$taskIdx  = Get-TaskIndex          # one CIM call, not 40
 $snapTasks = @()
+$i = 0
 foreach ($t in $TasksToDisable) {
-    $task = Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue
+    $i++
+    Write-Progress -Activity 'Pre-Race-Quiet' -Status ("Checking scheduled tasks ({0} of {1})" -f $i, $TasksToDisable.Count) `
+                   -CurrentOperation ($t.Path + $t.Name) -PercentComplete (5 + (15 * $i / $TasksToDisable.Count))
+    $task = $taskIdx[($t.Path + $t.Name)]
     if (-not $task) { continue }
     $snapTasks += [pscustomobject]@{ Path = $t.Path; Name = $t.Name; State = [string]$task.State }
 }
-# Edge updaters (names carry a GUID, so match by pattern)
-$edge = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'MicrosoftEdgeUpdateTaskMachine*' })
-foreach ($e in $edge) {
-    $snapTasks += [pscustomobject]@{ Path = $e.TaskPath; Name = $e.TaskName; State = [string]$e.State }
+# Edge updaters (names carry a GUID, so match by pattern) - same index,
+# no second enumeration of every task on the machine.
+foreach ($e in $taskIdx.Values) {
+    if ($e.TaskName -like 'MicrosoftEdgeUpdateTaskMachine*') {
+        $snapTasks += [pscustomobject]@{ Path = $e.TaskPath; Name = $e.TaskName; State = [string]$e.State }
+    }
 }
+Stop-Phase
 
 $defenderWasOn = $null
-if (-not $SkipDefender -and (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue)) {
-    try { $defenderWasOn = [bool](Get-MpComputerStatus -ErrorAction Stop).RealTimeProtectionEnabled } catch { }
+if (-not $SkipDefender) {
+    # First touch of a Defender cmdlet makes PowerShell import the Defender
+    # module, which is the single slowest thing in a cold run. Timed so the
+    # log says so plainly rather than leaving it to guesswork.
+    Start-Phase 'load Defender module'
+    Write-Progress -Activity 'Pre-Race-Quiet' -Status 'Querying Defender (slow on a cold start)' -PercentComplete 22
+    if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+        try { $defenderWasOn = [bool](Get-MpComputerStatus -ErrorAction Stop).RealTimeProtectionEnabled } catch { }
+    }
+    Stop-Phase
 }
 
 $snapshot = [pscustomobject]@{
@@ -419,8 +480,13 @@ try {
 # ================================================================
 Write-Host ""
 Write-Host "2. Disabling scheduled tasks" -ForegroundColor White
+Start-Phase 'disable scheduled tasks'
 $failedTasks = @()
+$i = 0
 foreach ($s in $snapTasks) {
+    $i++
+    Write-Progress -Activity 'Pre-Race-Quiet' -Status ("Disabling scheduled tasks ({0} of {1})" -f $i, $snapTasks.Count) `
+                   -CurrentOperation ($s.Path + $s.Name) -PercentComplete (25 + (25 * $i / [Math]::Max(1,$snapTasks.Count)))
     if ($s.State -eq 'Disabled') { Write-Log ("already disabled: {0}{1}" -f $s.Path, $s.Name) 'DarkGray'; continue }
     try {
         Disable-ScheduledTask -TaskPath $s.Path -TaskName $s.Name -ErrorAction Stop | Out-Null
@@ -430,6 +496,7 @@ foreach ($s in $snapTasks) {
         Write-Log ("could not disable (will retry as SYSTEM): {0}{1}" -f $s.Path, $s.Name) 'DarkGray'
     }
 }
+Stop-Phase
 
 # ---- SYSTEM helper for TrustedInstaller-owned tasks ---------------
 if ($failedTasks.Count -gt 0 -and -not $NoSystem) {
@@ -455,8 +522,21 @@ if ($failedTasks.Count -gt 0 -and -not $NoSystem) {
     & schtasks.exe /Create /TN $taskName /TR $cmd /SC ONCE /ST 00:00 /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-Null
     & schtasks.exe /Run /TN $taskName 2>&1 | Out-Null
 
-    $waited = 0
-    while (-not (Test-Path $marker) -and $waited -lt 30) { Start-Sleep -Seconds 1; $waited++ }
+    # Poll every 100ms rather than every second. The helper usually reports
+    # back in well under a second; the old loop slept a full second before
+    # even looking, so a fast success still cost a second and a silent
+    # failure cost the whole 30. Same 30s ceiling, far shorter typical wait.
+    Start-Phase 'SYSTEM helper'
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not (Test-Path $marker) -and $sw.Elapsed.TotalSeconds -lt 30) {
+        Write-Progress -Activity 'Pre-Race-Quiet' `
+                       -Status ("Retrying {0} protected task(s) as SYSTEM" -f $failedTasks.Count) `
+                       -CurrentOperation ("waited {0:N1}s of 30" -f $sw.Elapsed.TotalSeconds) `
+                       -PercentComplete 55
+        Start-Sleep -Milliseconds 100
+    }
+    $sw.Stop()
+    Stop-Phase
     & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
 
     if (Test-Path $marker) {
@@ -479,10 +559,18 @@ elseif ($failedTasks.Count -gt 0) {
 # ================================================================
 Write-Host ""
 Write-Host "3. Disabling services" -ForegroundColor White
+Start-Phase 'disable + stop services'
 $script:UnlockedKeys = @()
+$i = 0
 foreach ($s in $snapServices) {
     $name = $s.Name
     $key  = Join-Path $SvcRoot $name
+    $i++
+    # Stop-Service blocks until the service actually stops. WSearch mid-index
+    # is the usual culprit for a long pause here, so name what we are waiting on.
+    Write-Progress -Activity 'Pre-Race-Quiet' -Status ("Stopping services ({0} of {1})" -f $i, $snapServices.Count) `
+                   -CurrentOperation ("{0} - this one can take a few seconds" -f $name) `
+                   -PercentComplete (60 + (25 * $i / [Math]::Max(1,$snapServices.Count)))
 
     # (a) clear failure/recovery actions so a force-stop can't auto-restart it
     try {
@@ -538,6 +626,7 @@ foreach ($s in $snapServices) {
                                         if (-not $UnlockMedic) { Write-Log ("   re-run with -UnlockMedic to force it (see the script header)" -f $name) 'Yellow' } }
     else                              { Write-Log ("{0}: could not disable or stop (protected)" -f $name) 'Yellow' }
 }
+Stop-Phase
 
 # ---- record any keys we had to unlock, so the restore can verify ----
 if ($script:UnlockedKeys.Count -gt 0) {
@@ -653,13 +742,19 @@ $NoisyApps = @(
     @{ Name='RTSS';           Safe=$false; Why='frame limiter - closing it can change your frame pacing' },
     @{ Name='HWiNFO64';       Safe=$false; Why='monitoring - you may be logging with it' }
 )
+# One process enumeration instead of 21 separate Get-Process calls.
+Start-Phase 'scan background apps'
+$running = @{}
+foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+    if ($running.ContainsKey($p.ProcessName)) { $running[$p.ProcessName]++ } else { $running[$p.ProcessName] = 1 }
+}
 $found = @()
 foreach ($a in $NoisyApps) {
-    $procs = @(Get-Process -Name $a.Name -ErrorAction SilentlyContinue)
-    if ($procs.Count -gt 0) {
-        $found += [pscustomobject]@{ Name=$a.Name; Why=$a.Why; Count=$procs.Count; Safe=$a.Safe }
+    if ($running.ContainsKey($a.Name)) {
+        $found += [pscustomobject]@{ Name=$a.Name; Why=$a.Why; Count=$running[$a.Name]; Safe=$a.Safe }
     }
 }
+Stop-Phase
 if ($found.Count -gt 0) {
     Write-Host ""
     Write-Host "4c. Background apps worth closing before you drive" -ForegroundColor White
@@ -718,17 +813,26 @@ if ($Verify) {
         if ($now -and $now.Status -eq 'Running') { Write-Log ("REVERTED: {0} is running again" -f $s.Name) 'Yellow'; $bad++ }
         elseif ($st -ne 4)                       { Write-Log ("REVERTED: {0} startup type is back to {1}" -f $s.Name, $st) 'Yellow'; $bad++ }
     }
+    # -Refresh is essential here: the whole point of verify is to see what
+    # changed since, so the cached index from earlier must be thrown away.
+    # Still one CIM call rather than one per task.
+    $freshIdx = Get-TaskIndex -Refresh
     foreach ($t in $snapTasks) {
-        $now = Get-ScheduledTask -TaskPath $t.Path -TaskName $t.Name -ErrorAction SilentlyContinue
+        $now = $freshIdx[($t.Path + $t.Name)]
         if ($now -and $now.State -ne 'Disabled') { Write-Log ("REVERTED: task {0}{1} is enabled again" -f $t.Path, $t.Name) 'Yellow'; $bad++ }
     }
     if ($bad -eq 0) { Write-Log "nothing came back - the machine is holding quiet" 'Green' }
     else            { Write-Log ("{0} item(s) reverted - see above" -f $bad) 'Yellow' }
 }
 
+Stop-Phase
+Write-Progress -Activity 'Pre-Race-Quiet' -Completed
+$script:PhaseAll.Stop()
+Write-Log ("timing  {0,-28} {1,7:N0} ms  TOTAL" -f 'whole run', $script:PhaseAll.Elapsed.TotalMilliseconds) 'DarkGray' -NoHost
+
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host "  Quiet. Go race." -ForegroundColor Green
+Write-Host ("  Quiet. Go race.   ({0:N1}s)" -f $script:PhaseAll.Elapsed.TotalSeconds) -ForegroundColor Green
 Write-Host ""
 Write-Host "  >>> RUN Post-Race-Restore.ps1 AFTERWARDS <<<" -ForegroundColor Yellow
 Write-Host "  This survives a reboot. Until you restore, this PC has no" -ForegroundColor Yellow
