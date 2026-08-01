@@ -67,6 +67,47 @@ foreach ($n in 'Pre-Race-Quiet.ps1','Post-Race-Restore.ps1','Check-Quiet-Status.
     Check ($c -match "Kit-Common\.ps1") "$n loads Kit-Common.ps1"
 }
 
+# --- v3.3.0: the hard-fault constants ---------------------------------
+# Same discipline as the quiet lists. FullTrace writes these files and
+# Scan-Stutter-Events reads them; Preflight-Check reports on the toolkit.
+# Three scripts, one set of facts - so it lives here or it drifts.
+"--- Kit-Common exposes the hard-fault constants ---"
+foreach ($v in 'HardFaultSessionName','HardFaultProviders','FullTraceCsvPattern','HardFaultCsvPattern','HardFaultColumns') {
+    Check ($null -ne (Get-Variable -Name $v -ErrorAction SilentlyContinue)) "`$$v is defined"
+}
+foreach ($fn in 'Find-Xperf','Test-HardFaultTraceRunning') {
+    Check ($null -ne (Get-Command $fn -ErrorAction SilentlyContinue)) "$fn is defined"
+}
+
+# FILENAME is the flag that turns kernel file objects into real paths.
+# Drop it and every fault comes back nameless - the trace still "works"
+# and is completely useless, which is the worst kind of regression.
+Check ($HardFaultProviders -match 'HARD_FAULTS') "providers include HARD_FAULTS"
+Check ($HardFaultProviders -match 'FILENAME')    "providers include FILENAME (without it, faults have no filenames)"
+
+Check ($HardFaultColumns.Count -eq 3) "three fault columns declared"
+foreach ($c in 'sim_hardfaults_s','top_fault_proc','top_fault_file') {
+    Check ($HardFaultColumns -contains $c) "column $c declared"
+}
+
+# Find-Xperf must never throw - callers treat a missing toolkit as
+# "degrade quietly", so an exception here would break a normal trace.
+$xperfOk = $true
+try { $null = Find-Xperf } catch { $xperfOk = $false }
+Check $xperfOk "Find-Xperf returns without throwing when the toolkit is absent"
+
+"--- the hard-fault consumers load it too ---"
+foreach ($n in 'FullTrace.ps1','Scan-Stutter-Events.ps1','Preflight-Check.ps1') {
+    $c = Get-Content (Join-Path $scripts $n) -Raw
+    Check ($c -match "Kit-Common\.ps1") "$n loads Kit-Common.ps1"
+}
+
+# FullTrace must keep working if someone copies it out of the kit, so it
+# is allowed a fallback - but it has to prefer the shared function.
+$ft = Get-Content (Join-Path $scripts 'FullTrace.ps1') -Raw
+Check ($ft -match 'Find-Xperf') "FullTrace prefers the shared Find-Xperf"
+Check ($ft -match '\$HardFaultProviders') "FullTrace uses the shared provider string"
+
 ""
 if ($fail) { "RESULT: $fail assertion(s) failed"; exit 1 }
 "RESULT: all assertions passed"
