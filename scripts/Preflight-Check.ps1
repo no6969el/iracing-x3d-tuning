@@ -196,6 +196,37 @@ Write-Host "7. GPU driver"
 $vc = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like '*NVIDIA*' } | Select-Object -First 1
 if ($vc) { Show-INFO "$($vc.Name)  driver $($vc.DriverVersion)  ($($vc.DriverDate))" }
 
+# 8. Hard-fault tracing readiness  (v3.3.0)
+# Two separate things: can FullTrace's "Hard faults" mode work at all,
+# and is there a kernel trace session left running from a previous run.
+# The second matters more - a session orphaned by a force-closed window
+# keeps writing to disk until something stops it.
+Write-Host ""
+Write-Host "8. Hard-fault tracing (FullTrace 'Hard faults' button)"
+$kc = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+if (Test-Path -LiteralPath $kc) { . $kc }
+
+if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
+    $xp = Find-Xperf
+    if ($xp) {
+        Show-OK "Windows Performance Toolkit found - per-process fault columns available"
+    } else {
+        Show-INFO "xperf not installed - the 'Hard faults' button will run a normal trace with those columns blank. Install the Windows ADK's Performance Toolkit to enable it. Not required for anything else."
+    }
+
+    $running = Test-HardFaultTraceRunning
+    if ($running -eq $true) {
+        Show-WARN "a kernel trace session is STILL RUNNING - it is writing to disk right now. Something closed FullTrace without letting it stop. Clear it from an elevated prompt with:  xperf -stop"
+        $issues++
+    } elseif ($running -eq $false) {
+        Show-OK "no leftover kernel trace session"
+    } else {
+        Show-INFO "could not determine whether a kernel trace is running (logman unavailable)"
+    }
+} else {
+    Show-INFO "Kit-Common.ps1 not found - skipping hard-fault checks. Re-unzip the kit if you expected them."
+}
+
 # profile notes
 if ($P.Warnings -and $P.Warnings.Count) {
     Write-Host ""

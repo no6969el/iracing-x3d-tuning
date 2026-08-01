@@ -155,6 +155,72 @@ $ServiceDefaults = @{
     'TabletInputService' = 3
 }
 
+# ================================================================
+#  HARD-FAULT TRACING
+#  Shared by FullTrace (which captures) and Scan-Stutter-Events
+#  (which reads what it produced). Preflight-Check reports on it.
+# ================================================================
+# The whole point of this file is that a fact stated in two places
+# drifts. The xperf lookup and the output filenames are exactly that
+# kind of fact, so they live here rather than in each script.
+
+# ETW session name. xperf's kernel logger is a single global session,
+# so a run left behind by a force-closed window blocks the next one -
+# and keeps writing to disk. Preflight-Check looks for this.
+$HardFaultSessionName = 'NT Kernel Logger'
+
+# PROC_THREAD + LOADER give process names; HARD_FAULTS is the payload;
+# FILENAME is what resolves kernel file objects to real paths. Without
+# FILENAME you get faults with no names, which is useless.
+$HardFaultProviders = 'PROC_THREAD+LOADER+HARD_FAULTS+FILENAME'
+
+# Filename patterns, so the producer and the consumer cannot disagree.
+$FullTraceCsvPattern  = 'iRacing-FullTrace-*.csv'
+$HardFaultCsvPattern  = 'iRacing-HardFaults-*.csv'
+
+# Columns FullTrace appends when the hard-fault trace ran. Their
+# absence is how every reader detects a plain (non-elevated) trace.
+$HardFaultColumns = @('sim_hardfaults_s','top_fault_proc','top_fault_file')
+
+function Find-Xperf {
+    <#
+        .SYNOPSIS
+        Locate xperf.exe from the Windows Performance Toolkit, or $null.
+
+        .DESCRIPTION
+        Ships with the Windows ADK and is not on PATH by default, so the
+        install locations are checked first and PATH second. Returns
+        $null rather than throwing - every caller treats a missing
+        toolkit as "degrade quietly", never as an error.
+    #>
+    foreach ($cand in @(
+        'C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+        'C:\Program Files\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+    )) { if (Test-Path -LiteralPath $cand) { return $cand } }
+
+    $cmd = Get-Command xperf.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Test-HardFaultTraceRunning {
+    <#
+        .SYNOPSIS
+        Is a kernel trace session currently active? $true / $false / $null
+        when it cannot be determined.
+
+        .DESCRIPTION
+        Uses logman rather than xperf so this works even without the
+        toolkit installed - a session can be left running by a kit that
+        has since been partially removed.
+    #>
+    try {
+        $out = & logman.exe query -ets 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -and -not $out) { return $null }
+        return [bool]($out -match [regex]::Escape($HardFaultSessionName))
+    } catch { return $null }
+}
+
 function Get-QuietTaskPathPattern {
     <#
         .SYNOPSIS

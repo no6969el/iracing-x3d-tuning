@@ -1,5 +1,5 @@
 <#
-    iRacing Full Diagnostic Trace  (v2)
+    iRacing Full Diagnostic Trace  (v3)
     ---------------------------------------------------------------
     One-pass logger for everything this method tunes:
       * Power plan (confirm your plan holds - no mid-race flip from
@@ -12,8 +12,54 @@
       * GPU core voltage, fan, PCIe bus load, and which limiter is
         actually holding the card back.
       * Sim CPU%/affinity, VR (pi_server) CPU%
-      * Hard pagefaults/sec (the Defender/pagefault signal)
+      * Hard pagefaults/sec - SYSTEM-WIDE, see the warning below
+      * Per-process hard faults with filenames (v3, needs admin)
       * Free RAM
+
+    ---------------------------------------------------------------
+    READ THIS BEFORE YOU TRUST hardfaults_s
+    ---------------------------------------------------------------
+    hardfaults_s counts hard page faults for the WHOLE MACHINE. It is
+    not the sim. On a machine that looked like it was thrashing during
+    a race, an xperf HARD_FAULTS capture of the same session attributed
+    the faults like this:
+
+        1,729  System (4)              $Mft, $UsnJrnl (NTFS metadata)
+          829  backgroundTaskHost.exe  WinStore.App.dll
+          251  MicrosoftEdgeUpdate.exe
+          245  SearchHost.exe
+          201  TabTip.exe
+          170  ctfmon.exe
+           14  iRacingSim64DX11.exe    <-- the sim
+
+    Fourteen. Out of 4,712. Every one of the sim's was a font cache,
+    the NTFS journal, or the shader cache - not a single texture or
+    .dat file. A big hardfaults_s number almost always means Windows
+    is busy, NOT that iRacing is starved for I/O.
+
+    Reading that column as sim I/O sends you tuning storage for days
+    and fixes nothing. That mistake is the reason v3 exists.
+
+    ---------------------------------------------------------------
+    WHAT v3 ADDS
+    ---------------------------------------------------------------
+    If xperf is present (Windows ADK / Performance Toolkit) AND this
+    is run elevated, v3 also runs a kernel HARD_FAULTS+FILENAME trace
+    alongside the CSV. On exit it stops the trace, attributes every
+    fault to a process and a filename, and writes:
+
+      * three extra CSV columns - sim_hardfaults_s, top_fault_proc,
+        top_fault_file - so each row says WHO faulted that second
+      * iRacing-HardFaults-<stamp>.csv, every fault event with its
+        file, size and process
+      * a ranked summary in the console when the trace stops
+
+    Without xperf or without admin it degrades silently to the v2
+    behaviour. The trace still runs; you just do not get the extra
+    columns. Skip it deliberately with -NoHardFaultTrace.
+
+    If the script is killed in a way that skips cleanup, a kernel
+    trace can be left running. Clear it with:  xperf -stop
 
     ---------------------------------------------------------------
     WHAT CHANGED IN v2 - AND WHY IT MATTERS
@@ -78,9 +124,82 @@
     race, then Ctrl+C. CSV lands on your Desktop.
 #>
 
+[CmdletBinding()]
+param(
+    # Skip the kernel hard-fault trace even if xperf and admin are available.
+    [switch]$NoHardFaultTrace
+)
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $Csv = Join-Path ([Environment]::GetFolderPath('Desktop')) "iRacing-FullTrace-$stamp.csv"
+$HfCsv = Join-Path ([Environment]::GetFolderPath('Desktop')) "iRacing-HardFaults-$stamp.csv"
 $ncpu = [Environment]::ProcessorCount
+
+# =================================================================
+#  HARD-FAULT TRACE SETUP  (v3)
+# =================================================================
+# Optional and strictly additive: if anything here fails the rest of
+# the trace runs exactly as it did in v2. Never let diagnostics take
+# down the diagnostic.
+$HfActive = $false
+$HfEtl    = Join-Path $env:TEMP "iRacing-hf-$stamp.etl"
+$HfStart  = $null
+$Xperf    = $null
+
+# Kit-Common owns the xperf lookup, the provider string and the output
+# filename patterns, so this script and Scan-Stutter-Events cannot drift
+# apart about what was written or where. It declares data only - no
+# elevation needed, nothing runs on load.
+$KitCommon = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+if (Test-Path -LiteralPath $KitCommon) { . $KitCommon }
+
+if (-not $NoHardFaultTrace) {
+    if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
+        $Xperf = Find-Xperf
+    } else {
+        # Kit-Common missing: this script still works standalone, it just
+        # loses the shared definitions. Fall back rather than fail.
+        foreach ($cand in @(
+            'C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+            'C:\Program Files\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+        )) { if (Test-Path -LiteralPath $cand) { $Xperf = $cand; break } }
+        if (-not $Xperf) {
+            $c = Get-Command xperf.exe -ErrorAction SilentlyContinue
+            if ($c) { $Xperf = $c.Source }
+        }
+    }
+    if (-not $HardFaultProviders) { $HardFaultProviders = 'PROC_THREAD+LOADER+HARD_FAULTS+FILENAME' }
+
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+                ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (-not $Xperf) {
+        Write-Host "xperf not found - per-process fault columns will be blank." -ForegroundColor DarkGray
+        Write-Host "Install the Windows Performance Toolkit (Windows ADK) to enable them." -ForegroundColor DarkGray
+    } elseif (-not $isAdmin) {
+        Write-Host "Not elevated - per-process fault columns will be blank." -ForegroundColor DarkGray
+        Write-Host "Run this as Administrator to see WHICH process is faulting." -ForegroundColor DarkGray
+    } else {
+        try {
+            # Clear any session left behind by a previous run that was killed.
+            & $Xperf -stop 2>&1 | Out-Null
+
+            # Provider string comes from Kit-Common - see the comment there
+            # for why FILENAME is not optional.
+            & $Xperf -on $HardFaultProviders -f "`"$HfEtl`"" `
+                     -BufferSize 1024 -MinBuffers 64 -MaxBuffers 256 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $HfStart  = Get-Date
+                $HfActive = $true
+                Write-Host "Hard-fault trace running - per-process faults will be attributed on exit." -ForegroundColor Green
+            } else {
+                Write-Host "Could not start the hard-fault trace (xperf exit $LASTEXITCODE)." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "Could not start the hard-fault trace: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
 
 # =================================================================
 #  CONSOLE GEOMETRY - do this first so nothing wraps, ever
@@ -364,8 +483,13 @@ $HeadA = New-Band $RowWidth @(
 )
 
 Write-Host ""
-Write-Host "  iRacing Full Trace v2" -ForegroundColor Cyan
+Write-Host "  iRacing Full Trace v3" -ForegroundColor Cyan
 Write-Host "  CSV -> $Csv" -ForegroundColor Cyan
+if ($HfActive) {
+    Write-Host "  Hard-fault attribution: ON  -> $HfCsv" -ForegroundColor Green
+} else {
+    Write-Host "  Hard-fault attribution: OFF (hardfaults_s is SYSTEM-WIDE, not the sim)" -ForegroundColor DarkGray
+}
 Write-Host ""
 Write-Host "  $ncpu logical CPUs | split at CPU $FreqFirst | G0/G1 = $Label" -ForegroundColor DarkGray
 if ($planBase) {
@@ -418,6 +542,13 @@ $PF_SUSTAIN  = 3
 $pfStreak    = 0
 
 $iter = 0
+
+# The sampling loop is wrapped so the finally block below always stops the
+# kernel trace - including on Ctrl+C. A left-running ETW session keeps
+# writing to disk indefinitely, which is the one way this script could
+# actually cost the user something.
+try {
+
 while ($true) {
     $t0 = Get-Date; $now = Get-Date
 
@@ -557,3 +688,138 @@ while ($true) {
     $iter++
     $e=((Get-Date)-$t0).TotalSeconds; if (1-$e -gt 0) { Start-Sleep -Milliseconds ([int]((1-$e)*1000)) }
 }
+
+}   # end try  (opened just before the sampling loop)
+finally {
+
+# =================================================================
+#  HARD-FAULT TRACE: STOP, ATTRIBUTE, MERGE   (v3)
+# =================================================================
+# Runs on Ctrl+C as well as a normal exit, because leaving a kernel
+# trace session running is the one way this script could cost the
+# user something. Everything here is wrapped: a failure to analyse
+# must never lose the CSV that was just recorded.
+
+if ($HfActive) {
+  try {
+    Write-Host ""
+    Write-Host "Stopping hard-fault trace and attributing faults..." -ForegroundColor Cyan
+
+    $merged = Join-Path $env:TEMP "iRacing-hf-$stamp-merged.etl"
+    & $Xperf -stop -d "`"$merged`"" 2>&1 | Out-Null
+
+    $dump = Join-Path $env:TEMP "iRacing-hf-$stamp-dump.csv"
+    & $Xperf -i "`"$merged`"" -o "`"$dump`"" -a dumper 2>&1 | Out-Null
+
+    if (-not (Test-Path -LiteralPath $dump)) { throw 'xperf produced no dump' }
+
+    # xperf's dumper indents every line, so a naive StartsWith('HardFault')
+    # matches nothing. Trim first. Columns:
+    #   HardFault, TimeStamp, Process Name ( PID), ThreadID, VirtualAddr,
+    #   ByteOffset, IOSize, ElapsedTime, FileObject, FileName, AddrInfo
+    $events = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in [System.IO.File]::ReadLines($dump)) {
+        $t = $line.TrimStart()
+        if (-not $t.StartsWith('HardFault,')) { continue }
+        if ($t -match 'TimeStamp') { continue }          # header row
+        $f = $t.Split(',')
+        if ($f.Count -lt 10) { continue }
+        $us = 0L
+        if (-not [int64]::TryParse($f[1].Trim(), [ref]$us)) { continue }
+        $sz = 0L; [void][int64]::TryParse($f[6].Trim(), [ref]$sz)
+        $events.Add([pscustomobject]@{
+            # TimeStamp is microseconds since the trace started, so map it
+            # back onto wall clock using the moment we called xperf -on.
+            Time     = $HfStart.AddMilliseconds($us / 1000.0)
+            Process  = $f[2].Trim()
+            IOSize   = $sz
+            FileName = $f[9].Trim().Trim('"')
+        })
+    }
+
+    Remove-Item -LiteralPath $dump   -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $HfEtl  -Force -ErrorAction SilentlyContinue
+
+    if ($events.Count -eq 0) {
+        Write-Host "No hard faults captured - nothing to attribute." -ForegroundColor DarkGray
+    } else {
+        # ---- full event log for later analysis ----
+        $events | Select-Object @{n='timestamp';e={$_.Time.ToString('HH:mm:ss')}},
+                                @{n='process'; e={$_.Process}},
+                                @{n='io_size'; e={$_.IOSize}},
+                                @{n='file';    e={$_.FileName}} |
+            Export-Csv -LiteralPath $HfCsv -NoTypeInformation -Encoding UTF8
+
+        # ---- per-second buckets for the merge ----
+        $simSec = @{}   # second -> sim fault count
+        $allSec = @{}   # second -> @{proc->n}, @{file->n}
+        foreach ($e in $events) {
+            $k = $e.Time.ToString('HH:mm:ss')
+            if ($e.Process -match '^iRacingSim64') {
+                if (-not $simSec.ContainsKey($k)) { $simSec[$k] = 0 }
+                $simSec[$k]++
+            }
+            if (-not $allSec.ContainsKey($k)) { $allSec[$k] = @{ P=@{}; F=@{} } }
+            $p = $e.Process; $fn = $e.FileName
+            if ($p)  { if (-not $allSec[$k].P.ContainsKey($p))  { $allSec[$k].P[$p]  = 0 }; $allSec[$k].P[$p]++ }
+            if ($fn) { if (-not $allSec[$k].F.ContainsKey($fn)) { $allSec[$k].F[$fn] = 0 }; $allSec[$k].F[$fn]++ }
+        }
+
+        # ---- rewrite the CSV with three extra columns ----
+        # Rebuilt rather than edited in place: if this throws, the original
+        # file is still on disk untouched and only the extra columns are lost.
+        $lines = Get-Content -LiteralPath $Csv
+        if ($lines.Count -gt 1) {
+            $out = [System.Collections.Generic.List[string]]::new()
+            $out.Add($lines[0] + ',sim_hardfaults_s,top_fault_proc,top_fault_file')
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                $row = $lines[$i]
+                if (-not $row.Trim()) { continue }
+                $ts  = $row.Split(',')[0]
+                $sim = if ($simSec.ContainsKey($ts)) { $simSec[$ts] } else { 0 }
+                $tp = ''; $tf = ''
+                if ($allSec.ContainsKey($ts)) {
+                    $tp = ($allSec[$ts].P.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key
+                    $tf = ($allSec[$ts].F.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key
+                }
+                # Commas inside a process name like "svchost.exe (123)" would
+                # break the column count, so quote defensively.
+                $out.Add(('{0},{1},"{2}","{3}"' -f $row, $sim, $tp, $tf))
+            }
+            $out | Set-Content -LiteralPath $Csv -Encoding utf8
+        }
+
+        # ---- console summary ----
+        Write-Host ""
+        Write-Host "  HARD FAULTS BY PROCESS  ($($events.Count) events)" -ForegroundColor Cyan
+        $events | Group-Object Process | Sort-Object Count -Descending | Select-Object -First 12 | ForEach-Object {
+            $mb  = (($_.Group | Measure-Object IOSize -Sum).Sum) / 1MB
+            $col = if ($_.Name -match '^iRacingSim64') { 'Green' } else { 'Gray' }
+            Write-Host ('   {0,6:N0}  {1,7:N1} MB   {2}' -f $_.Count, $mb, $_.Name) -ForegroundColor $col
+        }
+
+        $simN = @($events | Where-Object { $_.Process -match '^iRacingSim64' }).Count
+        $pct  = if ($events.Count) { 100 * $simN / $events.Count } else { 0 }
+        Write-Host ""
+        Write-Host ('   iRacing accounted for {0:N0} of {1:N0} faults ({2:N1}%).' -f $simN, $events.Count, $pct) -ForegroundColor Yellow
+        if ($pct -lt 10) {
+            Write-Host '   The sim is NOT your bottleneck. The processes above are.' -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "  Full event log: $HfCsv" -ForegroundColor Green
+    }
+
+    Remove-Item -LiteralPath $merged -Force -ErrorAction SilentlyContinue
+
+  } catch {
+    Write-Host "Hard-fault analysis failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "The main trace CSV is unaffected. If a kernel session is still" -ForegroundColor Yellow
+    Write-Host "running, clear it with:  xperf -stop" -ForegroundColor Yellow
+    try { & $Xperf -stop 2>&1 | Out-Null } catch {}
+  }
+}
+
+Write-Host ""
+Write-Host "Trace saved: $Csv" -ForegroundColor Green
+
+}   # end finally
