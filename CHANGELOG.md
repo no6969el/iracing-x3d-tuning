@@ -261,7 +261,7 @@ output (`iRacing-FullTrace-*.csv`, `iRacing-HardFaults-*.csv`,
   The trace tool can now see the five previously invisible services, which may
   identify the healer, but the cause is still open.
 
-### Bonus — iRacing Tuner Mini
+### Bonus — iRacing Tuner Mini    ****REMOVED TEMPORARILY**** 
 
 `mini-tuner/Small-Tuning-Menu.ps1` and `mini-tuner/Start-Small-Tuning-Menu.bat`,
 for people who want the baseline fixes without the full troubleshooting
