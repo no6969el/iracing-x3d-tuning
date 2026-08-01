@@ -182,6 +182,43 @@ if (Get-Command Disable-ConsoleQuickEdit -ErrorAction SilentlyContinue) {
     $PrevConsoleMode = Disable-ConsoleQuickEdit
 }
 
+# ---- Ctrl+C handling --------------------------------------------
+# PowerShell's finally does NOT reliably run when the console host
+# terminates a script on Ctrl+C. That matters here because Ctrl+C is
+# the documented way to stop this tool, and the finally block is what
+# stops the kernel trace and writes the fault columns.
+#
+# Measured consequence before this fix: five consecutive elevated runs
+# each left an orphaned ETW session and a 50-100 MB .etl in %TEMP%,
+# and not one produced attribution. The capture worked perfectly every
+# time; the analysis never ran.
+#
+# So take Ctrl+C as ordinary input and break the loop ourselves. The
+# finally is then reached the normal way, through the bottom of the
+# loop, and cleanup is guaranteed.
+$PrevTreatCtrlC = $null
+try {
+    $PrevTreatCtrlC = [Console]::TreatControlCAsInput
+    [Console]::TreatControlCAsInput = $true
+    $CtrlCIsInput = $true
+} catch {
+    # No real console (redirected host, ISE). Fall back to the old
+    # behaviour and say so, rather than pretending cleanup is safe.
+    $CtrlCIsInput = $false
+}
+
+# ---- recover anything a previous run left behind -----------------
+# This is what makes the feature survive being X-ed out. A killed run
+# cannot clean up after itself - the process is gone - so the NEXT run
+# finds its .etl in %TEMP%, analyses it, and merges the columns into
+# the matching FullTrace CSV. The shared timestamp in both filenames
+# is the join key. Nothing is lost by closing the window.
+if (-not $NoHardFaultTrace -and (Get-Command Invoke-HardFaultRecovery -ErrorAction SilentlyContinue)) {
+    try { $null = Invoke-HardFaultRecovery } catch {
+        Write-Host "Recovery of a previous capture failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 if (-not $NoHardFaultTrace) {
     if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
         $Xperf = Find-Xperf
@@ -720,137 +757,74 @@ while ($true) {
         )
 
     $iter++
-    $e=((Get-Date)-$t0).TotalSeconds; if (1-$e -gt 0) { Start-Sleep -Milliseconds ([int]((1-$e)*1000)) }
+
+    # ---- sleep out the rest of the second, watching for Ctrl+C ----
+    # With TreatControlCAsInput on, Ctrl+C arrives as a keypress rather
+    # than killing the pipeline. Breaking out here reaches the finally
+    # through the bottom of the loop, which is the only way cleanup is
+    # actually guaranteed.
+    $deadline = $t0.AddSeconds(1)
+    $stopNow  = $false
+    if ($CtrlCIsInput) {
+        while ((Get-Date) -lt $deadline) {
+            try {
+                if ([Console]::KeyAvailable) {
+                    $k = [Console]::ReadKey($true)
+                    if ($k.Key -eq 'C' -and ($k.Modifiers -band [ConsoleModifiers]::Control)) { $stopNow = $true; break }
+                }
+            } catch { }
+            Start-Sleep -Milliseconds 25
+        }
+    } else {
+        $e = ((Get-Date)-$t0).TotalSeconds
+        if (1-$e -gt 0) { Start-Sleep -Milliseconds ([int]((1-$e)*1000)) }
+    }
+    if ($stopNow) {
+        Write-Host ""
+        Write-Host "  Stopping..." -ForegroundColor Cyan
+        break
+    }
 }
 
 }   # end try  (opened just before the sampling loop)
 finally {
 
 # =================================================================
-#  HARD-FAULT TRACE: STOP, ATTRIBUTE, MERGE   (v3)
+#  HARD-FAULT TRACE: STOP AND ATTRIBUTE   (v3)
 # =================================================================
-# Runs on Ctrl+C as well as a normal exit, because leaving a kernel
-# trace session running is the one way this script could cost the
-# user something. Everything here is wrapped: a failure to analyse
-# must never lose the CSV that was just recorded.
+# The analysis itself lives in Kit-Common as Invoke-HardFaultAnalysis,
+# because it must also be callable LATER - a run that is X-ed out never
+# reaches this block at all, and the next run recovers it instead.
+# Calling the same function from both places means the clean path and
+# the recovery path cannot disagree about what they produce.
+#
+# A failure here must never lose the CSV that was just recorded, so the
+# whole thing is wrapped and the trace file is already on disk.
 
 if ($HfActive) {
   try {
     Write-Host ""
     Write-Host "Stopping hard-fault trace and attributing faults..." -ForegroundColor Cyan
 
-    $merged = Join-Path $env:TEMP "iRacing-hf-$stamp-merged.etl"
-    & $Xperf -stop -d "`"$merged`"" 2>&1 | Out-Null
-
-    $dump = Join-Path $env:TEMP "iRacing-hf-$stamp-dump.csv"
-    & $Xperf -i "`"$merged`"" -o "`"$dump`"" -a dumper 2>&1 | Out-Null
-
-    if (-not (Test-Path -LiteralPath $dump)) { throw 'xperf produced no dump' }
-
-    # xperf's dumper indents every line, so a naive StartsWith('HardFault')
-    # matches nothing. Trim first. Columns:
-    #   HardFault, TimeStamp, Process Name ( PID), ThreadID, VirtualAddr,
-    #   ByteOffset, IOSize, ElapsedTime, FileObject, FileName, AddrInfo
-    $events = [System.Collections.Generic.List[object]]::new()
-    foreach ($line in [System.IO.File]::ReadLines($dump)) {
-        $t = $line.TrimStart()
-        if (-not $t.StartsWith('HardFault,')) { continue }
-        if ($t -match 'TimeStamp') { continue }          # header row
-        $f = $t.Split(',')
-        if ($f.Count -lt 10) { continue }
-        $us = 0L
-        if (-not [int64]::TryParse($f[1].Trim(), [ref]$us)) { continue }
-        $sz = 0L; [void][int64]::TryParse($f[6].Trim(), [ref]$sz)
-        $events.Add([pscustomobject]@{
-            # TimeStamp is microseconds since the trace started, so map it
-            # back onto wall clock using the moment we called xperf -on.
-            Time     = $HfStart.AddMilliseconds($us / 1000.0)
-            Process  = $f[2].Trim()
-            IOSize   = $sz
-            FileName = $f[9].Trim().Trim('"')
-        })
-    }
-
-    Remove-Item -LiteralPath $dump   -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $HfEtl  -Force -ErrorAction SilentlyContinue
-
-    if ($events.Count -eq 0) {
-        Write-Host "No hard faults captured - nothing to attribute." -ForegroundColor DarkGray
+    if (Get-Command Invoke-HardFaultAnalysis -ErrorAction SilentlyContinue) {
+        $null = Invoke-HardFaultAnalysis -EtlPath $HfEtl -Stamp $stamp
     } else {
-        # ---- full event log for later analysis ----
-        $events | Select-Object @{n='timestamp';e={$_.Time.ToString('HH:mm:ss')}},
-                                @{n='process'; e={$_.Process}},
-                                @{n='io_size'; e={$_.IOSize}},
-                                @{n='file';    e={$_.FileName}} |
-            Export-Csv -LiteralPath $HfCsv -NoTypeInformation -Encoding UTF8
-
-        # ---- per-second buckets for the merge ----
-        $simSec = @{}   # second -> sim fault count
-        $allSec = @{}   # second -> @{proc->n}, @{file->n}
-        foreach ($e in $events) {
-            $k = $e.Time.ToString('HH:mm:ss')
-            if ($e.Process -match '^iRacingSim64') {
-                if (-not $simSec.ContainsKey($k)) { $simSec[$k] = 0 }
-                $simSec[$k]++
-            }
-            if (-not $allSec.ContainsKey($k)) { $allSec[$k] = @{ P=@{}; F=@{} } }
-            $p = $e.Process; $fn = $e.FileName
-            if ($p)  { if (-not $allSec[$k].P.ContainsKey($p))  { $allSec[$k].P[$p]  = 0 }; $allSec[$k].P[$p]++ }
-            if ($fn) { if (-not $allSec[$k].F.ContainsKey($fn)) { $allSec[$k].F[$fn] = 0 }; $allSec[$k].F[$fn]++ }
-        }
-
-        # ---- rewrite the CSV with three extra columns ----
-        # Rebuilt rather than edited in place: if this throws, the original
-        # file is still on disk untouched and only the extra columns are lost.
-        $lines = Get-Content -LiteralPath $Csv
-        if ($lines.Count -gt 1) {
-            $out = [System.Collections.Generic.List[string]]::new()
-            $out.Add($lines[0] + ',sim_hardfaults_s,top_fault_proc,top_fault_file')
-            for ($i = 1; $i -lt $lines.Count; $i++) {
-                $row = $lines[$i]
-                if (-not $row.Trim()) { continue }
-                $ts  = $row.Split(',')[0]
-                $sim = if ($simSec.ContainsKey($ts)) { $simSec[$ts] } else { 0 }
-                $tp = ''; $tf = ''
-                if ($allSec.ContainsKey($ts)) {
-                    $tp = ($allSec[$ts].P.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key
-                    $tf = ($allSec[$ts].F.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key
-                }
-                # Commas inside a process name like "svchost.exe (123)" would
-                # break the column count, so quote defensively.
-                $out.Add(('{0},{1},"{2}","{3}"' -f $row, $sim, $tp, $tf))
-            }
-            $out | Set-Content -LiteralPath $Csv -Encoding utf8
-        }
-
-        # ---- console summary ----
-        Write-Host ""
-        Write-Host "  HARD FAULTS BY PROCESS  ($($events.Count) events)" -ForegroundColor Cyan
-        $events | Group-Object Process | Sort-Object Count -Descending | Select-Object -First 12 | ForEach-Object {
-            $mb  = (($_.Group | Measure-Object IOSize -Sum).Sum) / 1MB
-            $col = if ($_.Name -match '^iRacingSim64') { 'Green' } else { 'Gray' }
-            Write-Host ('   {0,6:N0}  {1,7:N1} MB   {2}' -f $_.Count, $mb, $_.Name) -ForegroundColor $col
-        }
-
-        $simN = @($events | Where-Object { $_.Process -match '^iRacingSim64' }).Count
-        $pct  = if ($events.Count) { 100 * $simN / $events.Count } else { 0 }
-        Write-Host ""
-        Write-Host ('   iRacing accounted for {0:N0} of {1:N0} faults ({2:N1}%).' -f $simN, $events.Count, $pct) -ForegroundColor Yellow
-        if ($pct -lt 10) {
-            Write-Host '   The sim is NOT your bottleneck. The processes above are.' -ForegroundColor Yellow
-        }
-        Write-Host ""
-        Write-Host "  Full event log: $HfCsv" -ForegroundColor Green
+        Write-Host "Kit-Common.ps1 is missing - stopping the trace without analysing it." -ForegroundColor Yellow
+        Write-Host "The capture is kept at $HfEtl and a later run will pick it up." -ForegroundColor DarkGray
+        try { & $Xperf -stop 2>&1 | Out-Null } catch { }
     }
-
-    Remove-Item -LiteralPath $merged -Force -ErrorAction SilentlyContinue
 
   } catch {
     Write-Host "Hard-fault analysis failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    Write-Host "The main trace CSV is unaffected. If a kernel session is still" -ForegroundColor Yellow
-    Write-Host "running, clear it with:  xperf -stop" -ForegroundColor Yellow
-    try { & $Xperf -stop 2>&1 | Out-Null } catch {}
+    Write-Host "The main trace CSV is unaffected, and the capture is kept so the" -ForegroundColor Yellow
+    Write-Host "next run can retry it. If a kernel session is still running:  xperf -stop" -ForegroundColor Yellow
+    try { & $Xperf -stop 2>&1 | Out-Null } catch { }
   }
+}
+
+# Ctrl+C was taken as input for the life of the run - hand it back.
+if ($null -ne $PrevTreatCtrlC) {
+    try { [Console]::TreatControlCAsInput = $PrevTreatCtrlC } catch { }
 }
 
 # Put the console back exactly as we found it. Leaving a user unable to
