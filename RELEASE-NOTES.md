@@ -25,19 +25,68 @@ and the Store auto-download policy.
 **GPU interrupt steering works on any vendor now** — NVIDIA, AMD or Intel, by PCI
 vendor ID. The old manual file-swap folder is gone.
 
+**FullTrace can now tell you which process is faulting.** The trace that found
+those five services also exposed a problem with the kit's own headline
+diagnostic: `hardfaults_s` is a **system-wide** counter, and nothing said so. A
+big number there looks exactly like a sim starved for disk I/O. It is not:
+
+| faults | process |
+|-------:|---------|
+| 1,729 | `System (4)` — NTFS metadata |
+| 829 | `backgroundTaskHost.exe` — Microsoft Store updating apps |
+| 251 | `MicrosoftEdgeUpdate.exe` |
+| 245 | `SearchHost.exe` |
+| 201 | `TabTip.exe` — touch keyboard |
+| **14** | **`iRacingSim64DX11.exe`** |
+
+Fourteen out of 4,712. Not one texture, not one `.dat`. Reading that column as
+sim I/O sends you tuning storage for days and fixes nothing.
+
+So `FullTrace.ps1` is v3. Run it **elevated** — or use the new **Hard faults
+(Admin)** button beside **Run** in *Troubleshoot a stutter → 1) Record a race* —
+and with the Windows Performance Toolkit installed it runs a kernel
+`HARD_FAULTS+FILENAME` trace alongside the normal sampling. You get three extra
+columns naming the process and file behind each second's faults, a full event
+log, and a ranked summary when you stop. Without admin or the toolkit it behaves
+exactly as v2 did and says so in the banner.
+
+**And the analysis step caught up with it.** `Scan-Stutter-Events` used to trigger
+on one thing — a gap in the timestamps. A burst of hard faults can stall a frame
+without the logger ever missing a second, so that whole class of stutter was
+invisible to it. Now a fault burst is an incident in its own right, every
+incident names the process and file behind it, and the report ranks who was
+faulting across the session. Where the sim faulted zero times it says so and
+names who actually did.
+
+`Preflight-Check` gained a section that tells you whether the *Hard faults*
+button will work on your machine, and — more usefully — warns if a kernel trace
+session has been left running by a force-closed window, since that keeps writing
+to disk until something stops it.
+
 ### Read this first — one breaking change
 
 `scripts/Kit-Common.ps1` is new and required. The four race-quiet scripts refuse
 to run without it, so copy the whole `scripts/` folder rather than individual
-files. Run `Post-Race-Restore` on your current version **before** upgrading.
+files — and take `Tuning-Menu.ps1` too, for the new button. Run
+`Post-Race-Restore` on your current version **before** upgrading.
 
 ### Honest gaps
 
-Nothing in v3.3.0 has been run on Windows hardware yet — the scripts parse clean,
-which is not the same thing. The `Post-Race-Restore` full round trip is still
-outstanding, and the `wuauserv` revert reported from the field is **not** fixed
-by this release; the trace tool can simply now see the services that were
+The diagnostic half of v3.3.0 has been run on Windows: FullTrace v3 parses and
+runs, the v2 path is byte-for-byte unchanged, and the menu's XAML and handler
+wiring check out structurally. The hard-fault capture itself was proven end to
+end as a standalone tool — that 25-minute trace is where the table above comes
+from — but folding it into FullTrace's exit path has only been dry-run, not
+driven through a full race ending in `Ctrl+C`. Watch your first one.
+
+The half that changes system state has **not** been exercised. The
+`Pre-Race-Quiet` → `Post-Race-Restore` round trip is still outstanding, as it has
+been since v3.1.0, and the `wuauserv` revert reported from the field is **not**
+fixed by this release; the trace tool can simply now see the services that were
 previously invisible to it.
+
+The GUI has not been rendered — the two buttons are verified structurally, so
+check the label fits your window on first launch.
 
 Full detail in the [changelog](CHANGELOG.md).
 

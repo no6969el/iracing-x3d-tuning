@@ -147,7 +147,11 @@ $XAML = @"
                 <Expander Header="1) Record a race (FullTrace)" Foreground="White">
                     <StackPanel Margin="26,2,4,8">
                         <TextBlock Style="{StaticResource ExpText}" Text="Records everything your PC does while you drive. Start it, race, then press Ctrl+C to stop - it saves a CSV to your Desktop."/>
-                        <Button x:Name="BtnFullTrace" Content="Run" Style="{StaticResource RunBtn}"/>
+                        <TextBlock Style="{StaticResource ExpText}" Text="Hard faults adds a kernel trace (PROC_THREAD+LOADER+HARD_FAULTS+FILENAME) alongside the same sampling, so the CSV also says WHICH process and WHICH file faulted each second. Needs admin and the Windows Performance Toolkit. The hardfaults_s column on its own is system-wide - it is usually Windows, not the sim."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="BtnFullTrace" Content="Run" Style="{StaticResource RunBtn}"/>
+                            <Button x:Name="BtnFullTraceHF" Content="Hard faults (Admin)" Style="{StaticResource RunBtn}" Margin="8,0,0,0"/>
+                        </StackPanel>
                     </StackPanel>
                 </Expander>
                 <Expander Header="2) Turn on task log (Admin)" Foreground="#FFB74D">
@@ -462,6 +466,9 @@ $Window.FindName("BtnChipAuto").Add_Click({ Set-ChipClass 'AUTO' })
 
 # tools
 $Window.FindName("BtnFullTrace").Add_Click({ Launch-Script 'FullTrace.ps1' })
+# Same script, elevated. FullTrace v3 starts the kernel HARD_FAULTS trace only
+# when it detects admin + xperf, so -Admin is the whole switch - no extra args.
+$Window.FindName("BtnFullTraceHF").Add_Click({ Launch-Script 'FullTrace.ps1' -Admin })
 $Window.FindName("BtnEnableLogs").Add_Click({ Launch-Script 'Enable-DiagnosticLogs.ps1' -Admin })
 $Window.FindName("BtnScan").Add_Click({ Launch-Script 'Scan-Stutter-Events.ps1' })
 $Window.FindName("BtnPreflight").Add_Click({ Launch-Script 'Preflight-Check.ps1' })

@@ -63,6 +63,20 @@ elevated PowerShell (right-click > Run as administrator). Marked below.
 --- DIAGNOSTICS (read-only) ---
 FullTrace.ps1            MAIN logger. Run, race, read the CSV on your Desktop.
                          Time-gaps in it = system-wide stalls.            (no admin)
+                         Run it ELEVATED (or use the menu's "Hard faults"
+                         button) and, if the Windows Performance Toolkit is
+                         installed, it also runs a kernel HARD_FAULTS trace
+                         and adds three columns telling you WHICH process and
+                         WHICH file faulted each second, plus a second CSV
+                         with every fault event.                      (ADMIN opt)
+
+                         NOTE: the plain hardfaults_s column is SYSTEM-WIDE.
+                         It is not the sim. On a traced 25-minute session the
+                         sim caused 14 of 4,712 hard faults; the rest were the
+                         Microsoft Store, Edge Update, Search and NTFS
+                         metadata. Do not read that column as iRacing I/O -
+                         use the elevated run to find out who is really
+                         faulting.
 Preflight-Check.ps1      Pre-session sanity check. Adapts to your chip: on a
                          single-CCD or non-X3D CPU the pinning and interrupt
                          checks are skipped rather than failed.            (no admin*)

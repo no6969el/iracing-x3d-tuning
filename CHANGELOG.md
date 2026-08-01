@@ -78,8 +78,133 @@ mismatch impossible.
 - **`.gitattributes`** pins text files to CRLF. Four of the most-edited scripts
   had drifted to LF against the project's own convention.
 
+### What's new — FullTrace v3 names the process, not just the number
+
+The five services above were found with an external xperf capture. That tool now
+lives in the kit, because the trace that found them also proved the kit's own
+headline diagnostic could not have.
+
+`hardfaults_s` is a **system-wide** counter. It always was. Nothing in the kit
+said so, and the number is alarming — tens of thousands per second during a race
+looks exactly like a sim starved for I/O. It is not. In the traced session:
+
+| faults | process | what it was reading |
+|-------:|---------|---------------------|
+| 1,729 | `System (4)` | `$Mft`, `$UsnJrnl` — NTFS metadata |
+| 829 | `backgroundTaskHost.exe` | `WinStore.App.dll` |
+| 251 | `MicrosoftEdgeUpdate.exe` | |
+| 245 | `SearchHost.exe` | Start-menu web components |
+| 201 | `TabTip.exe` | touch keyboard |
+| 170 | `ctfmon.exe` | |
+| **14** | **`iRacingSim64DX11.exe`** | a font cache, `$UsnJrnl`, the shader cache |
+
+Fourteen out of 4,712 — 0.3%. Not one texture, not one `.dat`. Total iRacing
+*content* faulting for the whole session was 17 events on `tracks.dat` and the
+car's `.dat`, all during track load, which is exactly where they belong.
+
+Read that column as sim I/O and you will tune storage for days and fix nothing.
+
+- **`FullTrace.ps1` is v3.** Run elevated with the Windows Performance Toolkit
+  present and it starts a kernel `PROC_THREAD+LOADER+HARD_FAULTS+FILENAME`
+  session alongside the existing per-second sampling. On exit it attributes every
+  fault and adds three columns — `sim_hardfaults_s`, `top_fault_proc`,
+  `top_fault_file` — so each row says *who* faulted that second and *what* they
+  read. It also writes `iRacing-HardFaults-<stamp>.csv` with every event, and
+  prints a ranked per-process summary ending in the percentage attributable to
+  the sim.
+- **It degrades, it does not fail.** No admin, no xperf, or `-NoHardFaultTrace`
+  and it behaves exactly as v2 did, says so in the banner, and still writes the
+  same 39-column CSV. The "no admin needed" promise is intact; the extra columns
+  are the only thing you give up.
+- **The sampling loop is wrapped in `try/finally`** so the ETW session is stopped
+  on Ctrl+C as well as a clean exit. A kernel trace left running writes to disk
+  indefinitely — the one way this script could have cost somebody something. It
+  also calls `xperf -stop` before starting, to clear a session orphaned by a
+  previous run. Manual escape hatch: `xperf -stop`.
+- **The CSV is rebuilt, not edited in place.** If attribution throws, the
+  recorded trace is still on disk and only the extra columns are lost.
+- **New GUI button.** Troubleshoot → *1) Record a race* now has **Run** and
+  **Hard faults (Admin)** side by side. Both launch the same script; v3 decides
+  for itself whether to trace, so `-Admin` is the entire difference and there are
+  no arguments to keep in sync between the menu and the script.
+
+### Fixed — `Scan-Stutter-Events` could not see a whole class of stutter
+
+It triggered on one thing: a gap in the timestamps. A burst of hard faults can
+stall a frame without the logger ever missing a second, so those stutters were
+invisible to the analysis step even when the capture step had recorded them
+perfectly.
+
+- **A fault burst is now an incident in its own right,** tagged `FAULT` where a
+  missing second is tagged `GAP`. A synthetic trace carrying both confirms each
+  detector fires independently.
+- **Every incident names the process and the file** that faulted at that second
+  instead of leaving you to infer it from a list of scheduled tasks. Where the
+  sim faulted zero times, the report says so explicitly and names who did.
+- **A session-wide attribution table** ranks which process was the top faulter in
+  the most seconds, with the sim's own row marked.
+- **It parses with `Import-Csv` now.** The old code took field `[0]` of a raw
+  string split, which could not see any other column — and the new fault columns
+  are quoted, which a naive split would have mangled.
+- Traces without the fault columns are detected and the report says exactly which
+  button to use to get them, rather than silently omitting the section.
+
+### Fixed — the xperf lookup was about to become the next drifted fact
+
+This release exists because facts stated in two places drift. The hard-fault work
+then hardcoded the Windows Performance Toolkit paths, the provider string and the
+output filenames into `FullTrace`, and `Scan-Stutter-Events` and `Preflight-Check`
+each needed the same knowledge. That is three copies, shipping in the release
+that removes duplicate copies.
+
+`Kit-Common.ps1` now also owns `$HardFaultSessionName`, `$HardFaultProviders`,
+`$FullTraceCsvPattern`, `$HardFaultCsvPattern`, `$HardFaultColumns`, `Find-Xperf`
+and `Test-HardFaultTraceRunning`. `FullTrace` keeps a fallback so it still runs
+if copied out of the kit, but prefers the shared definitions — and a test asserts
+that it does.
+
+### What's new — Preflight reports hard-fault readiness
+
+- **Section 8 says whether the *Hard faults* button will actually work** — that
+  is, whether the Performance Toolkit is installed. Without this the button
+  produces blank columns and only a grey console line explains why.
+- **It detects a kernel trace session left running.** Force-close the FullTrace
+  window instead of pressing Ctrl+C and the ETW session survives, writing to disk
+  until something stops it. That is the one way this release could cost somebody
+  something, so it now counts as a **NOT READY** item with the exact command to
+  clear it. Detection uses `logman`, not `xperf`, so it works even on a machine
+  where the toolkit was never installed.
+
+### Fixed — `.gitattributes` was documented but absent
+
+The v3.3.0 notes said it pins text files to CRLF. The file was not in the
+repository. Every file happened to be CRLF anyway, so the claim held by luck
+rather than by enforcement — the same class of documented-but-missing reference
+as the `Validate-Repo.ps1` mentions removed elsewhere in this release. The file
+now exists, covers the kit's real extensions, and marks generated diagnostic
+output (`iRacing-FullTrace-*.csv`, `iRacing-HardFaults-*.csv`,
+`stutter-events.txt`) as `-text` so Git never rewrites a captured trace.
+
+### Tests
+
+- `test-kitcommon.ps1` asserts the hard-fault constants exist, that
+  `$HardFaultProviders` still contains **both** `HARD_FAULTS` and `FILENAME`
+  (drop `FILENAME` and every fault comes back nameless — the trace still "works"
+  and is useless), that `Find-Xperf` never throws when the toolkit is absent, and
+  that all three consumers load the shared file.
+- `test-xaml.ps1` asserts both FullTrace buttons exist, are wired, sit in the
+  same horizontal `StackPanel`, that the plain **Run** button has **not** gained
+  `-Admin` — the kit's no-admin promise for the read-only tracer — and that no
+  `x:Name` is duplicated, which is a runtime `XamlParseException` rather than a
+  parse error and would otherwise sail past the well-formedness check.
+
 ### Documentation
 
+- `FullTrace.ps1`'s header now opens with the attribution table above, before any
+  of its column documentation. The `hardfaults_s` warning is the first thing a
+  reader meets, because the misreading is the expensive part.
+- `scripts/README.txt` marks FullTrace as `(ADMIN opt)` and carries the same
+  system-wide caveat.
 - `README.txt`'s "what gets disabled" inventory said 6 services and 20 tasks
   under a v3.2.5 heading. It now matches the shipped lists (11 and 39) and points
   at `Kit-Common.ps1` as authoritative.
@@ -95,6 +220,46 @@ mismatch impossible.
 - The shared lists resolve to 11 services and 39 tasks, and every service in
   `$ServicesToQuiet` has a matching entry in `$ServiceDefaults`.
 - The derived task-path regex matches every folder in `$TasksToDisable`.
+
+**On Windows, on real hardware** (9950X3D / RTX 5090 / Win11, elevated):
+
+- `FullTrace.ps1` v3 parses and runs; `-NoHardFaultTrace` produces a byte-for-byte
+  compatible 39-column CSV, confirming the v2 path is untouched.
+- Diffed against v2: three lines changed, all version strings or the rewritten
+  `hardfaults_s` doc line. Nothing removed.
+- `Tuning-Menu.ps1` XAML parses as XML; the FullTrace expander contains exactly
+  two buttons in a horizontal `StackPanel`; all 48 `FindName` targets resolve
+  against 56 unique `x:Name` declarations with no duplicates; both click handlers
+  wire to the expected script and switch.
+- The underlying capture, dump and per-file attribution were exercised end to end
+  on a 25-minute session — that trace is the source of the table above.
+- The whole test suite passes: `test-kitcommon`, `test-xaml`, `test-racequiet`,
+  `test-profiles` and `test-integration`.
+- `Scan-Stutter-Events` was run against a synthetic trace built to carry a
+  timestamp gap **and** a sim fault burst at a second with no gap. Both were
+  detected and tagged separately, attribution named the right process and file
+  for each, and the session table ranked correctly — confirming the new detector
+  catches the case the old one structurally could not.
+- Every edited file is CRLF, checked byte-by-byte rather than assumed.
+
+### Not yet validated
+
+- **The in-script hard-fault path has not been run against a full race.** The
+  capture, dump and attribution logic was proven as a standalone tool; folding it
+  into FullTrace's `finally` block is validated by parse and by a short dry run,
+  not by a complete session ending in Ctrl+C. Watch the first one.
+- The GUI has not been rendered — WPF could not be hosted in the validation
+  environment, so the two buttons are verified structurally rather than visually.
+  Check the label fits your window width on first launch.
+- **The race-quiet round trip is still outstanding.** `Pre-Race-Quiet` →
+  `Post-Race-Restore` has not been exercised end to end on a real machine, and
+  that has been true since v3.1.0. The diagnostic half of this release has now
+  been run on Windows; the half that changes system state has not.
+- The vendor-neutral GPU scripts have not been exercised on an AMD or Intel
+  adapter; the NVIDIA path is unchanged in behaviour but is also untested here.
+- The `wuauserv` revert reported from the field is **not** fixed by this release.
+  The trace tool can now see the five previously invisible services, which may
+  identify the healer, but the cause is still open.
 
 ### Bonus — iRacing Tuner Mini
 
