@@ -221,6 +221,90 @@ function Test-HardFaultTraceRunning {
     } catch { return $null }
 }
 
+# ================================================================
+#  CONSOLE QUICKEDIT
+# ================================================================
+# Windows consoles ship with QuickEdit on. Click anywhere in the window
+# and the console enters selection mode, which BLOCKS the process on its
+# next write to stdout until Enter or Esc is pressed.
+#
+# For a sampling loop that is not cosmetic. The loop stalls, so no CSV
+# row is written either - and the result is a gap in the timestamps that
+# looks exactly like a system stall. A stray click can therefore
+# manufacture the very stutter the tool exists to find.
+#
+# Noticed on the elevated ("Hard faults") run in particular: an elevated
+# console is a different window and reads its own defaults, so QuickEdit
+# can be on there while off in a normal window.
+#
+# Callers disable it for the life of the script and restore the original
+# mode on exit. Restoring matters - leaving a user's console permanently
+# unable to select text would be its own bug.
+
+if (-not ([System.Management.Automation.PSTypeName]'KitConsole').Type) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class KitConsole {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
+    const int  STD_INPUT_HANDLE      = -10;
+    const uint ENABLE_QUICK_EDIT     = 0x0040;
+    // Without EXTENDED_FLAGS the QuickEdit bit is ignored on write.
+    const uint ENABLE_EXTENDED_FLAGS = 0x0080;
+
+    public static uint GetMode() {
+        uint m;
+        if (!GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), out m)) return 0;
+        return m;
+    }
+    public static bool SetMode(uint m) {
+        return SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), m);
+    }
+    public static bool DisableQuickEdit() {
+        uint m = GetMode();
+        if (m == 0) return false;
+        return SetMode((m & ~ENABLE_QUICK_EDIT) | ENABLE_EXTENDED_FLAGS);
+    }
+}
+'@ -ErrorAction SilentlyContinue
+}
+
+function Disable-ConsoleQuickEdit {
+    <#
+        .SYNOPSIS
+        Turn off click-to-select. Returns the previous console mode so the
+        caller can restore it, or $null if it could not be changed.
+
+        .DESCRIPTION
+        Returns $null rather than throwing when there is no real console -
+        Windows Terminal, a redirected host or the ISE. A logger must never
+        fail to start because it could not adjust a console setting.
+    #>
+    try {
+        if (-not ('KitConsole' -as [type])) { return $null }
+        $prev = [KitConsole]::GetMode()
+        if ($prev -eq 0) { return $null }
+        if ([KitConsole]::DisableQuickEdit()) { return $prev }
+        return $null
+    } catch { return $null }
+}
+
+function Restore-ConsoleQuickEdit {
+    <# Put the console mode back exactly as it was. #>
+    param($PreviousMode)
+    try {
+        if ($null -eq $PreviousMode) { return }
+        if (-not ('KitConsole' -as [type])) { return }
+        [void][KitConsole]::SetMode([uint32]$PreviousMode)
+    } catch { }
+}
+
 function Get-QuietTaskPathPattern {
     <#
         .SYNOPSIS

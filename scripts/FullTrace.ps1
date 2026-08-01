@@ -62,6 +62,26 @@
     trace can be left running. Clear it with:  xperf -stop
 
     ---------------------------------------------------------------
+    WHY CLICKING IN THE WINDOW USED TO FREEZE THE LOG
+    ---------------------------------------------------------------
+    Windows consoles ship with QuickEdit enabled. A click puts the
+    window into selection mode, and selection mode BLOCKS the process
+    on its next write to stdout until Enter or Esc is pressed.
+
+    That is not merely a paused display. The loop is blocked, so no CSV
+    row is written either - and what lands in the trace is a gap in the
+    timestamps, indistinguishable from a real system stall. A stray
+    click could manufacture the exact symptom this tool exists to find.
+
+    v3 turns QuickEdit off at startup and restores the previous console
+    mode on exit. It shows up more on the elevated "Hard faults" run
+    because an elevated console is a separate window with its own
+    defaults - QuickEdit is often on there and off in a normal window.
+
+    If the mode could not be changed (Windows Terminal, a redirected
+    host), the banner says so and asks you not to click instead.
+
+    ---------------------------------------------------------------
     WHAT CHANGED IN v2 - AND WHY IT MATTERS
     ---------------------------------------------------------------
     v1 read CPU and pagefault data from the WMI "cooked counter"
@@ -152,6 +172,15 @@ $Xperf    = $null
 # elevation needed, nothing runs on load.
 $KitCommon = Join-Path $PSScriptRoot 'Kit-Common.ps1'
 if (Test-Path -LiteralPath $KitCommon) { . $KitCommon }
+
+# ---- console QuickEdit ------------------------------------------
+# Clicking in a QuickEdit console blocks the process on its next write,
+# which stalls this loop and leaves a hole in the CSV that reads as a
+# system stall. Turn it off for the run; restored in the finally block.
+$PrevConsoleMode = $null
+if (Get-Command Disable-ConsoleQuickEdit -ErrorAction SilentlyContinue) {
+    $PrevConsoleMode = Disable-ConsoleQuickEdit
+}
 
 if (-not $NoHardFaultTrace) {
     if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
@@ -490,6 +519,11 @@ if ($HfActive) {
 } else {
     Write-Host "  Hard-fault attribution: OFF (hardfaults_s is SYSTEM-WIDE, not the sim)" -ForegroundColor DarkGray
 }
+if ($null -ne $PrevConsoleMode) {
+    Write-Host "  Click-to-select disabled for this run (it would freeze the log). Restored on exit." -ForegroundColor DarkGray
+} else {
+    Write-Host "  NOTE: do not click inside this window - it pauses the log and leaves a fake gap." -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "  $ncpu logical CPUs | split at CPU $FreqFirst | G0/G1 = $Label" -ForegroundColor DarkGray
 if ($planBase) {
@@ -817,6 +851,12 @@ if ($HfActive) {
     Write-Host "running, clear it with:  xperf -stop" -ForegroundColor Yellow
     try { & $Xperf -stop 2>&1 | Out-Null } catch {}
   }
+}
+
+# Put the console back exactly as we found it. Leaving a user unable to
+# select text in their own window would be our bug, not Windows'.
+if ($PrevConsoleMode -ne $null -and (Get-Command Restore-ConsoleQuickEdit -ErrorAction SilentlyContinue)) {
+    Restore-ConsoleQuickEdit $PrevConsoleMode
 }
 
 Write-Host ""
