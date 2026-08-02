@@ -28,7 +28,7 @@ function State($label,$good,$goodText,$badText){
     else     { Write-Host ("  [ on  ]  {0}: {1}" -f $label,$badText) -ForegroundColor Yellow }
 }
 
-$StateFile = Join-Path $env:ProgramData 'RaceQuiet\state.json'
+$StateFile = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'RaceQuiet\state.json'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
 $StartName = @{ 0='Boot'; 1='System'; 2='Automatic'; 3='Manual'; 4='Disabled' }
 

@@ -150,7 +150,7 @@ param(
     [switch]$NoHardFaultTrace
 )
 
-$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$stamp = [DateTime]::Now.ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
 $Csv = Join-Path ([Environment]::GetFolderPath('Desktop')) "iRacing-FullTrace-$stamp.csv"
 $HfCsv = Join-Path ([Environment]::GetFolderPath('Desktop')) "iRacing-HardFaults-$stamp.csv"
 $ncpu = [Environment]::ProcessorCount
@@ -226,8 +226,8 @@ if (-not $NoHardFaultTrace) {
         # Kit-Common missing: this script still works standalone, it just
         # loses the shared definitions. Fall back rather than fail.
         foreach ($cand in @(
-            'C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
-            'C:\Program Files\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+            (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Windows Kits\10\Windows Performance Toolkit\xperf.exe')
+            (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Windows Kits\10\Windows Performance Toolkit\xperf.exe')
         )) { if (Test-Path -LiteralPath $cand) { $Xperf = $cand; break } }
         if (-not $Xperf) {
             $c = Get-Command xperf.exe -ErrorAction SilentlyContinue
@@ -430,6 +430,61 @@ public class MahmReader {
     }
 }
 '@
+}
+
+# ================================================================
+#  CSV SAFETY  -  locale, and why this file used to corrupt itself
+# ================================================================
+#  PowerShell formats numbers using the machine's regional settings.
+#  Across most of the world - Norway, Germany, France, Spain, Brazil,
+#  Italy, Poland - the decimal separator is a COMMA. So a rounded
+#  value like 12.5 leaves as "12,5", which in a comma-separated file
+#  is not one field. It is two.
+#
+#  The damage is silent and total. A real trace off a Norwegian PC
+#  came back with rows 41 to 46 fields wide against a 39-field header,
+#  every row shifted by a different amount. Per-CCD load, busiest
+#  core, and every interrupt and DPC column were unrecoverable. Only
+#  the GPU columns survived, and only because nvidia-smi prints
+#  invariant decimals no matter what language the machine is set to.
+#
+#  Nothing warns you. The file opens, it looks like a spreadsheet, and
+#  the numbers are quietly in the wrong columns.
+#
+#  So every value now leaves through one of these two functions.
+$InvCulture = [System.Globalization.CultureInfo]::InvariantCulture
+
+function Inv($v) {
+    <#
+        A number, formatted with a period, always, whatever language
+        Windows is set to. Blank stays blank. Text passes through with
+        any comma stripped - hex masks and nvidia-smi output arrive as
+        strings already, and a stray comma in one of those would break
+        the row just as thoroughly as a decimal one.
+    #>
+    if ($null -eq $v) { return '' }
+    if ($v -is [string]) {
+        if ($v -eq '') { return '' }
+        return ($v -replace ',', '')
+    }
+    if ($v -is [double] -or $v -is [single] -or $v -is [decimal]) {
+        return ([double]$v).ToString('0.####', $InvCulture)
+    }
+    if ($v -is [int] -or $v -is [long] -or $v -is [int16] -or $v -is [byte]) {
+        return $v.ToString($InvCulture)
+    }
+    return ("$v" -replace ',', '')
+}
+
+function Txt($v) {
+    <#
+        Text that came from Windows rather than from us. A power plan
+        name is whatever the user's language calls it, and we do not
+        get to assume it has no comma in it. Quote it, double any quote
+        inside it, and it can then contain anything at all.
+    #>
+    if ($null -eq $v -or "$v" -eq '') { return '' }
+    return '"' + ("$v" -replace '"', '""') + '"'
 }
 
 # Afterburner publishes core voltage in volts on some cards and in
@@ -707,9 +762,25 @@ while ($true) {
     }
 
     # ---- write row (CSV schema identical to v1) ----
-    ($now.ToString('HH:mm:ss'),$plan,$ccd0,$ccd1,$busyIdx,$busyPct,$c0i,$c0d,$c16i,$c16d,$totDpc,$totInt,$gu,$gp,$gg,$gm,$gt,$gthr,$simRun,$simPct,$simAff,$piPct,$hf,$ram,
-      $fVolt,$fFan,$gMemUtil,$gVram,$fMemT,$fFps,$fFt,$gPstate,
-      $ab.voltlim,$ab.pwrlim,$ab.templim,$ab.noload,$ab.fanrpm,$ab.bus,$ab.fb) -join ',' |
+    # Every field goes out through Inv() or Txt() - see CSV SAFETY above.
+    # The timestamp gets the invariant culture too, because ":" in a .NET
+    # format string means "this culture's time separator", and that is not
+    # a colon everywhere.
+    (@(
+        $now.ToString('HH:mm:ss', $InvCulture)
+        (Txt $plan)
+        (Inv $ccd0),   (Inv $ccd1),   (Inv $busyIdx),  (Inv $busyPct)
+        (Inv $c0i),    (Inv $c0d),    (Inv $c16i),     (Inv $c16d)
+        (Inv $totDpc), (Inv $totInt)
+        (Inv $gu),     (Inv $gp),     (Inv $gg),       (Inv $gm)
+        (Inv $gt),     (Inv $gthr)
+        (Inv $simRun), (Inv $simPct), (Inv $simAff),   (Inv $piPct)
+        (Inv $hf),     (Inv $ram)
+        (Inv $fVolt),  (Inv $fFan),   (Inv $gMemUtil), (Inv $gVram)
+        (Inv $fMemT),  (Inv $fFps),   (Inv $fFt),      (Inv $gPstate)
+        (Inv $ab.voltlim), (Inv $ab.pwrlim), (Inv $ab.templim)
+        (Inv $ab.noload),  (Inv $ab.fanrpm), (Inv $ab.bus), (Inv $ab.fb)
+    ) -join ',') |
         Out-File $Csv -Append -Encoding utf8
 
     # ---- which limiter is actually holding the GPU back? ----
@@ -745,7 +816,7 @@ while ($true) {
     $busyCell = if ($busyIdx -ne '') { "#$busyIdx $busyPct%" } else { '-' }
 
     Write-Host ($Fmt -f `
-        $now.ToString('HH:mm:ss'), (Cell $ccd0), (Cell $ccd1), $busyCell, (Cell $hf),
+        $now.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), (Cell $ccd0), (Cell $ccd1), $busyCell, (Cell $hf),
         (Cell $c0i), (Cell $c0d), (Cell $c16i), (Cell $c16d), (Cell $totDpc), (Cell $totInt),
         (Cell $gu), (Cell $gp), (Cell $gt), (Cell $fVolt), (Cell $fFan), (Cell $ab.bus), $lim,
         (Cell $simPct), (Cell $piPct)) `

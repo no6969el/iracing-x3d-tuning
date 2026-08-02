@@ -79,11 +79,11 @@ if ($P.Form -eq 'mobile') {
     Show-OK "active plan = $planName (single-CCD - power plan isn't critical; Balanced is fine)"
 } elseif (-not $P.IsX3D) {
     Show-INFO "active plan = $planName - make sure core parking is OFF (100% cores unparked)"
-} elseif ($scheme.ToLower().Contains('a4342cf1') -or $planName -like '*Bitsum*') {
+} elseif ($scheme.ToLowerInvariant().Contains('a4342cf1') -or $planName -like '*Bitsum*') {
     Show-OK "active plan = $planName (all cores unparked)"
-} elseif ($scheme.ToLower().Contains('8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c')) {
+} elseif ($scheme.ToLowerInvariant().Contains('8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c')) {
     Show-OK "active plan = $planName (High Performance - cores unparked)"
-} elseif ($scheme.ToLower().Contains('381b4222-f694-41f0-9685-ff5bb260df2e')) {
+} elseif ($scheme.ToLowerInvariant().Contains('381b4222-f694-41f0-9685-ff5bb260df2e')) {
     Show-WARN "active plan = Balanced - on a dual-CCD chip its core parking can starve the VR compositor. Switch to Bitsum Highest Performance or High Performance."
     $issues++
 } else {
@@ -165,10 +165,10 @@ if (-not $P.IsX3D) {
         Show-WARN "ProcessGovernor.exe not running - Process Lasso rules won't apply"
         $issues++
     }
-    $cfg = 'C:\ProgramData\ProcessLasso\config\prolasso.ini'
+    $cfg = (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'ProcessLasso\config\prolasso.ini')
     if (Test-Path $cfg) {
         try {
-            $t = [System.IO.File]::ReadAllText($cfg, [System.Text.Encoding]::Unicode).ToLower()
+            $t = [System.IO.File]::ReadAllText($cfg, [System.Text.Encoding]::Unicode).ToLowerInvariant()
             if ($t.Contains("iracingsim64dx11.exe,($VCacheRange)")) { Show-OK "iRacing soft CPU Set $VCacheRange present" }
             else { Show-WARN "iRacing CPU Set $VCacheRange missing - add it (CPU Sets, not affinity)"; $issues++ }
             if (-not $t.Contains("iracingsim64dx11.exe,0,$VCacheRange")) { Show-OK "no hard-affinity rule (EAC would reject it)" }

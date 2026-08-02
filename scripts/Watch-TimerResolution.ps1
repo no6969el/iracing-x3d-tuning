@@ -28,7 +28,7 @@ public static class TimerRes {
 }
 "@
 
-$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$stamp = [DateTime]::Now.ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
 $Csv = Join-Path ([Environment]::GetFolderPath('Desktop')) "iRacing-TimerWatch-$stamp.csv"
 'timestamp,timer_ms,foreground_process,sim_running' | Out-File $Csv -Encoding utf8
 
@@ -53,7 +53,15 @@ while ($true) {
     $sim = if (Get-Process iRacingSim64DX11 -ErrorAction SilentlyContinue) { 1 } else { 0 }
     $now = Get-Date
 
-    ($now.ToString('HH:mm:ss'), $curMs, $fg, $sim) -join ',' | Out-File $Csv -Append -Encoding utf8
+    # Invariant formatting: on a comma-decimal locale a timer reading of
+    # 0.49 ms would otherwise be written "0,49" and split into two fields.
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    (@(
+        $now.ToString('HH:mm:ss', $inv)
+        ([double]$curMs).ToString('0.####', $inv)
+        ('"' + ("$fg" -replace '"','""') + '"')
+        ([int]$sim).ToString($inv)
+    ) -join ',') | Out-File $Csv -Append -Encoding utf8
 
     $color = 'Green'
     if ($curMs -gt 2) { $color = if ($sim -eq 1) { 'Red' } else { 'Yellow' } }

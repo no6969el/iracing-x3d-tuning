@@ -128,7 +128,7 @@ if (-not (Test-Path $common)) {
 
 
 # ================================================================
-$StateDir  = Join-Path $env:ProgramData 'RaceQuiet'
+$StateDir  = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'RaceQuiet'
 $StateFile = Join-Path $StateDir 'state.json'
 $LogFile   = Join-Path $StateDir 'RaceQuiet.log'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
@@ -178,7 +178,7 @@ function Stop-Phase {
 
 function Write-Log {
     param([string]$Msg, [string]$Color = 'Gray', [switch]$NoHost)
-    $line = ("{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Msg)
+    $line = ("{0}  {1}" -f ([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)), $Msg)
     try {
         if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
         Add-Content -Path $LogFile -Value $line -Encoding utf8 -ErrorAction SilentlyContinue

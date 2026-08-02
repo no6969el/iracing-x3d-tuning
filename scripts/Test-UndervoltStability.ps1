@@ -296,7 +296,7 @@ if (-not $PSBoundParameters.ContainsKey('SecondsPerCore'))  { $SecondsPerCore = 
 if (-not $PSBoundParameters.ContainsKey('Cycles'))          { $Cycles         = $d.Cycles }
 if (-not $PSBoundParameters.ContainsKey('Shuffle') -and $d.Shuffle) { $Shuffle = [switch]$true }
 
-$stamp   = Get-Date -Format 'yyyyMMdd_HHmmss'
+$stamp   = [DateTime]::Now.ToString('yyyyMMdd_HHmmss', [Globalization.CultureInfo]::InvariantCulture)
 $scriptDir = Split-Path $PSCommandPath -Parent
 if (-not $LogPath)    { $LogPath    = Join-Path $scriptDir 'undervolt_test_log.txt' }
 if (-not $ReportPath) { $ReportPath = Join-Path $scriptDir "undervolt_results_$stamp.csv" }
@@ -475,7 +475,7 @@ function Invoke-CoreTest {
         $clk  = if ($peakMHz -gt 0) { ('~{0:0.00}GHz' -f ($peakMHz/1000)) } else { '--' }
         $flag = if ($stalled) { ' [!! no heartbeat]' } else { '' }
         $line = ("[C{0}/{1} S{2}/{3}] Core {4,2} {5} {6,-5} | {7}/{8} | {9} pk | blk {10} | left {11}{12}" -f `
-            $Cycle,$Cycles,($script:completedSubs+1),$subTotal,$Core,$siblings,$Phase.ToUpper(),`
+            $Cycle,$Cycles,($script:completedSubs+1),$subTotal,$Core,$siblings,$Phase.ToUpperInvariant(),`
             (Format-HMS $remaining),(Format-HMS $SecondsPerCore),$clk,$blocks,(Format-HMS $ovLeft),$flag)
         [Console]::Write("`r" + $line.PadRight(118).Substring(0,[math]::Min(118,$line.PadRight(118).Length)))
 

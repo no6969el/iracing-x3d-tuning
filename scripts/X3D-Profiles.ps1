@@ -36,7 +36,7 @@
 # older/absent version are discarded and re-detected rather than trusted.
 $script:X3DSchemaVersion = 3
 
-$script:X3DConfigDir  = Join-Path $env:APPDATA 'iRacingX3DTuning'
+$script:X3DConfigDir  = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'iRacingX3DTuning'
 $script:X3DConfigFile = Join-Path $script:X3DConfigDir 'config.json'
 
 # ================================================================

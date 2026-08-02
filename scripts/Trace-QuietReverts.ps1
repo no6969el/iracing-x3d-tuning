@@ -36,7 +36,7 @@ param(
     [switch]$Export
 )
 
-$StateDir  = Join-Path $env:ProgramData 'RaceQuiet'
+$StateDir  = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'RaceQuiet'
 $StateFile = Join-Path $StateDir 'state.json'
 $LogFile   = Join-Path $StateDir 'RaceQuiet.log'
 $SvcRoot   = 'HKLM:\SYSTEM\CurrentControlSet\Services'
@@ -221,7 +221,7 @@ if ($reverted.Count -eq 0) {
 Say ""
 
 if ($Export) {
-    $f = Join-Path ([Environment]::GetFolderPath('Desktop')) ("QuietReverts-{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $f = Join-Path ([Environment]::GetFolderPath('Desktop')) ("QuietReverts-{0}.txt" -f ([DateTime]::Now.ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)))
     $out | Out-File -FilePath $f -Encoding utf8
     Write-Host ("  Saved: {0}" -f $f) -ForegroundColor Green
     Write-Host ""

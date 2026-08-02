@@ -194,8 +194,8 @@ function Find-Xperf {
         toolkit as "degrade quietly", never as an error.
     #>
     foreach ($cand in @(
-        'C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
-        'C:\Program Files\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+        (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Windows Kits\10\Windows Performance Toolkit\xperf.exe')
+        (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Windows Kits\10\Windows Performance Toolkit\xperf.exe')
     )) { if (Test-Path -LiteralPath $cand) { return $cand } }
 
     $cmd = Get-Command xperf.exe -ErrorAction SilentlyContinue
@@ -394,14 +394,14 @@ function Invoke-HardFaultAnalysis {
         if (-not $origin) { $origin = (Get-Item -LiteralPath $EtlPath).CreationTime }
 
         $events | Select-Object `
-            @{n='timestamp';e={ $origin.AddMilliseconds($_.Us/1000.0).ToString('HH:mm:ss') }},
+            @{n='timestamp';e={ $origin.AddMilliseconds($_.Us/1000.0).ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture) }},
             @{n='process'; e={$_.Process}}, @{n='io_size';e={$_.IOSize}}, @{n='file';e={$_.FileName}} |
             Export-Csv -LiteralPath $hfCsv -NoTypeInformation -Encoding UTF8
 
         # ---- per-second buckets, then merge into the FullTrace CSV ----
         $simSec = @{}; $allSec = @{}
         foreach ($e in $events) {
-            $k = $origin.AddMilliseconds($e.Us/1000.0).ToString('HH:mm:ss')
+            $k = $origin.AddMilliseconds($e.Us/1000.0).ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
             if ($e.Process -match '^iRacingSim64') { if (-not $simSec.ContainsKey($k)) { $simSec[$k]=0 }; $simSec[$k]++ }
             if (-not $allSec.ContainsKey($k)) { $allSec[$k] = @{ P=@{}; F=@{} } }
             if ($e.Process)  { if (-not $allSec[$k].P.ContainsKey($e.Process))  { $allSec[$k].P[$e.Process]=0  }; $allSec[$k].P[$e.Process]++  }

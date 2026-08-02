@@ -79,7 +79,7 @@ if ($times.Count -lt 2) {
     Read-Host "  Press Enter to close" | Out-Null; return
 }
 
-function DT([string]$hms) { $day + [TimeSpan]::Parse($hms) }
+function DT([string]$hms) { $day + [TimeSpan]::Parse($hms, [Globalization.CultureInfo]::InvariantCulture) }
 function AsInt($v) { $n = 0; [void][int]::TryParse(("$v").Trim(), [ref]$n); $n }
 
 # --- incident detection --------------------------------------------
@@ -100,7 +100,7 @@ function Add-Incident([string]$ts, [string]$why) {
 
 $prev = $null
 foreach ($t in $times) {
-    $cur = [TimeSpan]::Parse($t).TotalSeconds
+    $cur = [TimeSpan]::Parse($t, [Globalization.CultureInfo]::InvariantCulture).TotalSeconds
     if ($null -ne $prev -and ($cur - $prev) -gt 1) { Add-Incident $t 'GAP' }
     $prev = $cur
 }
@@ -117,7 +117,7 @@ if ($HasFault) {
     }
 }
 
-$ordered = @($incidents.Keys | Sort-Object { [TimeSpan]::Parse($_) })
+$ordered = @($incidents.Keys | Sort-Object { [TimeSpan]::Parse($_, [Globalization.CultureInfo]::InvariantCulture) })
 $Start = DT $times[0]
 $End   = DT $times[-1]
 
@@ -125,7 +125,7 @@ $gapN   = @($incidents.Values | Where-Object { $_ -contains 'GAP' }).Count
 $faultN = @($incidents.Values | Where-Object { $_ -contains 'FAULT' }).Count
 
 Write-Host ("  Session {0} -> {1}   |   {2} incident(s): {3} gap, {4} fault burst" -f `
-    $Start.ToString('HH:mm:ss'), $End.ToString('HH:mm:ss'), $ordered.Count, $gapN, $faultN) -ForegroundColor Cyan
+    $Start.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $End.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $ordered.Count, $gapN, $faultN) -ForegroundColor Cyan
 if ($HasFault) {
     Write-Host ("  Per-process fault data present - sim faulted {0} time(s), peak {1}/sec" -f $simTotal, $simPeak) -ForegroundColor Green
 } else {
