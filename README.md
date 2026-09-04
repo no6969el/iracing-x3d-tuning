@@ -24,7 +24,7 @@ Your chip is detected on first launch. If it gets it wrong, **CPU profile** in t
 
 ---
 
-**In this repo** (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it): `Apply-Baseline.bat` — one-shot optimizer · `Start-Tuning-Menu.bat` — guided menu with undo for everything · `scripts/` — the individual tools ([inventory](scripts/README.txt)) · [changelog](CHANGELOG.md).
+New here? Read [START-HERE.txt](START-HERE.txt). **In this repo** (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it): `Apply-Baseline.bat` — one-shot optimizer · `Start-Tuning-Menu.bat` — guided menu with undo for everything · `scripts/` — the individual tools ([inventory](scripts/README.txt)) · [changelog](CHANGELOG.md).
 
 ### Measuring it: FullTrace
 
@@ -61,15 +61,10 @@ You get three extra CSV columns — `sim_hardfaults_s`, `top_fault_proc`, `top_f
 
 Without admin or without the toolkit it behaves exactly as before and says so in the banner; `-NoHardFaultTrace` skips it deliberately. The plain **Run** button still needs no admin and produces the same 39-column CSV.
 
-### Bonus: iRacing Tuner Mini
-
-If you do not want the full troubleshooting workflow and just want the baseline fixes, use the lightweight launcher in [mini-tuner/Small-Tuning-Menu.ps1](mini-tuner/Small-Tuning-Menu.ps1) or [mini-tuner/Start-Small-Tuning-Menu.bat](mini-tuner/Start-Small-Tuning-Menu.bat). It keeps the initial CPU detection, then offers **Optimize My PC**, the before/after race routine, **Defender Exclusions**, and **Guide Extras**. This is a lower-profile companion tool rather than a major release update.
-
-> ⚠️ **Note:** The `mini-tuner` folder is not included in the main ZIP download. It is only available in the GitHub repository and can be downloaded separately.
 
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
 
-**Upgrading?** From v3.2.5 or earlier, replace the whole `scripts/` folder **and `Tuning-Menu.ps1`** — v3.3.0 adds `scripts/Kit-Common.ps1`, which the quiet, restore, status and trace scripts all now read, so a partial copy will not run; `FullTrace.ps1` is v3; and the dashboard gains the **Hard faults (Admin)** button that goes with it. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.2.0 or earlier, replace `scripts/Pre-Race-Quiet.ps1`, `scripts/Post-Race-Restore.ps1` and `scripts/Check-Quiet-Status.ps1` — v3.2.5 adds nine scheduled tasks to the pre-race disable list and fixes a status screen that could report "race ready" while tasks were still live. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.1.0 or earlier, also replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
+**Upgrading?** From v3.2.5 or earlier, replace the whole `scripts/` folder **and `Tuning-Menu.ps1`** — v3.3.0 adds `scripts/Kit-Common.ps1` (quiet lists) plus hard-fault / race-quiet shared helpers the quiet, restore, status and trace scripts now read, so a partial copy will not run; `FullTrace.ps1` is v3; and the dashboard gains the **Hard faults (Admin)** button that goes with it. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.2.0 or earlier, replace `scripts/Pre-Race-Quiet.ps1`, `scripts/Post-Race-Restore.ps1` and `scripts/Check-Quiet-Status.ps1` — v3.2.5 adds nine scheduled tasks to the pre-race disable list and fixes a status screen that could report "race ready" while tasks were still live. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.1.0 or earlier, also replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
 > 

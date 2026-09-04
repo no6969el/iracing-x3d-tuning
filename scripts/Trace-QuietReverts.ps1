@@ -55,6 +55,11 @@ if (-not (Test-Path $common)) {
     return
 }
 . $common
+$hfCommon = Join-Path $PSScriptRoot 'HardFault-Common.ps1'
+if (Test-Path $hfCommon) { . $hfCommon }
+$rqCommon = Join-Path $PSScriptRoot 'RaceQuiet-Common.ps1'
+if (Test-Path $rqCommon) { . $rqCommon }
+
 # Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
 
 $Watched      = $ServicesToQuiet

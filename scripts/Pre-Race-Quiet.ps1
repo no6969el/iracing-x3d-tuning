@@ -1,25 +1,25 @@
 <#
-    Pre-Race-Quiet.ps1  -  MEDIC-UNLOCK EDITION               v3.3.0
+    Pre-Race-Quiet.ps1                                    v3.3.0
     ================================================================
-    Same as the standard Pre-Race-Quiet, with ONE difference: it takes
-    ownership of the WaaSMedicSvc registry key by default, instead of
-    asking you to pass -UnlockMedic.
+    Quiets Windows Update / Store / Search noise for a race session.
+    By default it also unlocks WaaSMedicSvc when that service's
+    registry key is TrustedInstaller-owned and refuses to disable
+    (-NoUnlock turns that off).
 
-    WHY THIS EXISTS
-    ---------------
+    WHY MEDIC UNLOCK IS ON BY DEFAULT
+    ---------------------------------
     On some Windows builds WaaSMedicSvc's registry key is owned by
     TrustedInstaller and refuses to be disabled even when running as SYSTEM.
     Windows Update Medic then keeps switching the update services back on,
     roughly every ten minutes - mid-race, with a stutter each time.
 
-    The standard edition stops at that point and tells you. This edition
-    goes through: it takes ownership of that one key, disables the service,
-    and hands ownership straight back in the same run.
+    This script takes ownership of that one key when needed, disables the
+    service, and hands ownership straight back in the same run. Pass
+    -NoUnlock if you would rather it stop and report instead.
 
-    USE THIS ONLY IF you have confirmed Medic is the problem. Run
-    Trace-QuietReverts.ps1 first - if it reports
-        "WaaSMedicSvc: stopped, but could NOT disable (protected)"
-    then this edition is what you want. Otherwise use the standard one.
+    If quieting does not hold, run Trace-QuietReverts.ps1 elevated first.
+    If it points at Group Policy or MDM rather than Medic, unlocking will
+    not help - a managed machine re-applies those settings regardless.
 
     WHAT CHANGED IN v3.3.0
     ----------------------
@@ -56,10 +56,11 @@
     WHAT IT TOUCHES
     ---------------
     HKLM\SYSTEM\CurrentControlSet\Services\WaaSMedicSvc  -  owner and
-    permissions, briefly. The original security descriptor is saved to the
-    snapshot AND to a separate .sddl file before anything is changed, and
-    permissions are handed back within the same run - the key is only in a
-    modified state for a few seconds, not for the length of your session.
+    permissions, briefly (when unlock is on). The original security
+    descriptor is saved to the snapshot AND to a separate .sddl file
+    before anything is changed, and permissions are handed back within
+    the same run - the key is only in a modified state for a few seconds,
+    not for the length of your session.
 
     Post-Race-Restore re-verifies the owner and permissions afterwards, and
     refuses to delete the snapshot while any key is still unrestored.
@@ -70,9 +71,9 @@
     signature updates ride the same services, no fresh definitions.
 
     USAGE
-      .\Pre-Race-Quiet.ps1              quiet + unlock Medic (the point of this edition)
+      .\Pre-Race-Quiet.ps1              quiet + unlock Medic (default)
       .\Pre-Race-Quiet.ps1 -Verify      wait 3 min afterwards, report anything that came back
-      .\Pre-Race-Quiet.ps1 -NoUnlock    behave like the standard edition
+      .\Pre-Race-Quiet.ps1 -NoUnlock    skip Medic registry unlock
       .\Pre-Race-Quiet.ps1 -KeepSearch  leave Windows Search alone
       .\Pre-Race-Quiet.ps1 -KeepTouchKeyboard  leave TabletInputService alone (VR keyboard)
       .\Pre-Race-Quiet.ps1 -KeepStore   leave the Store auto-download policy alone
@@ -125,6 +126,16 @@ if (-not (Test-Path $common)) {
 . $common
 # Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
 
+$rqCommon = Join-Path $PSScriptRoot 'RaceQuiet-Common.ps1'
+if (-not (Test-Path $rqCommon)) {
+    Write-Host ""
+    Write-Host "  scripts\RaceQuiet-Common.ps1 is missing - re-unzip the kit." -ForegroundColor Red
+    Write-Host "  It holds the shared elevate / log / privilege helpers." -ForegroundColor Red
+    Write-Host ""
+    return
+}
+. $rqCommon
+
 
 
 # ================================================================
@@ -176,53 +187,11 @@ function Stop-Phase {
     $script:PhaseSw = $null
 }
 
-function Write-Log {
-    param([string]$Msg, [string]$Color = 'Gray', [switch]$NoHost)
-    $line = ("{0}  {1}" -f ([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)), $Msg)
-    try {
-        if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
-        Add-Content -Path $LogFile -Value $line -Encoding utf8 -ErrorAction SilentlyContinue
-    } catch { }
-    if (-not $NoHost) { Write-Host ("  " + $Msg) -ForegroundColor $Color }
-}
-
 
 # ================================================================
-#  Registry ownership helpers - only used by -UnlockMedic
+#  Registry ownership helpers - used when Medic unlock is on
+#  (Initialize-Privileges / RQPriv come from RaceQuiet-Common.ps1)
 # ================================================================
-function Initialize-Privileges {
-    # Taking ownership needs SeTakeOwnershipPrivilege, and handing it back to
-    # TrustedInstaller needs SeRestorePrivilege. Admins hold both, but they
-    # are disabled in the token until explicitly enabled.
-    if ('RQPriv' -as [type]) { return $true }
-    $code = @'
-using System;
-using System.Runtime.InteropServices;
-public class RQPriv {
-    [DllImport("advapi32.dll", SetLastError=true)]
-    static extern bool OpenProcessToken(IntPtr h, uint acc, out IntPtr tok);
-    [DllImport("advapi32.dll", SetLastError=true)]
-    static extern bool LookupPrivilegeValue(string host, string name, out long luid);
-    [DllImport("advapi32.dll", SetLastError=true)]
-    static extern bool AdjustTokenPrivileges(IntPtr tok, bool disall, ref TOKPRIV1LUID newst, int len, IntPtr prev, IntPtr rel);
-    [StructLayout(LayoutKind.Sequential, Pack=1)]
-    public struct TOKPRIV1LUID { public int Count; public long Luid; public int Attr; }
-    public static bool Enable(string priv) {
-        IntPtr tok = IntPtr.Zero;
-        if (!OpenProcessToken(System.Diagnostics.Process.GetCurrentProcess().Handle, 0x28, out tok)) return false;
-        TOKPRIV1LUID tp;
-        tp.Count = 1;
-        tp.Luid  = 0;
-        tp.Attr  = 2;   // SE_PRIVILEGE_ENABLED
-        if (!LookupPrivilegeValue(null, priv, out tp.Luid)) return false;
-        return AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
-    }
-}
-'@
-    try { Add-Type -TypeDefinition $code -ErrorAction Stop } catch { return $false }
-    return $true
-}
-
 function Unlock-ServiceKey {
     <#
         Take ownership of a service's registry key so its Start value can be
@@ -277,34 +246,19 @@ function Unlock-ServiceKey {
 }
 
 # ---- self-elevate -------------------------------------------------
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Host "Elevating..." -ForegroundColor Cyan
-    $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File', ('"{0}"' -f $PSCommandPath))
-    if ($Force)        { $argList += '-Force' }
-    if ($SkipDefender) { $argList += '-SkipDefender' }
-    if ($KeepSearch)   { $argList += '-KeepSearch' }
-    if ($NoSystem)     { $argList += '-NoSystem' }
-    if ($Verify)       { $argList += @('-Verify','-VerifyDelay',$VerifyDelay) }
-    if ($Deadman)      { $argList += '-Deadman' }
-    if ($NoUnlock)     { $argList += '-NoUnlock' }
-    if ($KeepTouchKeyboard) { $argList += '-KeepTouchKeyboard' }
-    if ($KeepStore)    { $argList += '-KeepStore' }
-    if ($CloseApps)    { $argList += '-CloseApps' }
-    try   { Start-Process powershell.exe -Verb RunAs -ArgumentList $argList }
-    catch { Write-Host "Elevation cancelled - nothing was changed." -ForegroundColor Yellow }
+if (-not (Assert-AdminOrRelaunch -ScriptPath $PSCommandPath -BoundParameters $PSBoundParameters -CancelMessage 'Elevation cancelled - nothing was changed.')) {
     return
 }
 
 if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
 
 Write-Host ""
-Write-Host "========  PRE-RACE QUIET (MEDIC-UNLOCK EDITION)  ========" -ForegroundColor Cyan
+Write-Host "========  PRE-RACE QUIET  ========" -ForegroundColor Cyan
 if ($UnlockMedic) {
     Write-Host "  Medic unlock is ON. If WaaSMedicSvc refuses to disable, this" -ForegroundColor Yellow
     Write-Host "  will take ownership of its registry key, disable it, and hand" -ForegroundColor Yellow
     Write-Host "  ownership straight back. Original permissions are saved first." -ForegroundColor Yellow
-    Write-Host "  Run with -NoUnlock to behave like the standard edition." -ForegroundColor DarkGray
+    Write-Host "  Pass -NoUnlock to skip taking ownership of the Medic key." -ForegroundColor DarkGray
 }
 Write-Log ("=== Pre-Race-Quiet v{0} starting ===" -f $KitVersion) 'Gray' -NoHost
 
@@ -500,59 +454,17 @@ Stop-Phase
 
 # ---- SYSTEM helper for TrustedInstaller-owned tasks ---------------
 if ($failedTasks.Count -gt 0 -and -not $NoSystem) {
-    Write-Host ""
-    Write-Host ("  {0} task(s) refused - retrying as SYSTEM" -f $failedTasks.Count) -ForegroundColor Yellow
-    $helper = Join-Path $StateDir 'system-hop.ps1'
-    $marker = Join-Path $StateDir 'system-hop.done'
-    if (Test-Path $marker) { Remove-Item $marker -Force -ErrorAction SilentlyContinue }
-
-    $lines = @('$done = @()')
-    foreach ($f in $failedTasks) {
-        $pp = $f.Path -replace "'","''"
-        $nn = $f.Name -replace "'","''"
-        # NB: built by concatenation, not -f. The format operator treats the
-        # literal braces in try{}/catch{} as malformed placeholders and throws.
-        $lines += "try { Disable-ScheduledTask -TaskPath '$pp' -TaskName '$nn' -ErrorAction Stop | Out-Null; `$done += 'OK   $pp$nn' } catch { `$done += 'FAIL $pp$nn' }"
-    }
-    $lines += ("`$done | Out-File -FilePath '{0}' -Encoding utf8" -f ($marker -replace "'","''"))
-    Set-Content -Path $helper -Value $lines -Encoding utf8
-
-    $taskName = 'RaceQuiet-SystemHop'
-    $cmd = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $helper)
-    & schtasks.exe /Create /TN $taskName /TR $cmd /SC ONCE /ST 00:00 /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-Null
-    & schtasks.exe /Run /TN $taskName 2>&1 | Out-Null
-
-    # Poll every 100ms rather than every second. The helper usually reports
-    # back in well under a second; the old loop slept a full second before
-    # even looking, so a fast success still cost a second and a silent
-    # failure cost the whole 30. Same 30s ceiling, far shorter typical wait.
     Start-Phase 'SYSTEM helper'
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    while (-not (Test-Path $marker) -and $sw.Elapsed.TotalSeconds -lt 30) {
-        Write-Progress -Activity 'Pre-Race-Quiet' `
-                       -Status ("Retrying {0} protected task(s) as SYSTEM" -f $failedTasks.Count) `
-                       -CurrentOperation ("waited {0:N1}s of 30" -f $sw.Elapsed.TotalSeconds) `
-                       -PercentComplete 55
-        Start-Sleep -Milliseconds 100
-    }
-    $sw.Stop()
+    Invoke-SystemTaskHop -Tasks $failedTasks -Action Disable -StateDir $StateDir `
+        -SchTaskName 'RaceQuiet-SystemHop' -HelperLeaf 'system-hop.ps1' -MarkerLeaf 'system-hop.done' `
+        -FinePoll -ProgressActivity 'Pre-Race-Quiet' `
+        -TimeoutMessage 'SYSTEM helper did not report back within 30s - those tasks stay enabled'
     Stop-Phase
-    & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
-
-    if (Test-Path $marker) {
-        foreach ($l in (Get-Content $marker)) {
-            if ($l -like 'OK*')   { Write-Log ("SYSTEM " + $l) 'Green' }
-            else                  { Write-Log ("SYSTEM " + $l) 'Yellow' }
-        }
-        Remove-Item $marker -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Log "SYSTEM helper did not report back within 30s - those tasks stay enabled" 'Yellow'
-    }
-    Remove-Item $helper -Force -ErrorAction SilentlyContinue
 }
 elseif ($failedTasks.Count -gt 0) {
     Write-Log ("{0} task(s) refused and -NoSystem was set - left enabled" -f $failedTasks.Count) 'Yellow'
 }
+
 
 # ================================================================
 #  3. SERVICES  -  disable, clear recovery actions, then stop
@@ -623,7 +535,7 @@ foreach ($s in $snapServices) {
     if ($disabled -and $stopped)      { Write-Log ("{0}: disabled + stopped" -f $name) 'Green' }
     elseif ($disabled)                { Write-Log ("{0}: disabled, still running - it will not come back after a reboot" -f $name) 'Yellow' }
     elseif ($stopped)                 { Write-Log ("{0}: stopped, but could NOT disable (protected) - may return" -f $name) 'Yellow'
-                                        if (-not $UnlockMedic) { Write-Log ("   re-run with -UnlockMedic to force it (see the script header)" -f $name) 'Yellow' } }
+                                        if (-not $UnlockMedic) { Write-Log ("   unlock was skipped (-NoUnlock); re-run without -NoUnlock to force it" -f $name) 'Yellow' } }
     else                              { Write-Log ("{0}: could not disable or stop (protected)" -f $name) 'Yellow' }
 }
 Stop-Phase

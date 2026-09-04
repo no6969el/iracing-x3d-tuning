@@ -166,12 +166,16 @@ $HfEtl    = Join-Path $env:TEMP "iRacing-hf-$stamp.etl"
 $HfStart  = $null
 $Xperf    = $null
 
-# Kit-Common owns the xperf lookup, the provider string and the output
-# filename patterns, so this script and Scan-Stutter-Events cannot drift
-# apart about what was written or where. It declares data only - no
-# elevation needed, nothing runs on load.
-$KitCommon = Join-Path $PSScriptRoot 'Kit-Common.ps1'
-if (Test-Path -LiteralPath $KitCommon) { . $KitCommon }
+# Kit-Common owns the provider string and output filename patterns.
+# HardFault-Common owns Find-Xperf / analysis / QuickEdit helpers and
+# loads Kit-Common for the constants if needed.
+$HardFaultCommon = Join-Path $PSScriptRoot 'HardFault-Common.ps1'
+if (Test-Path -LiteralPath $HardFaultCommon) {
+    . $HardFaultCommon
+} else {
+    $KitCommon = Join-Path $PSScriptRoot 'Kit-Common.ps1'
+    if (Test-Path -LiteralPath $KitCommon) { . $KitCommon }
+}
 
 # ---- console QuickEdit ------------------------------------------
 # Clicking in a QuickEdit console blocks the process on its next write,
@@ -223,7 +227,7 @@ if (-not $NoHardFaultTrace) {
     if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
         $Xperf = Find-Xperf
     } else {
-        # Kit-Common missing: this script still works standalone, it just
+        # HardFault helpers missing: this script still works standalone, it just
         # loses the shared definitions. Fall back rather than fail.
         foreach ($cand in @(
             (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Windows Kits\10\Windows Performance Toolkit\xperf.exe')
@@ -250,7 +254,7 @@ if (-not $NoHardFaultTrace) {
             # Clear any session left behind by a previous run that was killed.
             & $Xperf -stop 2>&1 | Out-Null
 
-            # Provider string comes from Kit-Common - see the comment there
+            # Provider string comes from Kit-Common (via HardFault-Common) - see comment
             # for why FILENAME is not optional.
             & $Xperf -on $HardFaultProviders -f "`"$HfEtl`"" `
                      -BufferSize 1024 -MinBuffers 64 -MaxBuffers 256 2>&1 | Out-Null
@@ -863,7 +867,7 @@ finally {
 # =================================================================
 #  HARD-FAULT TRACE: STOP AND ATTRIBUTE   (v3)
 # =================================================================
-# The analysis itself lives in Kit-Common as Invoke-HardFaultAnalysis,
+# The analysis itself lives in HardFault-Common as Invoke-HardFaultAnalysis,
 # because it must also be callable LATER - a run that is X-ed out never
 # reaches this block at all, and the next run recovers it instead.
 # Calling the same function from both places means the clean path and
@@ -880,7 +884,7 @@ if ($HfActive) {
     if (Get-Command Invoke-HardFaultAnalysis -ErrorAction SilentlyContinue) {
         $null = Invoke-HardFaultAnalysis -EtlPath $HfEtl -Stamp $stamp
     } else {
-        Write-Host "Kit-Common.ps1 is missing - stopping the trace without analysing it." -ForegroundColor Yellow
+        Write-Host "HardFault-Common.ps1 is missing - stopping the trace without analysing it." -ForegroundColor Yellow
         Write-Host "The capture is kept at $HfEtl and a later run will pick it up." -ForegroundColor DarkGray
         try { & $Xperf -stop 2>&1 | Out-Null } catch { }
     }

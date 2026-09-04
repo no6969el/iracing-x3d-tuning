@@ -1,3 +1,6 @@
+> **What's new vs full history:** this file is the short "what's new" for each
+> release. Detailed history lives in [CHANGELOG.md](CHANGELOG.md).
+
 # Release Notes — v3.3.0
 
 ## What's new in v3.3.0
@@ -10,6 +13,8 @@ to be copy-pasted across four scripts each, under hand-written "must mirror
 Pre-Race-Quiet" comments. They are now in `scripts/Kit-Common.ps1`, which
 `Pre-Race-Quiet`, `Post-Race-Restore`, `Check-Quiet-Status` and
 `Trace-QuietReverts` all read. One place to edit; nothing left to keep in step.
+Hard-fault helpers live in `HardFault-Common.ps1`; quiet/restore elevate/log
+helpers live in `RaceQuiet-Common.ps1`.
 
 **`Trace-QuietReverts` could only see half of what it was watching.** It tracked
 six services while the quiet script disabled eleven, so five could revert without
@@ -148,8 +153,9 @@ way.
 ### Upgrading
 
 Replace `scripts\Pre-Race-Quiet.ps1`, `scripts\Post-Race-Restore.ps1` and
-`scripts\Check-Quiet-Status.ps1`. If you use the `scripts-medic-unlock\`
-edition, replace its copies too — this release changes the same code in both.
+`scripts\Check-Quiet-Status.ps1`. Medic unlock is built into `Pre-Race-Quiet`
+by default (`-NoUnlock` to skip); there is no separate `scripts-medic-unlock\`
+folder in this tree.
 
 **If you have an un-restored snapshot right now**, either path works:
 
@@ -196,13 +202,12 @@ tasks are invisible and will look absent when they aren't.
 **A way through when the answer is Medic.** On some builds `WaaSMedicSvc`'s
 registry key is owned by TrustedInstaller and refuses to be disabled even as
 SYSTEM — so Windows Update Medic keeps repairing the update stack mid-race.
-`Pre-Race-Quiet -UnlockMedic` takes ownership of that one key, disables the
-service, verifies it took, and hands ownership straight back in the same run.
-The original permissions are saved before anything changes, and
-`Post-Race-Restore` verifies they're back afterwards.
-
-There's also an optional `scripts-medic-unlock\` pair with that behaviour on by
-default, for handing to someone who's already confirmed it's their problem.
+At the time this shipped as opt-in `-UnlockMedic`. **Today unlock is the default**
+on `Pre-Race-Quiet` (`-NoUnlock` to skip). It takes ownership of that one key,
+disables the service, verifies it took, and hands ownership straight back in the
+same run. The original permissions are saved before anything changes, and
+`Post-Race-Restore` verifies they're back afterwards. There is no separate
+`scripts-medic-unlock\` folder in this tree.
 
 **Only use it if you've confirmed you need it.** Run `Trace-QuietReverts` first —
 if it points at Group Policy or an MDM profile rather than Medic, the unlock

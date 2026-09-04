@@ -10,8 +10,14 @@
     RUN AS ADMINISTRATOR, then REBOOT.
 #>
 
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) { Write-Host "ERROR: Run as Administrator." -ForegroundColor Red; return }
+$rqCommon = Join-Path $PSScriptRoot 'RaceQuiet-Common.ps1'
+if (Test-Path $rqCommon) { . $rqCommon }
+if (Get-Command Assert-Admin -ErrorAction SilentlyContinue) {
+    if (-not (Assert-Admin -Message 'ERROR: Run as Administrator.')) { return }
+} else {
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $admin) { Write-Host "ERROR: Run as Administrator." -ForegroundColor Red; return }
+}
 
 Write-Host "Rebuilding performance counter registry (64-bit)..." -ForegroundColor Cyan
 & "$env:windir\system32\lodctr.exe" /R

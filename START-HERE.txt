@@ -46,7 +46,9 @@ FOLDER LAYOUT  -  keep this structure intact
   Apply-Baseline.ps1
   scripts\                     <- all the individual tools
       X3D-Profiles.ps1         <- shared CPU detection, don't delete
-      Kit-Common.ps1           <- what gets quieted, don't delete
+      Kit-Common.ps1           <- what gets quieted (data), don't delete
+      HardFault-Common.ps1     <- hard-fault helpers for FullTrace
+      RaceQuiet-Common.ps1     <- shared elevate/log helpers for quiet/restore
       README.txt               <- what every script does
   tests\                       <- development only, safe to delete
   RELEASE-NOTES.md             <- what changed in this version

@@ -5,6 +5,7 @@
 
 $scripts = "$PSScriptRoot/../scripts"
 . "$scripts/Kit-Common.ps1"
+. "$scripts/HardFault-Common.ps1"
 
 $fail = 0
 function Check($ok, $msg) {
@@ -52,7 +53,7 @@ Check ($unmatched.Count -eq 0) ("regex matches all $($TasksToDisable.Count) task
 
 "--- Kit-Common is the only place the lists are declared ---"
 $leaked = @()
-foreach ($f in (Get-ChildItem -Path $scripts -Filter *.ps1 | Where-Object { $_.Name -ne 'Kit-Common.ps1' })) {
+foreach ($f in (Get-ChildItem -Path $scripts -Filter *.ps1 | Where-Object { $_.Name -notin @('Kit-Common.ps1','HardFault-Common.ps1','RaceQuiet-Common.ps1') })) {
     $c = Get-Content $f.FullName -Raw
     # A literal re-declaration is "= @(" then a newline then quoted entries.
     # Filtering the shared list (-KeepSearch, -KeepTouchKeyboard) is fine.
@@ -66,12 +67,16 @@ foreach ($n in 'Pre-Race-Quiet.ps1','Post-Race-Restore.ps1','Check-Quiet-Status.
     $c = Get-Content (Join-Path $scripts $n) -Raw
     Check ($c -match "Kit-Common\.ps1") "$n loads Kit-Common.ps1"
 }
+foreach ($n in 'Pre-Race-Quiet.ps1','Post-Race-Restore.ps1') {
+    $c = Get-Content (Join-Path $scripts $n) -Raw
+    Check ($c -match "RaceQuiet-Common\.ps1") "$n loads RaceQuiet-Common.ps1"
+}
 
 # --- v3.3.0: the hard-fault constants ---------------------------------
 # Same discipline as the quiet lists. FullTrace writes these files and
 # Scan-Stutter-Events reads them; Preflight-Check reports on the toolkit.
 # Three scripts, one set of facts - so it lives here or it drifts.
-"--- Kit-Common exposes the hard-fault constants ---"
+"--- Kit-Common exposes the hard-fault constants; HardFault-Common the helpers ---"
 foreach ($v in 'HardFaultSessionName','HardFaultProviders','FullTraceCsvPattern','HardFaultCsvPattern','HardFaultColumns') {
     Check ($null -ne (Get-Variable -Name $v -ErrorAction SilentlyContinue)) "`$$v is defined"
 }
@@ -96,10 +101,14 @@ $xperfOk = $true
 try { $null = Find-Xperf } catch { $xperfOk = $false }
 Check $xperfOk "Find-Xperf returns without throwing when the toolkit is absent"
 
-"--- the hard-fault consumers load it too ---"
-foreach ($n in 'FullTrace.ps1','Scan-Stutter-Events.ps1','Preflight-Check.ps1') {
+"--- the hard-fault consumers load the right commons ---"
+foreach ($n in 'Scan-Stutter-Events.ps1') {
     $c = Get-Content (Join-Path $scripts $n) -Raw
     Check ($c -match "Kit-Common\.ps1") "$n loads Kit-Common.ps1"
+}
+foreach ($n in 'FullTrace.ps1','Preflight-Check.ps1') {
+    $c = Get-Content (Join-Path $scripts $n) -Raw
+    Check ($c -match "HardFault-Common\.ps1") "$n loads HardFault-Common.ps1"
 }
 
 # FullTrace must keep working if someone copies it out of the kit, so it

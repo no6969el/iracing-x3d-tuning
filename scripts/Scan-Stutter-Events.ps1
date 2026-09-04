@@ -36,7 +36,7 @@
 
 $desktop = [Environment]::GetFolderPath('Desktop')
 
-# Kit-Common owns the filename patterns and the fault-column names, so
+# Kit-Common owns the filename patterns and the fault-column names (data only), so
 # this script cannot disagree with FullTrace about what was written.
 $KitCommon = Join-Path $PSScriptRoot 'Kit-Common.ps1'
 if (Test-Path -LiteralPath $KitCommon) { . $KitCommon }

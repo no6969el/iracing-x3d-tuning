@@ -1,5 +1,5 @@
 <#
-    Post-Race-Restore.ps1  -  MEDIC-UNLOCK EDITION            v3.3.0
+    Post-Race-Restore.ps1                                 v3.3.0
     ================================================================
     Puts everything Pre-Race-Quiet touched back exactly as it was.
 
@@ -15,16 +15,13 @@
     If no snapshot exists (someone deleted it, or quieting was done by hand)
     it falls back to Windows defaults and says so loudly.
 
-    PAIRED WITH THE MEDIC-UNLOCK EDITION
-    ------------------------------------
-    That edition may have taken ownership of the WaaSMedicSvc registry key.
+    MEDIC UNLOCK SESSIONS
+    ---------------------
+    Pre-Race-Quiet may have taken ownership of the WaaSMedicSvc registry key.
     This script restores the original security descriptor and owner, verifies
     both, and REFUSES to delete the snapshot while any key is still
     unrestored - so a partial restore can't be silently forgotten. If it
     cannot finish, it prints the exact commands to fix it by hand.
-
-    Identical to the standard edition otherwise. Either one restores either
-    kind of session correctly.
 
     USAGE
       .\Post-Race-Restore.ps1              normal run
@@ -58,63 +55,27 @@ if (-not (Test-Path $common)) {
 . $common
 # Provides: $KitVersion, $ServicesToQuiet, $TasksToDisable, $ServiceDefaults
 
+$rqCommon = Join-Path $PSScriptRoot 'RaceQuiet-Common.ps1'
+if (-not (Test-Path $rqCommon)) {
+    Write-Host ""
+    Write-Host "  scripts\RaceQuiet-Common.ps1 is missing - re-unzip the kit." -ForegroundColor Red
+    Write-Host "  It holds the shared elevate / log / privilege helpers." -ForegroundColor Red
+    Write-Host ""
+    return
+}
+. $rqCommon
+
 # Windows defaults, used only when there is no snapshot to replay.
 $Defaults = $ServiceDefaults
 
-function Write-Log {
-    param([string]$Msg, [string]$Color = 'Gray', [switch]$NoHost)
-    $line = ("{0}  {1}" -f ([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)), $Msg)
-    try {
-        if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
-        Add-Content -Path $LogFile -Value $line -Encoding utf8 -ErrorAction SilentlyContinue
-    } catch { }
-    if (-not $NoHost) { Write-Host ("  " + $Msg) -ForegroundColor $Color }
-}
-
-
-function Initialize-Privileges {
-    if ('RQPriv' -as [type]) { return $true }
-    $code = @'
-using System;
-using System.Runtime.InteropServices;
-public class RQPriv {
-    [DllImport("advapi32.dll", SetLastError=true)]
-    static extern bool OpenProcessToken(IntPtr h, uint acc, out IntPtr tok);
-    [DllImport("advapi32.dll", SetLastError=true)]
-    static extern bool LookupPrivilegeValue(string host, string name, out long luid);
-    [DllImport("advapi32.dll", SetLastError=true)]
-    static extern bool AdjustTokenPrivileges(IntPtr tok, bool disall, ref TOKPRIV1LUID newst, int len, IntPtr prev, IntPtr rel);
-    [StructLayout(LayoutKind.Sequential, Pack=1)]
-    public struct TOKPRIV1LUID { public int Count; public long Luid; public int Attr; }
-    public static bool Enable(string priv) {
-        IntPtr tok = IntPtr.Zero;
-        if (!OpenProcessToken(System.Diagnostics.Process.GetCurrentProcess().Handle, 0x28, out tok)) return false;
-        TOKPRIV1LUID tp;
-        tp.Count = 1;
-        tp.Luid  = 0;
-        tp.Attr  = 2;
-        if (!LookupPrivilegeValue(null, priv, out tp.Luid)) return false;
-        return AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
-    }
-}
-'@
-    try { Add-Type -TypeDefinition $code -ErrorAction Stop } catch { return $false }
-    return $true
-}
 
 # ---- self-elevate -------------------------------------------------
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Host "Elevating..." -ForegroundColor Cyan
-    $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File', ('"{0}"' -f $PSCommandPath))
-    if ($Verify) { $argList += @('-Verify','-VerifyDelay',$VerifyDelay) }
-    try   { Start-Process powershell.exe -Verb RunAs -ArgumentList $argList }
-    catch { Write-Host "Elevation cancelled - nothing was restored." -ForegroundColor Yellow }
+if (-not (Assert-AdminOrRelaunch -ScriptPath $PSCommandPath -BoundParameters $PSBoundParameters -CancelMessage 'Elevation cancelled - nothing was restored.')) {
     return
 }
 
 Write-Host ""
-Write-Host "======  POST-RACE RESTORE (MEDIC-UNLOCK EDITION)  ======" -ForegroundColor Cyan
+Write-Host "======  POST-RACE RESTORE  ======" -ForegroundColor Cyan
 Write-Log ("=== Post-Race-Restore v{0} starting ===" -f $KitVersion) 'Gray' -NoHost
 
 # ---- load the snapshot -------------------------------------------
@@ -313,40 +274,12 @@ foreach ($t in $taskList) {
 
 # SYSTEM helper for anything TrustedInstaller-owned
 if ($failedTasks.Count -gt 0) {
-    Write-Host ""
-    Write-Host ("  {0} task(s) refused - retrying as SYSTEM" -f $failedTasks.Count) -ForegroundColor Yellow
-    if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
-    $helper = Join-Path $StateDir 'system-hop-restore.ps1'
-    $marker = Join-Path $StateDir 'system-hop-restore.done'
-    if (Test-Path $marker) { Remove-Item $marker -Force -ErrorAction SilentlyContinue }
-
-    $lines = @('$done = @()')
-    foreach ($f in $failedTasks) {
-        $pp = $f.Path -replace "'","''"
-        $nn = $f.Name -replace "'","''"
-        # NB: concatenation, not -f - see Pre-Race-Quiet for why.
-        $lines += "try { Enable-ScheduledTask -TaskPath '$pp' -TaskName '$nn' -ErrorAction Stop | Out-Null; `$done += 'OK   $pp$nn' } catch { `$done += 'FAIL $pp$nn' }"
-    }
-    $lines += ("`$done | Out-File -FilePath '{0}' -Encoding utf8" -f ($marker -replace "'","''"))
-    Set-Content -Path $helper -Value $lines -Encoding utf8
-
-    $cmd = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $helper)
-    & schtasks.exe /Create /TN 'RaceQuiet-SystemHopRestore' /TR $cmd /SC ONCE /ST 00:00 /RU SYSTEM /RL HIGHEST /F 2>&1 | Out-Null
-    & schtasks.exe /Run /TN 'RaceQuiet-SystemHopRestore' 2>&1 | Out-Null
-    $waited = 0
-    while (-not (Test-Path $marker) -and $waited -lt 30) { Start-Sleep -Seconds 1; $waited++ }
-    & schtasks.exe /Delete /TN 'RaceQuiet-SystemHopRestore' /F 2>&1 | Out-Null
-
-    if (Test-Path $marker) {
-        foreach ($l in (Get-Content $marker)) {
-            if ($l -like 'OK*') { Write-Log ("SYSTEM " + $l) 'Green' } else { Write-Log ("SYSTEM " + $l) 'Yellow' }
-        }
-        Remove-Item $marker -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Log "SYSTEM helper did not report back - re-run this script from an elevated prompt" 'Yellow'
-    }
-    Remove-Item $helper -Force -ErrorAction SilentlyContinue
+    Invoke-SystemTaskHop -Tasks $failedTasks -Action Enable -StateDir $StateDir `
+        -SchTaskName 'RaceQuiet-SystemHopRestore' `
+        -HelperLeaf 'system-hop-restore.ps1' -MarkerLeaf 'system-hop-restore.done' `
+        -TimeoutMessage 'SYSTEM helper did not report back - re-run this script from an elevated prompt'
 }
+
 
 # ================================================================
 #  3. DEFENDER

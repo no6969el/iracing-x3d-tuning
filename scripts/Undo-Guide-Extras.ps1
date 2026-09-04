@@ -5,8 +5,14 @@
     Game Mode / Game Bar / Game DVR back ON. RUN AS ADMINISTRATOR.
 #>
 
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) { Write-Host "ERROR: Run as Administrator." -ForegroundColor Red; return }
+$rqCommon = Join-Path $PSScriptRoot 'RaceQuiet-Common.ps1'
+if (Test-Path $rqCommon) { . $rqCommon }
+if (Get-Command Assert-Admin -ErrorAction SilentlyContinue) {
+    if (-not (Assert-Admin)) { return }
+} else {
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $admin) { Write-Host 'Run this from an elevated PowerShell (right-click > Run as administrator).' -ForegroundColor Yellow; return }
+}
 
 Write-Host ""
 Write-Host "1) USB Selective Suspend -> ON (default)" -ForegroundColor Cyan

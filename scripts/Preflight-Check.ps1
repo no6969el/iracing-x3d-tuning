@@ -203,8 +203,10 @@ if ($vc) { Show-INFO "$($vc.Name)  driver $($vc.DriverVersion)  ($($vc.DriverDat
 # keeps writing to disk until something stops it.
 Write-Host ""
 Write-Host "8. Hard-fault tracing (FullTrace 'Hard faults' button)"
+$hf = Join-Path $PSScriptRoot 'HardFault-Common.ps1'
 $kc = Join-Path $PSScriptRoot 'Kit-Common.ps1'
-if (Test-Path -LiteralPath $kc) { . $kc }
+if (Test-Path -LiteralPath $hf) { . $hf }
+elseif (Test-Path -LiteralPath $kc) { . $kc }
 
 if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
     $xp = Find-Xperf
@@ -224,7 +226,7 @@ if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
         Show-INFO "could not determine whether a kernel trace is running (logman unavailable)"
     }
 } else {
-    Show-INFO "Kit-Common.ps1 not found - skipping hard-fault checks. Re-unzip the kit if you expected them."
+    Show-INFO "HardFault-Common.ps1 not found - skipping hard-fault checks. Re-unzip the kit if you expected them."
 }
 
 # profile notes
