@@ -6,7 +6,15 @@ The project ships as a script kit plus a web guide at
 
 ---
 
-## Unreleased — issue fixes on cleanup/high-priority
+## v3.3.2 — cleanup, CrowdDetail docs, stutter scan fix
+
+### Cleanup — shared modules and docs wording
+
+High-priority follow-ups after v3.3.0 / v3.3.1:
+
+- **Kit-Common stays data-only.** Analysis, recovery and console helpers moved to `HardFault-Common.ps1`; elevate / log / privilege helpers moved to `RaceQuiet-Common.ps1` so the quiet lists file no longer mixes declarations with behaviour.
+- **RaceQuiet-Common** shared by `Pre-Race-Quiet` and `Post-Race-Restore` (elevation hop, `RaceQuiet.log`, privilege helper, SYSTEM schtasks hop).
+- **Docs / medic wording** cleaned up so upgrade and restore guidance matches the current scripts.
 
 ### Fixed — guide: `CrowdDetail` belongs on the renderer ini (issue #1)
 
@@ -31,7 +39,7 @@ Task Scheduler logging was on and working.
 
 ---
 
-## v3.3.0 — one list, and a trace tool that could only see half of it (current)
+## v3.3.0 — one list, and a trace tool that could only see half of it
 
 Two root causes, both the same shape: **a fact that lived in more than one place
 drifted, and nothing was watching.**

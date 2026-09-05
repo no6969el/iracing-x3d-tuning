@@ -1,4 +1,4 @@
-iRacing X3D Tuning Kit  -  v3.3.0
+iRacing X3D Tuning Kit  -  v3.3.2
 ============================================================
 This is the complete kit. Nothing to merge, nothing to configure.
 

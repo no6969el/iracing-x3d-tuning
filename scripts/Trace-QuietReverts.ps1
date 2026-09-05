@@ -1,5 +1,5 @@
 <#
-    Trace-QuietReverts.ps1                                    v3.3.0
+    Trace-QuietReverts.ps1                                    v3.3.2
     ================================================================
     READ-ONLY forensics. Answers one question:
 

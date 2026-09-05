@@ -1,5 +1,5 @@
 ﻿<#
-    Kit-Common.ps1  -  shared constants for the race-quiet scripts    v3.3.0
+    Kit-Common.ps1  -  shared constants for the race-quiet scripts    v3.3.2
     ================================================================
     SINGLE SOURCE OF TRUTH for the kit version and for everything
     Pre-Race-Quiet turns off. Dot-source it:
@@ -43,7 +43,7 @@
 #  KIT VERSION
 #  Bump here and every script's banner follows.
 # ================================================================
-$KitVersion = '3.3.0'
+$KitVersion = '3.3.2'
 
 # ================================================================
 #  SERVICES

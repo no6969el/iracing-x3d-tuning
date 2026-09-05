@@ -1,5 +1,5 @@
 <#
-    Pre-Race-Quiet.ps1                                    v3.3.0
+    Pre-Race-Quiet.ps1                                    v3.3.2
     ================================================================
     Quiets Windows Update / Store / Search noise for a race session.
     By default it also unlocks WaaSMedicSvc when that service's

@@ -1,5 +1,5 @@
 <#
-    Check-Quiet-Status.ps1                                    v3.3.0
+    Check-Quiet-Status.ps1                                    v3.3.2
     ---------------------------------------------------------------
     READ-ONLY. Shows whether "race quiet" is active right now.
     No admin needed. Changes nothing.

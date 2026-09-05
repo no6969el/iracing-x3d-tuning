@@ -1,6 +1,20 @@
 > **What's new vs full history:** this file is the short "what's new" for each
 > release. Detailed history lives in [CHANGELOG.md](CHANGELOG.md).
 
+# Release Notes — v3.3.2
+
+## What's new in v3.3.2
+
+**CrowdDetail docs (issue #1).** Step 6 had `CrowdDetail=0` under in-sim Graphics options; it belongs on `rendererDX11*.ini` with the other renderer settings. The guide table now groups it correctly.
+
+**Stutter scan no longer dead-ends on empty System (issue #2).** `Scan-Stutter-Events` treated an empty `Get-WinEvent` result as a failed query. Empty is empty now, and each incident also checks Application, TaskScheduler/Operational, and Kernel-Processor-Power/Diagnostic.
+
+**Shared modules.** Hard-fault helpers live in `HardFault-Common.ps1`; quiet/restore elevate/log helpers live in `RaceQuiet-Common.ps1`. `Kit-Common.ps1` stays data-only (version + quiet lists). Docs and medic wording cleaned up to match.
+
+Upgrading from **v3.3.1**: replace the whole folder (or at least `scripts/` plus the top-level docs). No new breaking quiet-list changes versus v3.3.0 / v3.3.1 — run `Post-Race-Restore` on your current version before swapping if a quiet session is still active.
+
+---
+
 # Release Notes — v3.3.0
 
 ## What's new in v3.3.0
