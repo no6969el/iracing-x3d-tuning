@@ -183,18 +183,55 @@ process keeps appearing in top_fault_proc.
     }
 }
 
+# Safe Get-WinEvent: FilterHashtable throws "No events were found..." when the
+# result set is empty (ErrorAction Stop turns that into a terminating error).
+# Callers were treating that as "log off / query failed", which made every
+# quiet System window print "(no matching System events)" even when the query
+# worked - see GitHub issue #2.
+function Get-WinEventsSafe {
+    param([hashtable]$Filter, [int]$MaxEvents = 0)
+    # Unary comma keeps an empty Object[] from collapsing to $null on return
+    # (PowerShell enumerates return values; zero items => assignment becomes $null).
+    try {
+        if ($MaxEvents -gt 0) {
+            return ,@(Get-WinEvent -FilterHashtable $Filter -MaxEvents $MaxEvents -ErrorAction Stop)
+        }
+        return ,@(Get-WinEvent -FilterHashtable $Filter -ErrorAction Stop)
+    } catch {
+        $msg = "$_"
+        if ($msg -match 'No events were found|No matching events were found|NoMatchingEventsFound') {
+            return ,@()
+        }
+        # Log disabled / access denied / bad name - surface as $null so caller can explain.
+        return $null
+    }
+}
+
+function Format-EventLine {
+    param($e, [int]$MaxLen = 150)
+    $m = (($e.Message) -replace '\s+', ' ').Trim()
+    if ($m.Length -gt $MaxLen) { $m = $m.Substring(0, $MaxLen) }
+    return ("[{0:HH:mm:ss}] Id={1} {2}: {3}" -f $e.TimeCreated, $e.Id, $e.ProviderName, $m)
+}
+
 # 1) scheduled tasks that fired during the whole session (a repeating cadence is the prime suspect)
 "" | Out-File $out -Append -Encoding utf8
 "=== SCHEDULED TASKS THAT RAN THIS SESSION (Id 100/200) ===" | Out-File $out -Append -Encoding utf8
-try {
-    $t = Get-WinEvent -FilterHashtable @{ LogName='Microsoft-Windows-TaskScheduler/Operational'; Id=100,200; StartTime=$Start; EndTime=$End } -ErrorAction Stop | Sort-Object TimeCreated
-    if (-not $t) { "(none)" | Out-File $out -Append -Encoding utf8 }
-    foreach ($e in $t) { $m=($e.Message -replace '\s+',' '); "{0:HH:mm:ss}  {1}" -f $e.TimeCreated, $m.Substring(0,[Math]::Min(150,$m.Length)) | Out-File $out -Append -Encoding utf8 }
-} catch {
-    "(TaskScheduler Operational log is off - run Enable-DiagnosticLogs BEFORE your next race to capture this.)" | Out-File $out -Append -Encoding utf8
+$t = Get-WinEventsSafe @{ LogName='Microsoft-Windows-TaskScheduler/Operational'; Id=100,200; StartTime=$Start; EndTime=$End }
+if ($null -eq $t) {
+    "(TaskScheduler Operational log is off or unreadable - run Enable-DiagnosticLogs BEFORE your next race to capture this.)" | Out-File $out -Append -Encoding utf8
+} elseif (-not $t.Count) {
+    "(none in this window)" | Out-File $out -Append -Encoding utf8
+} else {
+    foreach ($e in ($t | Sort-Object TimeCreated)) {
+        $m = (($e.Message) -replace '\s+', ' ')
+        "{0:HH:mm:ss}  {1}" -f $e.TimeCreated, $m.Substring(0, [Math]::Min(150, $m.Length)) | Out-File $out -Append -Encoding utf8
+    }
 }
 
-# 2) System events within +/-20s of each detected stutter
+# 2) Events near each incident - System is rarely where scheduler/DPC blips live.
+# Enable-DiagnosticLogs turns on TaskScheduler/Operational and
+# Kernel-Processor-Power/Diagnostic; query those too, plus Application.
 "" | Out-File $out -Append -Encoding utf8
 "=== EACH INCIDENT: WHAT FAULTED, AND WHAT WINDOWS LOGGED (+/-20s) ===" | Out-File $out -Append -Encoding utf8
 if (-not $ordered.Count) {
@@ -205,8 +242,17 @@ if (-not $ordered.Count) {
 $byTime = @{}
 foreach ($r in $rows) { if ($r.timestamp) { $byTime[$r.timestamp] = $r } }
 
+$nearSources = @(
+    @{ Name = 'System';                          FilterExtra = @{ Level = 1,2,3 } },
+    @{ Name = 'Application';                     FilterExtra = @{ Level = 1,2,3 } },
+    @{ Name = 'Microsoft-Windows-TaskScheduler/Operational'; FilterExtra = @{} },
+    @{ Name = 'Microsoft-Windows-Kernel-Processor-Power/Diagnostic'; FilterExtra = @{} }
+)
+
 foreach ($ts in $ordered) {
     $c = DT $ts
+    $winStart = $c.AddSeconds(-20)
+    $winEnd   = $c.AddSeconds(20)
     "" | Out-File $out -Append -Encoding utf8
     "--- $ts   [$($incidents[$ts] -join '+')] ---" | Out-File $out -Append -Encoding utf8
 
@@ -224,14 +270,45 @@ foreach ($ts in $ordered) {
             "  -> the sim faulted zero times here. This was $proc, not iRacing." | Out-File $out -Append -Encoding utf8
         }
     }
-    try {
-        $ev = Get-WinEvent -FilterHashtable @{ LogName='System'; StartTime=$c.AddSeconds(-20); EndTime=$c.AddSeconds(20); Level=1,2,3 } -ErrorAction Stop | Sort-Object TimeCreated
-        if (-not $ev) { "  (no warnings/errors logged - typical for a pure DPC/scheduler blip)" | Out-File $out -Append -Encoding utf8 }
-        foreach ($e in $ev) { $m=($e.Message -replace '\s+',' '); "  [{0:HH:mm:ss}] Id={1} {2}: {3}" -f $e.TimeCreated,$e.Id,$e.ProviderName,$m.Substring(0,[Math]::Min(150,$m.Length)) | Out-File $out -Append -Encoding utf8 }
-    } catch {
-        "  (no matching System events)" | Out-File $out -Append -Encoding utf8
+
+    $anyNear = $false
+    $disabledHints = @()
+    foreach ($src in $nearSources) {
+        $fh = @{ LogName = $src.Name; StartTime = $winStart; EndTime = $winEnd }
+        foreach ($k in $src.FilterExtra.Keys) { $fh[$k] = $src.FilterExtra[$k] }
+        $ev = Get-WinEventsSafe $fh
+        if ($null -eq $ev) {
+            $disabledHints += $src.Name
+            continue
+        }
+        if (-not $ev.Count) { continue }
+        $anyNear = $true
+        "  -- $($src.Name) --" | Out-File $out -Append -Encoding utf8
+        foreach ($e in ($ev | Sort-Object TimeCreated | Select-Object -First 25)) {
+            "  $(Format-EventLine $e)" | Out-File $out -Append -Encoding utf8
+        }
+    }
+
+    if (-not $anyNear) {
+@"
+  (nothing logged in System/Application warnings+errors, TaskScheduler, or
+   Kernel-Processor-Power within +/-20s)
+
+  That is normal for a pure DPC / scheduler blip - Windows often writes no
+  System warning for those. Look at:
+    - SCHEDULED TASKS above (session-wide cadence is the usual culprit)
+    - WHO WAS FAULTING (if this trace has per-process columns)
+    - a LATENCY / ISR-DPC capture if gaps keep appearing with empty logs
+
+  If TaskScheduler above said the log is off, run Enable-DiagnosticLogs
+  (menu: Troubleshoot -> Turn on task log) BEFORE the next traced race.
+"@ | Out-File $out -Append -Encoding utf8
+    } elseif ($disabledHints.Count) {
+        "  (skipped unreadable logs: $($disabledHints -join ', '))" | Out-File $out -Append -Encoding utf8
+        if ($disabledHints -match 'TaskScheduler|Kernel-Processor-Power') {
+            "  Tip: run Enable-DiagnosticLogs before the next race to capture those." | Out-File $out -Append -Encoding utf8
+        }
     }
 }
-
 Write-Host "  Done -> $out" -ForegroundColor Green
 Start-Process notepad.exe $out

@@ -6,6 +6,31 @@ The project ships as a script kit plus a web guide at
 
 ---
 
+## Unreleased — issue fixes on cleanup/high-priority
+
+### Fixed — guide: `CrowdDetail` belongs on the renderer ini (issue #1)
+
+Step 6 listed `CrowdDetail=0` under "Graphics options (in-sim)". It is a
+`rendererDX11*.ini` property (same file as `LoadTexturesWhenDriving`). The
+table now groups it with the other renderer settings and notes the in-sim
+Graphics options UI as an alternate way to find it.
+
+### Fixed — `Scan-Stutter-Events` dead-ended on empty System (issue #2)
+
+`Get-WinEvent -FilterHashtable ... -ErrorAction Stop` throws when nothing
+matches. The per-stutter System query caught that and printed
+`(no matching System events)`, which looked like a setup failure even when
+Task Scheduler logging was on and working.
+
+- Empty results are handled as empty (PowerShell's empty-array return pitfall
+  included), not as "query failed".
+- Each incident now also checks Application, TaskScheduler/Operational, and
+  Kernel-Processor-Power/Diagnostic (the logs `Enable-DiagnosticLogs` turns on).
+- When still empty, the report explains that is normal for DPC/scheduler blips
+  and points at the session-wide scheduled-task list and fault columns.
+
+---
+
 ## v3.3.0 — one list, and a trace tool that could only see half of it (current)
 
 Two root causes, both the same shape: **a fact that lived in more than one place

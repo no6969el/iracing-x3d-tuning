@@ -423,8 +423,8 @@
             <tr><th>File</th><th>Set</th><th>Why</th></tr>
             <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(or your runtime's — see above)</span></span></td><td><code>LoadTexturesWhenDriving=0</code></td><td>Preload textures instead of streaming off disk mid-lap <b>⚠ breaks Trading Paints — see the note below</b></td></tr>
             <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(same file)</span></span></td><td><code>CacheSwap3HighResCars=0</code></td><td>No mid-race texture swapping <b>⚠ same</b></td></tr>
+            <tr><td><span data-disp="flat"><code>rendererDX11.ini</code></span><span data-disp="vr"><code>rendererDX11OpenXR.ini</code> <span class="muted">(same file)</span></span></td><td><code>CrowdDetail=0</code></td><td>Fewer draw calls, near-zero visual impact. Lives in the renderer ini (also exposed under Graphics options in-sim)</td></tr>
             <tr><td><code>app.ini</code></td><td><code>spoolingEnabled=0</code></td><td>Stops continuous replay-to-disk writes</td></tr>
-            <tr><td>Graphics options <span class="muted">(in-sim)</span></td><td><code>CrowdDetail=0</code></td><td>Fewer draw calls, near-zero visual impact</td></tr>
           </table>
           <div class="callout warn">
             <p><b>⚠ Use Trading Paints? Read this before setting those first two.</b></p>
