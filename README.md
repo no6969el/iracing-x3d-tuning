@@ -30,7 +30,41 @@ New here? Read [START-HERE.txt](START-HERE.txt). **In this repo** (the guide's [
 
 `scripts/FullTrace.ps1` is the read-only logger the whole method is built on. Run it, race, press `Ctrl+C`, and you get a 1 Hz CSV on your Desktop covering per-CCD load, CPU 0 versus frequency-core interrupt/DPC time, GPU utilisation, power, clocks, voltage, temperature, fan, PCIe load and active limiter, sim and VR CPU, hard pagefaults, free RAM, and the power plan. The live console shows the readable subset and colours each line — grey normal, yellow if the power plan drifted mid-session or the GPU is power/temperature limited, red on a hard-pagefault spike.
 
-GPU voltage, fan RPM, memory temperature, framerate and the limiter flags come from MSI Afterburner's shared memory, so start Afterburner first if you want them. Anything your card does not expose stays blank and the rest still logs.
+Framerate and frame time come from the SteamVR compositor when SteamVR is already running. Start SteamVR yourself before the logger, or any time during the session (it retries about every five seconds). The script never launches SteamVR and never takes scene focus. If SteamVR is not running, the `vr_*` columns stay blank and the rest of the CSV still logs. `-NoSteamVr` skips the client. MSI Afterburner / RTSS is not required for FPS.
+
+The same columns are filled in iRacing's OpenVR mode and its OpenXR mode. Both submit through the SteamVR compositor, including a Pimax that runs as a native SteamVR headset.
+
+`gpu_fps` and `gpu_frametime_ms` stay on Afterburner when Afterburner is running, so older comparisons stay valid. When Afterburner leaves either one blank, SteamVR fills it. `gpu_timing_source` says which: `afterburner`, `steamvr`, or `afterburner+steamvr`. Voltage, fan RPM, memory temperature and the limiter flags still need Afterburner. Anything the card does not expose stays blank.
+
+The new columns are appended after `fb_usage_pct`. Hard-fault columns, when you use the elevated run, are still appended after these. The history buffer is 128 frames, which is a full second at 72 / 90 / 120 Hz. Above that, `vr_fps` still counts every frame index the compositor advanced; the averages cover the newest 128.
+
+| Column | Unit |
+|---|---|
+| `gpu_timing_source` | `afterburner`, `steamvr`, `afterburner+steamvr`, or blank |
+| `vr_fps` | app frames/s (frame-index delta over the window) |
+| `vr_fps_presented` | presented frames/s, including frames the compositor repeated |
+| `vr_frametime_ms`, `vr_frametime_max_ms` | ms, mean and max time between the app's pose waits |
+| `vr_app_gpu_ms`, `vr_app_gpu_max_ms` | ms, app GPU work |
+| `vr_comp_gpu_ms`, `vr_comp_cpu_ms` | ms, compositor GPU and CPU |
+| `vr_gpu_ms` | ms, total GPU frame time |
+| `vr_idle_cpu_ms` | ms, compositor idle, time the app could still have used |
+| `vr_submit_ms` | ms, time inside Submit |
+| `vr_over_budget` | frames in the sample over 1.02× the refresh interval. Blank when the refresh rate is unknown |
+| `vr_reprojected`, `vr_reproj_cpu`, `vr_reproj_gpu`, `vr_motion` | frame counts. A frame counts as reprojected when it was presented more than once, or the CPU, GPU, or motion-smoothing flag is set. The async-mode flag does not count |
+| `vr_dropped`, `vr_mispresented`, `vr_throttled` | frame counts. Dropped and reprojected prefer the compositor's cumulative counters when those cover frames that rotated out of the 128-frame history |
+| `vr_frames` | frames actually averaged this second |
+| `vr_hz` | headset refresh, Hz |
+| `vr_target_w`, `vr_target_h` | pixels, recommended render target per eye (includes the resolution scale) |
+| `vr_res_scale` | ratio, 1.0 = 100%. Per-app `resolutionScale` wins over the global supersample scale |
+| `vr_predict_ms` | ms, estimated prediction: (1 + extra frames) × frame interval + vsync-to-photons. Blank unless both the refresh and the headset property are known |
+| `vr_predict_extra` | mean extra frames the runtime predicted ahead |
+| `vr_vsync_to_photons_ms` | ms, headset property |
+| `vr_transfer_ms` | ms, texture transfer latency when the runtime's timing struct includes it |
+| `vr_scene_app`, `vr_scene_pid` | process the compositor considers the scene app |
+| `vr_renderer` | process that rendered the last frame, or `compositor` |
+| `vr_hmd` | headset model string |
+
+`Scan-Stutter-Events` reads these and flags a second as `DROPPED` (any dropped frame), `LATE` (5 or more frames over budget), `MISPRESENT` (5 or more mispresented frames), or `REPROJ` (8 or more reprojected frames, and only when the session is not already reprojecting steadily).
 
 > **Changed in v3.2.0:** a skipped second in the trace is no longer treated as proof of a system stall on its own. Measurement showed the logger could occasionally overrun its own one-second budget on a healthy machine. The loop is now cheaper, and a gap should be corroborated against the `tot_dpc`, `tot_int` and `hardfaults_s` columns before you call it a freeze.
 
@@ -59,12 +93,12 @@ Run FullTrace **elevated** — or click **Hard faults (Admin)** next to **Run** 
 
 You get three extra CSV columns — `sim_hardfaults_s`, `top_fault_proc`, `top_fault_file` — so every row says *who* faulted that second and *what* they read, plus `iRacing-HardFaults-<stamp>.csv` with every event, and a ranked per-process summary in the console when you stop.
 
-Without admin or without the toolkit it behaves exactly as before and says so in the banner; `-NoHardFaultTrace` skips it deliberately. The plain **Run** button still needs no admin and produces the same 39-column CSV.
+Without admin or without the toolkit it behaves exactly as before and says so in the banner; `-NoHardFaultTrace` skips it deliberately. The plain **Run** button still needs no admin. Its CSV is the original columns plus the SteamVR columns above (blank when SteamVR is down). The three fault columns are still only on the elevated run.
 
 
 Needs **Windows PowerShell 5.1**, built into Windows 10 and 11. PowerShell 7 is not required.
 
-**Upgrading?** From **v3.3.1** (or v3.3.0), grab the [v3.3.2 release zip](https://github.com/no6969el/iracing-x3d-tuning/releases/tag/v3.3.2) or replace the whole folder — docs fix for CrowdDetail, stutter-scan empty-log handling, and the HardFault/RaceQuiet module split. From v3.2.5 or earlier, replace the whole `scripts/` folder **and `Tuning-Menu.ps1`** — v3.3.0 adds `scripts/Kit-Common.ps1` (quiet lists) plus hard-fault / race-quiet shared helpers the quiet, restore, status and trace scripts now read, so a partial copy will not run; `FullTrace.ps1` is v3; and the dashboard gains the **Hard faults (Admin)** button that goes with it. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.2.0 or earlier, replace `scripts/Pre-Race-Quiet.ps1`, `scripts/Post-Race-Restore.ps1` and `scripts/Check-Quiet-Status.ps1` — v3.2.5 adds nine scheduled tasks to the pre-race disable list and fixes a status screen that could report "race ready" while tasks were still live. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.1.0 or earlier, also replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
+**Upgrading?** From **v3.3.2**, replace the whole folder — `FullTrace.ps1` now reads SteamVR frame timing through `scripts/SteamVR-Timing.ps1` and no longer needs Afterburner/RTSS for FPS. From **v3.3.1** (or v3.3.0), the [v3.3.2 release zip](https://github.com/no6969el/iracing-x3d-tuning/releases/tag/v3.3.2) notes still apply on the way up: CrowdDetail docs, stutter-scan empty-log handling, and the HardFault/RaceQuiet module split. From v3.2.5 or earlier, replace the whole `scripts/` folder **and `Tuning-Menu.ps1`** — v3.3.0 adds `scripts/Kit-Common.ps1` (quiet lists) plus hard-fault / race-quiet shared helpers the quiet, restore, status and trace scripts now read, so a partial copy will not run; `FullTrace.ps1` is v3; and the dashboard gains the **Hard faults (Admin)** button that goes with it. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.2.0 or earlier, replace `scripts/Pre-Race-Quiet.ps1`, `scripts/Post-Race-Restore.ps1` and `scripts/Check-Quiet-Status.ps1` — v3.2.5 adds nine scheduled tasks to the pre-race disable list and fixes a status screen that could report "race ready" while tasks were still live. Run `Post-Race-Restore` on your current version *before* swapping the files. From v3.1.0 or earlier, also replace `scripts/FullTrace.ps1` — v3.2.0 fixes a GPU-voltage column that logged a constant value. From v2.2.0 or earlier, replace the whole folder — six scripts now share `scripts/X3D-Profiles.ps1`, and mixing versions produces wrong core numbers. See the [release notes](RELEASE-NOTES.md).
 
 > ⚠️ These scripts change Windows settings (power, registry, services, Defender). All reversible, nothing runs without your approval — review before running, at your own risk.
 > 

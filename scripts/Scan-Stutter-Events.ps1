@@ -40,6 +40,8 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 # this script cannot disagree with FullTrace about what was written.
 $KitCommon = Join-Path $PSScriptRoot 'Kit-Common.ps1'
 if (Test-Path -LiteralPath $KitCommon) { . $KitCommon }
+$vrTiming = Join-Path $PSScriptRoot 'SteamVR-Timing.ps1'
+if (Test-Path -LiteralPath $vrTiming) { . $vrTiming }
 if (-not $FullTraceCsvPattern) { $FullTraceCsvPattern = 'iRacing-FullTrace-*.csv' }
 if (-not $HardFaultColumns)    { $HardFaultColumns = @('sim_hardfaults_s','top_fault_proc','top_fault_file') }
 
@@ -117,15 +119,29 @@ if ($HasFault) {
     }
 }
 
+# SteamVR frame misses are incidents even when the logger itself did not
+# skip a second. A session that reprojects every frame is not a spike.
+$vrReport = $null
+if (Get-Command Get-SteamVrTraceReport -ErrorAction SilentlyContinue) {
+    $vrReport = Get-SteamVrTraceReport -Rows $rows
+    foreach ($ts in @($vrReport.Incidents.Keys)) {
+        foreach ($why in @($vrReport.Incidents[$ts])) { Add-Incident $ts $why }
+    }
+}
+
 $ordered = @($incidents.Keys | Sort-Object { [TimeSpan]::Parse($_, [Globalization.CultureInfo]::InvariantCulture) })
 $Start = DT $times[0]
 $End   = DT $times[-1]
 
 $gapN   = @($incidents.Values | Where-Object { $_ -contains 'GAP' }).Count
 $faultN = @($incidents.Values | Where-Object { $_ -contains 'FAULT' }).Count
+$dropN  = @($incidents.Values | Where-Object { $_ -contains 'DROPPED' }).Count
+$lateN  = @($incidents.Values | Where-Object { $_ -contains 'LATE' }).Count
+$reprojN = @($incidents.Values | Where-Object { $_ -contains 'REPROJ' }).Count
+$misN   = @($incidents.Values | Where-Object { $_ -contains 'MISPRESENT' }).Count
 
-Write-Host ("  Session {0} -> {1}   |   {2} incident(s): {3} gap, {4} fault burst" -f `
-    $Start.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $End.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $ordered.Count, $gapN, $faultN) -ForegroundColor Cyan
+Write-Host ("  Session {0} -> {1}   |   {2} incident(s): {3} gap, {4} fault, {5} dropped, {6} late, {7} reproj, {8} mispresent" -f `
+    $Start.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $End.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), $ordered.Count, $gapN, $faultN, $dropN, $lateN, $reprojN, $misN) -ForegroundColor Cyan
 if ($HasFault) {
     Write-Host ("  Per-process fault data present - sim faulted {0} time(s), peak {1}/sec" -f $simTotal, $simPeak) -ForegroundColor Green
 } else {
@@ -138,7 +154,7 @@ $out = Join-Path $desktop 'stutter-events.txt'
 "STUTTER EVENT SCAN"                                   | Out-File $out -Encoding utf8
 "Trace  : $($csv.Name)"                                | Out-File $out -Append -Encoding utf8
 "Window : $Start  ->  $End"                            | Out-File $out -Append -Encoding utf8
-"Incidents: $($ordered.Count)   ($gapN timestamp gap, $faultN sim fault burst)" | Out-File $out -Append -Encoding utf8
+"Incidents: $($ordered.Count)   ($gapN timestamp gap, $faultN sim fault burst, $dropN dropped frame, $lateN over budget, $reprojN reprojection spike, $misN mispresented)" | Out-File $out -Append -Encoding utf8
 if ($ordered.Count) {
     foreach ($ts in $ordered) { "  $ts  [$($incidents[$ts] -join '+')]" | Out-File $out -Append -Encoding utf8 }
 }
@@ -181,6 +197,14 @@ process keeps appearing in top_fault_proc.
         "" | Out-File $out -Append -Encoding utf8
         "iRacing did not hard-fault once. Whatever is stuttering, it is not the sim waiting on disk." | Out-File $out -Append -Encoding utf8
     }
+}
+
+"" | Out-File $out -Append -Encoding utf8
+if ($vrReport -and $vrReport.Lines) {
+    foreach ($line in @($vrReport.Lines)) { $line | Out-File $out -Append -Encoding utf8 }
+} else {
+    "=== STEAMVR FRAME TIMING ===" | Out-File $out -Append -Encoding utf8
+    "SteamVR timing helper was not loaded, so this trace was not checked for dropped or reprojected frames." | Out-File $out -Append -Encoding utf8
 }
 
 # Safe Get-WinEvent: FilterHashtable throws "No events were found..." when the
@@ -269,6 +293,18 @@ foreach ($ts in $ordered) {
         if ($sim -eq 0 -and $proc -and $proc -notmatch '^iRacingSim64') {
             "  -> the sim faulted zero times here. This was $proc, not iRacing." | Out-File $out -Append -Encoding utf8
         }
+    }
+    if ($byTime.ContainsKey($ts) -and ($byTime[$ts].PSObject.Properties.Name -contains 'vr_fps')) {
+        $vr = $byTime[$ts]
+        $bits = @()
+        if ("$($vr.vr_fps)") { $bits += "app $($vr.vr_fps) fps" }
+        if ("$($vr.vr_frametime_ms)") { $bits += "interval $($vr.vr_frametime_ms) ms" }
+        if ("$($vr.vr_app_gpu_ms)") { $bits += "GPU $($vr.vr_app_gpu_ms) ms" }
+        if ("$($vr.vr_dropped)") { $bits += "dropped $($vr.vr_dropped)" }
+        if ("$($vr.vr_reprojected)") { $bits += "reproj $($vr.vr_reprojected)" }
+        if ("$($vr.vr_over_budget)") { $bits += "over-budget $($vr.vr_over_budget)" }
+        if ("$($vr.vr_mispresented)") { $bits += "mispresent $($vr.vr_mispresented)" }
+        if ($bits.Count) { "  vr          : $($bits -join ', ')" | Out-File $out -Append -Encoding utf8 }
     }
 
     $anyNear = $false
