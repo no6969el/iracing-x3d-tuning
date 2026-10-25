@@ -1,6 +1,22 @@
 > **What's new vs full history:** this file is the short "what's new" for each
 > release. Detailed history lives in [CHANGELOG.md](CHANGELOG.md).
 
+# Release Notes — v3.4.0
+
+## What's new in v3.4.0
+
+**FullTrace reads FPS and frame time from SteamVR.** You no longer need MSI Afterburner or RTSS running for those two numbers. Start SteamVR yourself first (the logger will not launch it). Race as usual, then Ctrl+C. If SteamVR is down, the new columns stay blank and everything else still logs.
+
+The new columns are appended after `fb_usage_pct` and work the same in iRacing's OpenVR mode and its OpenXR mode, because both go through the SteamVR compositor. `gpu_fps` / `gpu_frametime_ms` still prefer Afterburner when it is running; `gpu_timing_source` says which source filled them. Voltage, fan and limiter flags are unchanged and still need Afterburner.
+
+`Scan-Stutter-Events` now calls out dropped frames, frames over the refresh budget, reprojection spikes and mispresented frames. Column units are in the README.
+
+A first live trace showed the timing columns blank on every row: the parser's array was nested by `@()`, so the sample was thrown away. That wrap is gone. `vr_frametime_ms` is blank when the compositor is up but no scene app is submitting (the interval is 0), rather than logging 0 ms.
+
+Upgrading from **v3.3.2**: replace the whole folder so `scripts/SteamVR-Timing.ps1` is next to `FullTrace.ps1`. No quiet-list changes. Run `Post-Race-Restore` on your current version before swapping if a quiet session is still active.
+
+---
+
 # Release Notes — v3.3.2
 
 ## What's new in v3.3.2

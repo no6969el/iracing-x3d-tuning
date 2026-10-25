@@ -37,7 +37,12 @@ if (-not (Test-Path $tracer)) { "FAIL: cannot find the recorder script"; exit 1 
 $src = Get-Content $tracer -Raw
 
 # ---- pull the real header out of the script ----------------------
-$m = [regex]::Match($src, "(?m)^'(timestamp,power_plan,[^']+)'")
+# The header is a single-quoted literal, either on its own line or
+# assigned to $CsvHeader. VR columns are appended on that same literal.
+$m = [regex]::Match($src, "(?m)^\`$CsvHeader = '(timestamp,power_plan,[^']+)'")
+if (-not $m.Success) {
+    $m = [regex]::Match($src, "(?m)^'(timestamp,power_plan,[^']+)'")
+}
 if (-not $m.Success) { "FAIL: could not find the CSV header literal"; exit 1 }
 $headerNames = $m.Groups[1].Value -split ','
 "OK: header found, $($headerNames.Count) columns"
@@ -53,7 +58,7 @@ Invoke-Expression $h.Value
 # broke it: [math]::Round(x,1) on a comma locale.
 function Build-Row {
     $now = Get-Date
-    @(
+    $fields = @(
         $now.ToString('HH:mm:ss', $InvCulture)
         (Txt 'Balansert, h y ytelse')      # a plan name WITH a comma in it
         (Inv ([math]::Round(37.5, 0)))
@@ -90,7 +95,17 @@ function Build-Row {
         (Inv ([math]::Round(1820.0, 0)))
         (Inv ([math]::Round(12.5, 0)))
         (Inv ([math]::Round(44.5, 0)))
-    ) -join ','
+    )
+    # Columns added after the original 39 (SteamVR timing, and anything
+    # appended later) have to survive the same culture rules. Text
+    # columns are quoted, including one with a comma in the test value.
+    $textCols = @('gpu_timing_source','vr_scene_app','vr_renderer','vr_hmd','top_fault_proc','top_fault_file')
+    while ($fields.Count -lt $headerNames.Count) {
+        $name = $headerNames[$fields.Count]
+        if ($textCols -contains $name) { $fields += (Txt 'steamvr, test') }
+        else { $fields += (Inv ([math]::Round(1.25, 2))) }
+    }
+    $fields -join ','
 }
 
 $cultures = 'nb-NO', 'de-DE', 'fr-FR', 'pt-BR', 'pl-PL', 'en-US', 'en-GB'
@@ -110,7 +125,9 @@ try {
         $row = Build-Row
 
         # the invariant
-        $tmp = Join-Path $env:TEMP ("qw-locale-{0}.csv" -f $c)
+        $tmpRoot = $env:TEMP
+        if (-not $tmpRoot) { $tmpRoot = [System.IO.Path]::GetTempPath() }
+        $tmp = Join-Path $tmpRoot ("qw-locale-{0}.csv" -f $c)
         Set-Content -LiteralPath $tmp -Value (($headerNames -join ','), $row) -Encoding UTF8
         $parsed = @(Import-Csv -LiteralPath $tmp)
         $cols   = $parsed[0].PSObject.Properties.Name
@@ -130,6 +147,10 @@ try {
                "gpu_frametime_ms kept its period ('$($parsed[0].gpu_frametime_ms)')"
         Assert ($parsed[0].power_plan -eq 'Balansert, h y ytelse') `
                "a power plan name containing a comma survived intact"
+        Assert ($parsed[0].vr_scene_app -eq 'steamvr, test') `
+               "vr_scene_app kept a comma inside quotes"
+        Assert ($parsed[0].vr_res_scale -eq '1.25') `
+               "vr_res_scale kept its period ('$($parsed[0].vr_res_scale)')"
         Assert ($parsed[0].timestamp -match '^\d{2}:\d{2}:\d{2}$') `
                "timestamp used colons ('$($parsed[0].timestamp)')"
 
