@@ -596,7 +596,7 @@ if (-not (Get-Command Get-SteamVrSample -ErrorAction SilentlyContinue)) {
         if ("$AbFps" -ne '' -or "$AbFt" -ne '') { $src = 'afterburner' }
         return @{ Fps = $AbFps; Frametime = $AbFt; Source = $src }
     }
-    function Get-SteamVrTextColumns { @('gpu_timing_source','vr_scene_app','vr_renderer','vr_hmd') }
+    function Get-SteamVrTextColumns { return ,@('gpu_timing_source','vr_scene_app','vr_renderer','vr_hmd') }
 }
 
 # ---- CSV header -------------------------------------------------
@@ -608,9 +608,11 @@ $CsvHeader = 'timestamp,power_plan,ccd0_cpu,ccd1_cpu,busy_core,busy_pct,cpu0_int
 $CsvHeader | Out-File $Csv -Encoding utf8
 $vrNames = @($CsvHeader.Split(',') | Select-Object -Skip $CsvBaseCount)
 $VrText = @{}
-foreach ($t in @(Get-SteamVrTextColumns)) { $VrText[$t] = $true }
+# Unary-comma returns. @() would nest the array and this loop would
+# see one element, the whole list, so text columns would not be quoted.
+foreach ($t in (Get-SteamVrTextColumns)) { $VrText[$t] = $true }
 if ((Get-Command Get-SteamVrColumnNames -ErrorAction SilentlyContinue)) {
-    $declared = @(Get-SteamVrColumnNames) -join ','
+    $declared = (Get-SteamVrColumnNames) -join ','
     if ($declared -ne ($vrNames -join ',')) {
         Write-Host "SteamVR column list does not match the CSV header. Cells follow the header." -ForegroundColor Yellow
     }

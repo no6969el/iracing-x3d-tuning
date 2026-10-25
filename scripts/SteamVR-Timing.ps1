@@ -193,6 +193,11 @@ function ConvertFrom-SteamVrTimingBuffer {
         Field offsets are the Windows x64 layout of Compositor_FrameTiming
         and have been stable since the vsync fields were added: six
         uint32s, a double at offset 24, sixteen floats, then the pose.
+
+        The unary comma on the return is load-bearing. It keeps a 0- or
+        1-frame result an array. Callers must assign the call directly.
+        Wrapping it in @() nests that array, so Count is 1, every frame
+        fails the plausibility check, and the timing columns stay blank.
     #>
     param(
         [byte[]]$Buffer,
@@ -357,7 +362,8 @@ function Get-SteamVrFrameAggregates {
         return $row
     }
 
-    $sumInterval = 0.0; $sumApp = 0.0; $sumCompG = 0.0; $sumCompC = 0.0
+    $sumInterval = 0.0; $intervalN = 0
+    $sumApp = 0.0; $sumCompG = 0.0; $sumCompC = 0.0
     $sumTotal = 0.0; $sumIdle = 0.0; $sumSubmit = 0.0; $sumExtra = 0.0
     $sumTransfer = 0.0; $nTransfer = 0
     $maxInterval = $null; $maxApp = $null
@@ -382,7 +388,15 @@ function Get-SteamVrFrameAggregates {
         $dropSum += [int]$f.Dropped
         $presentSum += [int]$f.Presents
         $sumExtra += $extra
-        $sumInterval += [double]$f.IntervalMs
+        # IntervalMs is 0 when the compositor is presenting but no scene
+        # app is calling WaitGetPoses. That is "not measured", not a
+        # 0 ms frame. Leave it out of the mean and the max.
+        $iv = [double]$f.IntervalMs
+        if ($iv -gt 0) {
+            $sumInterval += $iv
+            $intervalN++
+            if ($null -eq $maxInterval -or $iv -gt $maxInterval) { $maxInterval = $iv }
+        }
         $sumApp += [double]$f.AppGpuMs
         $sumCompG += [double]$f.CompGpuMs
         $sumCompC += [double]$f.CompCpuMs
@@ -390,7 +404,6 @@ function Get-SteamVrFrameAggregates {
         $sumIdle += [double]$f.IdleCpuMs
         $sumSubmit += [double]$f.SubmitMs
         if ($null -ne $f.TransferMs) { $sumTransfer += [double]$f.TransferMs; $nTransfer++ }
-        if ($null -eq $maxInterval -or [double]$f.IntervalMs -gt $maxInterval) { $maxInterval = [double]$f.IntervalMs }
         if ($null -eq $maxApp -or [double]$f.AppGpuMs -gt $maxApp) { $maxApp = [double]$f.AppGpuMs }
         if ($limit -gt 0) {
             if ([double]$f.IntervalMs -gt $limit -or [double]$f.AppGpuMs -gt $limit -or [double]$f.TotalGpuMs -gt $limit) {
@@ -416,8 +429,10 @@ function Get-SteamVrFrameAggregates {
 
     if ($null -ne $fps) { $row.vr_fps = (ConvertTo-SteamVrRound $fps 1) }
     if ($null -ne $presented) { $row.vr_fps_presented = (ConvertTo-SteamVrRound $presented 1) }
-    $row.vr_frametime_ms     = (ConvertTo-SteamVrRound ($sumInterval / $n) 2)
-    $row.vr_frametime_max_ms = (ConvertTo-SteamVrRound $maxInterval 2)
+    if ($intervalN -gt 0) {
+        $row.vr_frametime_ms     = (ConvertTo-SteamVrRound ($sumInterval / $intervalN) 2)
+        $row.vr_frametime_max_ms = (ConvertTo-SteamVrRound $maxInterval 2)
+    }
     $row.vr_app_gpu_ms       = (ConvertTo-SteamVrRound ($sumApp / $n) 2)
     $row.vr_app_gpu_max_ms   = (ConvertTo-SteamVrRound $maxApp 2)
     $row.vr_comp_gpu_ms      = (ConvertTo-SteamVrRound ($sumCompG / $n) 2)
@@ -1068,7 +1083,9 @@ function Find-SteamVrStructSize {
         $ok = $false
         try { $ok = [SteamVrClient]::TryFrameTiming($buf, $sz) } catch { $ok = $false }
         if (-not $ok) { continue }
-        $parsed = @(ConvertFrom-SteamVrTimingBuffer -Buffer $buf -Size $sz -Count 1)
+        # Direct assignment. @() nests the unary-comma return, so Count
+        # is 1 and [0] is the frame array rather than the frame.
+        $parsed = ConvertFrom-SteamVrTimingBuffer -Buffer $buf -Size $sz -Count 1
         if ($parsed.Count -eq 1 -and (Test-SteamVrFramePlausible $parsed[0])) { return $sz }
     }
     return 0
@@ -1122,7 +1139,10 @@ function Get-SteamVrSample {
             return (New-SteamVrBlankRow)
         }
         if ($n -gt 0) {
-            $parsed = @(ConvertFrom-SteamVrTimingBuffer -Buffer $buf -Size $size -Count $n)
+            # Same rule as Find-SteamVrStructSize: do not wrap this call
+            # in @(). A live 128-frame read came back as Count 1 and the
+            # timing columns stayed blank on every tick.
+            $parsed = ConvertFrom-SteamVrTimingBuffer -Buffer $buf -Size $size -Count $n
             $good = @($parsed | Where-Object { Test-SteamVrFramePlausible $_ })
             $need = [int][math]::Ceiling($n / 2.0)
             if ($good.Count -lt $need) {

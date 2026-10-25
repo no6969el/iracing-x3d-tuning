@@ -87,6 +87,36 @@ Assert ($old.Count -eq 1 -and $null -eq $old[0].TransferMs -and $old[0].VSyncsTo
 $none = ConvertFrom-SteamVrTimingBuffer -Buffer (New-Object byte[] 0) -Size 192 -Count 0
 Assert ($null -ne $none -and $none -is [System.Array] -and $none.Count -eq 0) "empty buffer stays an empty array"
 
+# Same assignment Get-SteamVrSample uses. A live 128-frame read wrapped
+# in @() came back as Count 1, good 0, and every timing column blank.
+$n128 = 128
+$batch = New-Object System.Collections.Generic.List[object]
+for ($i = 0; $i -lt $n128; $i++) {
+    $batch.Add([pscustomobject]@{
+        Index = 1000 + $i; Presents = 1; Mis = 0; Dropped = 0; Flags = 0
+        Time = 1000.0 + ($i / 90.0)
+        AppGpu = 8.0; TotalGpu = 9.5; CompGpu = 1.55; CompCpu = 0.37
+        Interval = (1000.0 / 90.0); Submit = 0.1; VSyncs = 1; Transfer = 0.4
+    })
+}
+$buf128 = New-TimingBuffer $batch.ToArray() 192
+$parsed128 = ConvertFrom-SteamVrTimingBuffer -Buffer $buf128 -Size 192 -Count $n128
+$good128 = @($parsed128 | Where-Object { Test-SteamVrFramePlausible $_ })
+$need128 = [int][math]::Ceiling($n128 / 2.0)
+Assert ($parsed128.Count -eq 128 -and $parsed128[0] -isnot [System.Array]) "128-frame parse is 128 frames, not one nested array ($($parsed128.Count))"
+Assert ($good128.Count -eq 128 -and $good128.Count -ge $need128) "plausibility keeps all 128 (the live failure was good=0)"
+$row128 = Get-SteamVrFrameAggregates -Frames $good128 -State @{} -Hz 90 -VsyncToPhotonsMs 2
+Assert ($null -ne $row128.vr_fps -and $row128.vr_fps -gt 0) "sample path fills vr_fps ($($row128.vr_fps))"
+Assert ($null -ne $row128.vr_fps_presented -and $row128.vr_fps_presented -gt 0) "sample path fills vr_fps_presented ($($row128.vr_fps_presented))"
+Assert ($null -ne $row128.vr_frametime_ms -and $row128.vr_frametime_ms -gt 0) "sample path fills vr_frametime_ms ($($row128.vr_frametime_ms))"
+Assert ([math]::Abs($row128.vr_comp_gpu_ms - 1.55) -lt 0.02) "sample path fills vr_comp_gpu_ms ($($row128.vr_comp_gpu_ms))"
+Assert ([math]::Abs($row128.vr_comp_cpu_ms - 0.37) -lt 0.02) "sample path fills vr_comp_cpu_ms ($($row128.vr_comp_cpu_ms))"
+Assert ($row128.vr_frames -eq 128) "sample path averages all 128 frames"
+$one = ConvertFrom-SteamVrTimingBuffer -Buffer (New-TimingBuffer @($batch[0]) 192) -Size 192 -Count 1
+Assert ($one.Count -eq 1 -and $one[0] -isnot [System.Array] -and (Test-SteamVrFramePlausible $one[0])) "struct-size probe sees one frame, not a nested array"
+$trap = @(ConvertFrom-SteamVrTimingBuffer -Buffer $buf128 -Size 192 -Count $n128)
+Assert ($trap.Count -eq 1 -and $trap[0] -is [System.Array]) "@() around the parser is still the bug; call sites must not use it"
+
 $bad = $parsed[0].PSObject.Copy()
 $bad.SystemTime = 0
 Assert (-not (Test-SteamVrFramePlausible $bad)) "system time 0 is implausible"
@@ -126,6 +156,16 @@ Assert ($ninety.vr_res_scale -eq 1.4) "resolution scale kept"
 Assert ($ninety.vr_predict_ms -eq 13.11) "prediction is one frame plus vsync-to-photons ($($ninety.vr_predict_ms))"
 Assert ($ninety.vr_scene_app -eq 'iRacingSim64DX11' -and $ninety.vr_scene_pid -eq 4242) "scene app and pid"
 Assert ($null -eq $ninety.gpu_timing_source) "aggregator leaves the source column for FullTrace"
+Assert ($null -ne $ninety.vr_frametime_ms -and $ninety.vr_frametime_ms -gt 0) "a real pose interval is reported ($($ninety.vr_frametime_ms))"
+
+$idle = Get-SteamVrFrameAggregates -Frames (New-Frames 5000 30 90 0) -State @{} -Hz 90 -VsyncToPhotonsMs 2
+Assert ($null -eq $idle.vr_frametime_ms -and $null -eq $idle.vr_frametime_max_ms) "idle compositor (interval 0) leaves frametime blank, not 0"
+Assert ($null -ne $idle.vr_fps -and $idle.vr_fps -gt 0) "idle compositor still reports the frame-index rate ($($idle.vr_fps))"
+Assert ($null -ne $idle.vr_comp_gpu_ms) "compositor GPU time is still reported when the app interval is 0"
+$mixFrames = New-Frames 1 2 90 10
+$mixFrames[1].IntervalMs = 0
+$mix = Get-SteamVrFrameAggregates -Frames $mixFrames -State @{} -Hz 90
+Assert ($mix.vr_frametime_ms -eq 10) "a zero interval is left out of the frametime mean ($($mix.vr_frametime_ms))"
 
 $lateFrames = New-Frames 2000 10 90 (1000.0/90)
 $lateFrames[3].IntervalMs = 20
@@ -302,6 +342,21 @@ Assert ($modSrc -notmatch 'ref err, 1') "nothing inits as application type 1"
 Assert ($modSrc -notmatch 'VR_IsHmdPresent') "VR_IsHmdPresent is not called"
 Assert ($modSrc -match 'vrserver' -and $modSrc -match 'vrcompositor') "the guard names vrserver and vrcompositor"
 Assert ($modSrc -match 'GetInt32, 7 is GetFloat' -and $modSrc -match 'Fn<GetIntSettingFn>\(p, 6\)' -and $modSrc -match 'Fn<GetFloatSettingFn>\(p, 7\)') "settings reads are GetInt32/GetFloat, not GetBool"
+
+# Functions that return with a leading comma must not be wrapped in @().
+$commaFns = 'ConvertFrom-SteamVrTimingBuffer','Get-SteamVrColumnNames','Get-SteamVrTextColumns'
+$wrappedCall = @()
+foreach ($f in (Get-ChildItem (Join-Path $PSScriptRoot '..\scripts') -Filter *.ps1)) {
+    $text = Get-Content $f.FullName -Raw
+    foreach ($fn in $commaFns) {
+        if ($text -match ('@\(\s*' + [regex]::Escape($fn))) { $wrappedCall += ("{0}: @({1}" -f $f.Name, $fn) }
+    }
+}
+Assert ($wrappedCall.Count -eq 0) ("no @() around a unary-comma return" + $(if ($wrappedCall.Count) { " -> " + ($wrappedCall -join ' | ') } else { '' }))
+$textCols = @{}
+foreach ($t in (Get-SteamVrTextColumns)) { $textCols[$t] = $true }
+Assert ($textCols.Count -eq 4 -and $textCols.ContainsKey('vr_scene_app') -and $textCols.ContainsKey('vr_hmd')) "text-column foreach sees four names"
+Assert (((Get-SteamVrColumnNames) -join ',') -eq ($names -join ',')) "column join is the header tail, not System.Object[]"
 
 $fmt = [regex]::Match($src, "(?m)^\`$Fmt = '(\{0,8\}[^']+)'")
 Assert $fmt.Success "console format string found"

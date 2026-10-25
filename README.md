@@ -43,7 +43,7 @@ The new columns are appended after `fb_usage_pct`. Hard-fault columns, when you 
 | `gpu_timing_source` | `afterburner`, `steamvr`, `afterburner+steamvr`, or blank |
 | `vr_fps` | app frames/s (frame-index delta over the window) |
 | `vr_fps_presented` | presented frames/s, including frames the compositor repeated |
-| `vr_frametime_ms`, `vr_frametime_max_ms` | ms, mean and max time between the app's pose waits |
+| `vr_frametime_ms`, `vr_frametime_max_ms` | ms, mean and max time between the app's pose waits. Blank when every interval is 0 (compositor up, no scene app) |
 | `vr_app_gpu_ms`, `vr_app_gpu_max_ms` | ms, app GPU work |
 | `vr_comp_gpu_ms`, `vr_comp_cpu_ms` | ms, compositor GPU and CPU |
 | `vr_gpu_ms` | ms, total GPU frame time |

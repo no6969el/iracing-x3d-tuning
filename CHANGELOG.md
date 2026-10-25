@@ -28,6 +28,7 @@ longer required for framerate or frame time.
 - **`Scan-Stutter-Events`** flags `DROPPED`, `LATE`, `REPROJ` and `MISPRESENT`
   seconds. Steady reprojection is not treated as a spike.
 - **Preflight** reports whether SteamVR is already running. It does not start it.
+- **Frame timing is read without `@()` around the parser.** A unary-comma return wrapped in `@()` is a one-element array of the frame list, so every timing column stayed blank on a live headset. `vr_frametime_ms` stays blank when the compositor is idle (interval 0) instead of logging a 0 ms frame.
 
 The history buffer is 128 frames. At 72 / 90 / 120 Hz that is a full second.
 Above that, `vr_fps` still counts every frame index; the averages cover the

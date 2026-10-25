@@ -11,6 +11,8 @@ The new columns are appended after `fb_usage_pct` and work the same in iRacing's
 
 `Scan-Stutter-Events` now calls out dropped frames, frames over the refresh budget, reprojection spikes and mispresented frames. Column units are in the README.
 
+A first live trace showed the timing columns blank on every row: the parser's array was nested by `@()`, so the sample was thrown away. That wrap is gone. `vr_frametime_ms` is blank when the compositor is up but no scene app is submitting (the interval is 0), rather than logging 0 ms.
+
 Upgrading from **v3.3.2**: replace the whole folder so `scripts/SteamVR-Timing.ps1` is next to `FullTrace.ps1`. No quiet-list changes. Run `Post-Race-Restore` on your current version before swapping if a quiet session is still active.
 
 ---
