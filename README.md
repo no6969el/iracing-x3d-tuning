@@ -26,6 +26,10 @@ Your chip is detected on first launch. If it gets it wrong, **CPU profile** in t
 
 New here? Read [START-HERE.txt](START-HERE.txt). **In this repo** (the guide's [download](https://github.com/no6969el/iracing-x3d-tuning/archive/refs/heads/main.zip) gets you all of it): `Apply-Baseline.bat` — one-shot optimizer · `Start-Tuning-Menu.bat` — guided menu with undo for everything · `scripts/` — the individual tools ([inventory](scripts/README.txt)) · [changelog](CHANGELOG.md).
 
+### Free VR resolution preview
+
+`Start-Tuning-Menu.bat` → **VR RESOLUTION PREVIEW** opens a free headset test for render scales a sim cannot hold. It is an OpenXR scene (sky, eye charts, Siemens stars, fence, a piece of track) with its own SteamVR-style pixel percent from 100% to 300%, plus MSAA and an A/B flip. Leave SteamVR's per-app resolution for `vr-res-preview.exe` at **100%** so the in-app number is the real scale. The Windows build is the `vr-res-preview-win64` artifact from the VR resolution preview workflow; unzip `vr-res-preview.exe` into `tools\vr-res-preview\dist\`. Details and controls: [tools/vr-res-preview/README.md](tools/vr-res-preview/README.md).
+
 ### Measuring it: FullTrace
 
 `scripts/FullTrace.ps1` is the read-only logger the whole method is built on. Run it, race, press `Ctrl+C`, and you get a 1 Hz CSV on your Desktop covering per-CCD load, CPU 0 versus frequency-core interrupt/DPC time, GPU utilisation, power, clocks, voltage, temperature, fan, PCIe load and active limiter, sim and VR CPU, hard pagefaults, free RAM, and the power plan. The live console shows the readable subset and colours each line — grey normal, yellow if the power plan drifted mid-session or the GPU is power/temperature limited, red on a hard-pagefault spike.
