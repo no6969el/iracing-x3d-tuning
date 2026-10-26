@@ -115,8 +115,8 @@ float4 psMain(VSOut i) : SV_Target {
         col *= 0.86 + 0.14 * grain;
         bool edge = abs(abs(x) - 4.0) < 0.055;
         bool dash = abs(x) < 0.03 && frac(-z * 0.22) < 0.42;
-        bool line = abs(z + 18.0) < 0.06 && abs(x) < 4.0;
-        if (edge || dash || line) col = float3(0.93, 0.93, 0.95);
+        bool stripe = abs(z + 18.0) < 0.06 && abs(x) < 4.0;
+        if (edge || dash || stripe) col = float3(0.93, 0.93, 0.95);
         if (abs(abs(x) - 4.4) < 0.26) {
             float k = frac((x + z) * 1.6) > 0.5 ? 1.0 : 0.0;
             col = lerp(float3(0.75, 0.12, 0.08), float3(0.92, 0.92, 0.92), k);
