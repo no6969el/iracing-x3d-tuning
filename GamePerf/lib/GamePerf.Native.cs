@@ -76,6 +76,118 @@ namespace GamePerf.Native
         /// <summary>QueryPerformanceCounter. Same clock PresentMon's CPUStartQPC column uses.</summary>
         public static long Qpc() { return Stopwatch.GetTimestamp(); }
         public static long QpcFrequency() { return Stopwatch.Frequency; }
+
+        // ---- power plan, straight from the power API ---------------------
+        // FullTrace ran "powercfg /getactivescheme" for this. From a windowless
+        // process every such launch can flash a console window over the game,
+        // and it costs a process start; the API costs neither.
+        [DllImport("powrprof.dll")] static extern uint PowerGetActiveScheme(IntPtr root, out IntPtr scheme);
+        [DllImport("powrprof.dll")] static extern uint PowerReadFriendlyName(IntPtr root, IntPtr scheme, IntPtr subGroup, IntPtr setting, IntPtr buffer, ref uint size);
+        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
+
+        /// <summary>Name of the active power plan, or "".</summary>
+        public static string ActivePowerPlanName()
+        {
+            IntPtr g = IntPtr.Zero;
+            try
+            {
+                if (PowerGetActiveScheme(IntPtr.Zero, out g) != 0 || g == IntPtr.Zero) return "";
+                uint size = 0;
+                PowerReadFriendlyName(IntPtr.Zero, g, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, ref size);
+                if (size == 0 || size > 4096) return "";
+                IntPtr buf = Marshal.AllocHGlobal((int)size);
+                try
+                {
+                    if (PowerReadFriendlyName(IntPtr.Zero, g, IntPtr.Zero, IntPtr.Zero, buf, ref size) != 0) return "";
+                    return Marshal.PtrToStringUni(buf) ?? "";
+                }
+                finally { Marshal.FreeHGlobal(buf); }
+            }
+            catch { return ""; }
+            finally { if (g != IntPtr.Zero) LocalFree(g); }
+        }
+
+        // ---- window helpers for the app ----------------------------------
+        [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SetCurrentProcessExplicitAppUserModelID(string id);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
+        [DllImport("user32.dll")] static extern bool FlashWindowEx(ref FLASHWINFO fi);
+
+        /// <summary>Hide the console window, if this process has one.</summary>
+        public static void HideConsole()
+        {
+            try { IntPtr h = GetConsoleWindow(); if (h != IntPtr.Zero) ShowWindow(h, 0); } catch { }
+        }
+
+        /// <summary>Dark title bar on Windows 10 20H1+ / 11.</summary>
+        public static void DarkTitleBar(IntPtr hwnd)
+        {
+            try { int on = 1; if (DwmSetWindowAttribute(hwnd, 20, ref on, 4) != 0) DwmSetWindowAttribute(hwnd, 19, ref on, 4); } catch { }
+        }
+
+        /// <summary>Flash the taskbar button until the window is brought forward - a quiet "done", no focus stolen.</summary>
+        public static void FlashTaskbar(IntPtr hwnd)
+        {
+            try
+            {
+                FLASHWINFO fi = new FLASHWINFO();
+                fi.cbSize = (uint)Marshal.SizeOf(typeof(FLASHWINFO));
+                fi.hwnd = hwnd; fi.dwFlags = 0x2 | 0xC; fi.uCount = 0; fi.dwTimeout = 0;   // FLASHW_TRAY | FLASHW_TIMERNOFG
+                FlashWindowEx(ref fi);
+            }
+            catch { }
+        }
+
+        /// <summary>Own taskbar identity, so the app does not group with PowerShell windows.</summary>
+        public static void SetAppId(string id)
+        {
+            try { SetCurrentProcessExplicitAppUserModelID(id); } catch { }
+        }
+    }
+
+    // ================================================================
+    //  Start helper programs without ever showing a window
+    // ================================================================
+    //  The logger has no console. A console program started the ordinary way
+    //  (PowerShell's & or Start-Process) from such a process can get a console
+    //  window of its own - over the game. CreateNoWindow means it never has one.
+    public static class Run
+    {
+        public static Process Start(string file, string arguments)
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(file, arguments);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.WindowStyle = ProcessWindowStyle.Hidden;
+            return Process.Start(psi);
+        }
+
+        /// <summary>Run to completion and return stdout, or null on failure / timeout.</summary>
+        public static string Capture(string file, string arguments, int timeoutMs)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(file, arguments);
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                using (Process p = Process.Start(psi))
+                {
+                    System.Threading.Tasks.Task<string> o = p.StandardOutput.ReadToEndAsync();
+                    System.Threading.Tasks.Task<string> e = p.StandardError.ReadToEndAsync();
+                    if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } return null; }
+                    p.WaitForExit();
+                    try { e.Wait(1000); } catch { }
+                    return o.Result;
+                }
+            }
+            catch { return null; }
+        }
     }
 
     // ================================================================
@@ -388,9 +500,69 @@ namespace GamePerf.Native
         public long Affinity;
     }
 
+    /// <summary>
+    /// Process and thread queries through PROCESS_QUERY_LIMITED_INFORMATION
+    /// handles. .NET's Process.HasExited / TotalProcessorTime ask for
+    /// PROCESS_QUERY_INFORMATION, which a non-elevated logger is refused for an
+    /// elevated game (and an anti-cheat protected one): the game would look
+    /// "exited" every second. The limited right is granted in both cases.
+    /// </summary>
+    public static class ProcApi
+    {
+        const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, SYNCHRONIZE = 0x00100000, THREAD_QUERY_LIMITED_INFORMATION = 0x0800;
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenThread(uint access, bool inherit, int tid);
+        [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h, uint ms);
+        [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr h, out long creation, out long exit, out long kernel, out long user);
+        [DllImport("kernel32.dll")] static extern bool GetThreadTimes(IntPtr h, out long creation, out long exit, out long kernel, out long user);
+        [DllImport("kernel32.dll")] static extern bool GetProcessAffinityMask(IntPtr h, out UIntPtr process, out UIntPtr system);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder name, ref int size);
+
+        /// <summary>A handle good for liveness, CPU time, affinity and image path. Zero if refused.</summary>
+        public static IntPtr Open(int pid) { return OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, false, pid); }
+
+        public static bool IsRunning(IntPtr h) { return h != IntPtr.Zero && WaitForSingleObject(h, 0) == 258; }   // WAIT_TIMEOUT
+
+        public static double CpuMs(IntPtr h)
+        {
+            long c, e, k, u;
+            return GetProcessTimes(h, out c, out e, out k, out u) ? (k + u) / 10000.0 : double.NaN;
+        }
+
+        public static double CpuMsOf(int pid)
+        {
+            IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (h == IntPtr.Zero) return double.NaN;
+            try { return CpuMs(h); } finally { CloseHandle(h); }
+        }
+
+        public static double ThreadMs(int tid)
+        {
+            IntPtr h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, false, tid);
+            if (h == IntPtr.Zero) return double.NaN;
+            try { long c, e, k, u; return GetThreadTimes(h, out c, out e, out k, out u) ? (k + u) / 10000.0 : double.NaN; }
+            finally { CloseHandle(h); }
+        }
+
+        public static long Affinity(IntPtr h)
+        {
+            UIntPtr p, s;
+            return GetProcessAffinityMask(h, out p, out s) ? (long)p.ToUInt64() : 0;
+        }
+
+        public static string ImagePath(IntPtr h)
+        {
+            StringBuilder sb = new StringBuilder(1024);
+            int n = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref n) ? sb.ToString() : null;
+        }
+    }
+
     public sealed class ProcTracker
     {
-        readonly Process _p;
+        readonly Process _p;      // snapshot data only (name, memory, thread list) - never its handle
+        readonly IntPtr _h;
         readonly int _ncpu;
         double _lastCpuMs = double.NaN;
         long _lastQpc;
@@ -407,67 +579,63 @@ namespace GamePerf.Native
             _ncpu = Math.Max(1, ncpu);
             _p = Process.GetProcessById(pid);
             Name = _p.ProcessName;
-            try { Path = _p.MainModule.FileName; } catch { Path = null; }
+            _h = ProcApi.Open(pid);
+            if (_h == IntPtr.Zero) throw new InvalidOperationException("Windows refused even limited access to process " + pid + " (error " + Marshal.GetLastWin32Error() + ").");
+            Path = ProcApi.ImagePath(_h);
             _lastQpc = Stopwatch.GetTimestamp();
-            try { _lastCpuMs = _p.TotalProcessorTime.TotalMilliseconds; } catch { }
-            try { foreach (ProcessThread t in _p.Threads) { try { _lastThreads[t.Id] = t.TotalProcessorTime.TotalMilliseconds; } catch { } } } catch { }
+            _lastCpuMs = ProcApi.CpuMs(_h);
+            try { foreach (ProcessThread t in _p.Threads) _lastThreads[t.Id] = ProcApi.ThreadMs(t.Id); } catch { }
         }
+
+        ~ProcTracker() { if (_h != IntPtr.Zero) ProcApi.CloseHandle(_h); }
 
         public ProcSample Sample()
         {
             ProcSample s = new ProcSample();
+            if (!ProcApi.IsRunning(_h)) return s;
+            s.Alive = true;
+            long now = Stopwatch.GetTimestamp();
+            double dtMs = (now - _lastQpc) * 1000.0 / Stopwatch.Frequency;
+            if (dtMs <= 0) dtMs = 1000;
+            _lastQpc = now;
+
+            double cpuMs = ProcApi.CpuMs(_h);
+            if (!double.IsNaN(cpuMs) && !double.IsNaN(_lastCpuMs))
+            {
+                s.Cores = Math.Max(0, (cpuMs - _lastCpuMs) / dtMs);
+                s.CpuPct = s.Cores * 100.0 / _ncpu;
+            }
+            _lastCpuMs = cpuMs;
+            s.Affinity = ProcApi.Affinity(_h);
             try
             {
-                _p.Refresh();
-                if (_p.HasExited) return s;
-                long now = Stopwatch.GetTimestamp();
-                double dtMs = (now - _lastQpc) * 1000.0 / Stopwatch.Frequency;
-                if (dtMs <= 0) dtMs = 1000;
-                _lastQpc = now;
-
-                try
-                {
-                    double cpuMs = _p.TotalProcessorTime.TotalMilliseconds;
-                    if (!double.IsNaN(_lastCpuMs))
-                    {
-                        s.Cores = Math.Max(0, (cpuMs - _lastCpuMs) / dtMs);
-                        s.CpuPct = s.Cores * 100.0 / _ncpu;
-                    }
-                    _lastCpuMs = cpuMs;
-                }
-                catch { }   // anti-cheat protected processes refuse the handle
-                try { s.WorkingSetMb = _p.WorkingSet64 / 1048576.0; s.PrivateMb = _p.PrivateMemorySize64 / 1048576.0; } catch { }
-                try { s.Affinity = _p.ProcessorAffinity.ToInt64(); } catch { }
-
+                _p.Refresh();   // re-reads the system snapshot; no handle involved
+                s.WorkingSetMb = _p.WorkingSet64 / 1048576.0;
+                s.PrivateMb = _p.PrivateMemorySize64 / 1048576.0;
                 if (TrackThreads)
                 {
                     Dictionary<int, double> cur = new Dictionary<int, double>();
                     double best = 0; int bestId = 0, n = 0; bool any = false;
-                    try
+                    foreach (ProcessThread t in _p.Threads)
                     {
-                        foreach (ProcessThread t in _p.Threads)
+                        n++;
+                        double ms = ProcApi.ThreadMs(t.Id);
+                        if (double.IsNaN(ms)) continue;
+                        cur[t.Id] = ms;
+                        double prev;
+                        if (_lastThreads.TryGetValue(t.Id, out prev) && !double.IsNaN(prev))
                         {
-                            n++;
-                            double ms;
-                            try { ms = t.TotalProcessorTime.TotalMilliseconds; } catch { continue; }
-                            cur[t.Id] = ms;
-                            double prev;
-                            if (_lastThreads.TryGetValue(t.Id, out prev))
-                            {
-                                any = true;
-                                double pct = (ms - prev) * 100.0 / dtMs;
-                                if (pct > best) { best = pct; bestId = t.Id; }
-                            }
+                            any = true;
+                            double pct = (ms - prev) * 100.0 / dtMs;
+                            if (pct > best) { best = pct; bestId = t.Id; }
                         }
                     }
-                    catch { }
                     _lastThreads = cur;
                     s.Threads = n;
                     if (any) { s.TopThreadPct = Math.Min(100, best); s.TopThreadId = bestId; }
                 }
-                s.Alive = true;
             }
-            catch { s.Alive = false; }
+            catch { }   // the snapshot raced with the process exiting; liveness above is what counts
             return s;
         }
     }
@@ -498,8 +666,10 @@ namespace GamePerf.Native
                 try
                 {
                     if (!_names.Contains(p.ProcessName)) continue;
-                    double prev;
-                    next[p.Id] = _last.TryGetValue(p.Id, out prev) ? prev : p.TotalProcessorTime.TotalMilliseconds;
+                    double prev, ms;
+                    if (_last.TryGetValue(p.Id, out prev)) ms = prev; else ms = ProcApi.CpuMsOf(p.Id);
+                    if (double.IsNaN(ms)) continue;
+                    next[p.Id] = ms;
                     if (!found.Contains(p.ProcessName)) found.Add(p.ProcessName);
                 }
                 catch { }
@@ -519,19 +689,12 @@ namespace GamePerf.Native
             if (dtMs <= 0) dtMs = 1000;
             _lastQpc = now;
             double sum = 0;
-            List<int> pids = new List<int>(_last.Keys);
-            foreach (int pid in pids)
+            foreach (int pid in new List<int>(_last.Keys))
             {
-                try
-                {
-                    using (Process p = Process.GetProcessById(pid))
-                    {
-                        double ms = p.TotalProcessorTime.TotalMilliseconds;
-                        sum += Math.Max(0, ms - _last[pid]);
-                        _last[pid] = ms;
-                    }
-                }
-                catch { _last.Remove(pid); }
+                double ms = ProcApi.CpuMsOf(pid);
+                if (double.IsNaN(ms)) { _last.Remove(pid); continue; }
+                sum += Math.Max(0, ms - _last[pid]);
+                _last[pid] = ms;
             }
             return sum * 100.0 / dtMs / _ncpu;
         }
@@ -551,7 +714,11 @@ namespace GamePerf.Native
             Dictionary<int, KeyValuePair<string, double>> d = new Dictionary<int, KeyValuePair<string, double>>();
             foreach (Process p in Process.GetProcesses())
             {
-                try { d[p.Id] = new KeyValuePair<string, double>(p.ProcessName, p.TotalProcessorTime.TotalMilliseconds); }
+                try
+                {
+                    double ms = ProcApi.CpuMsOf(p.Id);
+                    if (!double.IsNaN(ms)) d[p.Id] = new KeyValuePair<string, double>(p.ProcessName, ms);
+                }
                 catch { }
                 finally { p.Dispose(); }
             }
@@ -852,30 +1019,25 @@ namespace GamePerf.Native
         {
             FrameData d = new FrameData();
             d.File = path;
+            // Pass 1: find the dominant swap chain without keeping any rows -
+            // an hour of 120 fps VR is ~430,000 lines, which as string[] rows
+            // would cost hundreds of MB. Pass 2 parses only that chain.
             FrameColumns c = null;
-            List<string[]> rows = new List<string[]>();
             Dictionary<string, int> chainCount = new Dictionary<string, int>();
-            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (StreamReader sr = new StreamReader(fs, Encoding.UTF8, true, 1 << 16))
+            foreach (string line in ReadLines(path))
             {
-                string line;
-                while ((line = sr.ReadLine()) != null)
+                if (c == null)
                 {
-                    if (line.Length == 0) continue;
-                    if (c == null)
-                    {
-                        if (line.IndexOf("Application", StringComparison.OrdinalIgnoreCase) >= 0) c = FrameColumns.Parse(line.TrimStart('\uFEFF'));
-                        continue;
-                    }
-                    if (!c.Valid) break;
-                    string[] f = line.Split(',');
-                    if (f.Length <= c.Ft) continue;
-                    rows.Add(f);
-                    string key = FrameColumns.Str(f, c.Pid) + "|" + FrameColumns.Str(f, c.SwapChain);
-                    int n;
-                    chainCount.TryGetValue(key, out n);
-                    chainCount[key] = n + 1;
+                    if (line.IndexOf("Application", StringComparison.OrdinalIgnoreCase) >= 0) c = FrameColumns.Parse(line.TrimStart('\uFEFF'));
+                    continue;
                 }
+                if (!c.Valid) break;
+                string[] f = line.Split(',');
+                if (f.Length <= c.Ft) continue;
+                string key = FrameColumns.Str(f, c.Pid) + "|" + FrameColumns.Str(f, c.SwapChain);
+                int n;
+                chainCount.TryGetValue(key, out n);
+                chainCount[key] = n + 1;
             }
             if (c == null || !c.Valid) return d;
 
@@ -895,8 +1057,12 @@ namespace GamePerf.Native
             List<double> cb = new List<double>(bestN), cw = new List<double>(bestN), dc = new List<double>(bestN);
             List<bool> dr = new List<bool>(bestN);
             Dictionary<string, int> modes = new Dictionary<string, int>();
-            foreach (string[] f in rows)
+            bool header = true;
+            foreach (string line in ReadLines(path))
             {
+                if (header) { if (line.IndexOf("Application", StringComparison.OrdinalIgnoreCase) >= 0) header = false; continue; }
+                string[] f = line.Split(',');
+                if (f.Length <= c.Ft) continue;
                 string key = FrameColumns.Str(f, c.Pid) + "|" + FrameColumns.Str(f, c.SwapChain);
                 if (key != best) continue;
                 double v = FrameColumns.Num(f, c.Ft);
@@ -932,6 +1098,16 @@ namespace GamePerf.Native
             int bm = -1;
             foreach (KeyValuePair<string, int> kv in modes) if (kv.Value > bm) { bm = kv.Value; d.PresentMode = kv.Key; }
             return d;
+        }
+
+        static IEnumerable<string> ReadLines(string path)
+        {
+            using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader sr = new StreamReader(fs, Encoding.UTF8, true, 1 << 16))
+            {
+                string line;
+                while ((line = sr.ReadLine()) != null) if (line.Length > 0) yield return line;
+            }
         }
     }
 

@@ -10,13 +10,16 @@
         game's config files - to paste into Grok / ChatGPT / Claude /
         Gemini, or send from the AI page if you connect a provider
 
-    Low resource by design: this window does nothing while you play (it
-    minimises and reads one small status file a second), renders in
-    software so it never touches the GPU the game is using, and all
-    measurement happens in a separate, compiled-helper logger process.
+    Low resource and silent by design: this window does nothing while you
+    play (it minimises and reads one small status file a second), renders
+    in software so it never touches the GPU the game is using, and never
+    jumps in front of the game - when a session ends it flashes its
+    taskbar button. All measurement happens in a separate, windowless
+    recorder that this app starts, watches and stops.
 
-    Windows PowerShell 5.1 (built into Windows 10/11). Start it with
-    Start-GamePerf.bat.
+    Start it with GamePerf.exe (the icon). It runs on the Windows
+    PowerShell 5.1 engine built into Windows 10/11; Start-GamePerf.bat
+    remains as a fallback.
 #>
 
 # ---- STA is required for WPF ------------------------------------
@@ -36,15 +39,14 @@ $AnalyzePath = Join-Path $LibDir 'GamePerf-Analyze.ps1'
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-# Hide the console window this script runs in, and dark title bar support.
-try {
-    Add-Type -Namespace GamePerfUi -Name Win32 -MemberDefinition @'
-[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
-[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-'@ -ErrorAction Stop
-    [void][GamePerfUi.Win32]::ShowWindow([GamePerfUi.Win32]::GetConsoleWindow(), 0)
-} catch { }
+# Compiled helpers (a cached DLL after the first run): window chrome,
+# taskbar identity, and a focus-free "done" flash.
+$NativeOk = Initialize-GpNative
+if ($NativeOk) {
+    [GamePerf.Native.Win]::HideConsole()
+    [GamePerf.Native.Win]::SetAppId('GamePerf.App')
+}
+$IconPath = Join-Path $AppDir 'launcher\GamePerf.ico'
 
 # Software rendering: this window never competes with the game for the GPU.
 try { [System.Windows.Media.RenderOptions]::ProcessRenderMode = [System.Windows.Interop.RenderMode]::SoftwareOnly } catch { }
@@ -483,7 +485,8 @@ $Xaml = @'
               <StackPanel>
                 <TextBlock Text="CAPTURE" Style="{StaticResource Caption}" Margin="0,0,0,10"/>
                 <CheckBox x:Name="ChkFrames" Content="Per-frame timing (PresentMon)"/>
-                <CheckBox x:Name="ChkAdmin" Content="Run the logger as administrator (needed for per-frame timing)"/>
+                <CheckBox x:Name="ChkAdmin" Content="Ask for admin when per-frame timing needs it"/>
+                <TextBlock x:Name="TxtAdminHint" Style="{StaticResource Hint}" Margin="28,-6,0,10"/>
                 <CheckBox x:Name="ChkStopWithGame" Content="Stop when the game closes"/>
                 <CheckBox x:Name="ChkMinimize" Content="Minimise this window while logging"/>
               </StackPanel>
@@ -526,6 +529,8 @@ $Xaml = @'
                 </StackPanel>
               </Border>
               <TextBlock x:Name="TxtLiveWarn" Foreground="{StaticResource Warn}" TextWrapping="Wrap" FontSize="12" Margin="0,12,0,0"/>
+              <TextBlock Text="RECORDER" Style="{StaticResource Caption}" Margin="0,14,0,4"/>
+              <TextBlock x:Name="TxtLiveLog" FontFamily="Cascadia Mono, Consolas" FontSize="11" Foreground="{StaticResource Mute}" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
         </StackPanel>
@@ -709,7 +714,7 @@ $Xaml = @'
               </Grid>
               <CheckBox x:Name="ChkRedact" Content="Hide my Windows user name, PC name and anything that looks like a password or token in AI briefs" Margin="0,16,0,10"/>
               <CheckBox x:Name="ChkIncludePrev" Content="Compare with the previous session of the same game"/>
-              <CheckBox x:Name="ChkBeep" Content="Play a sound when the marker key is pressed"/>
+              <CheckBox x:Name="ChkBeep" Content="Play a short sound when the marker key is pressed (off: the recorder is completely silent)"/>
             </StackPanel>
           </Border>
 
@@ -721,6 +726,21 @@ $Xaml = @'
                 <Button x:Name="BtnGetPm2" Style="{StaticResource Btn}" Content="Download PresentMon"/>
                 <Button x:Name="BtnBrowsePm" Style="{StaticResource Btn}" Content="Choose PresentMon.exe..."/>
               </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource CardBox}">
+            <StackPanel>
+              <TextBlock Text="Launch and permissions" Style="{StaticResource H2}"/>
+              <TextBlock Text="Start GamePerf from its icon, like any app." Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+              <WrapPanel>
+                <Button x:Name="BtnShortcutDesktop" Style="{StaticResource Btn}" Content="Add a desktop icon"/>
+                <Button x:Name="BtnShortcutStart" Style="{StaticResource Btn}" Content="Add to the Start menu"/>
+              </WrapPanel>
+              <TextBlock x:Name="TxtShortcut" Style="{StaticResource Hint}"/>
+              <TextBlock Text="PER-FRAME TIMING WITHOUT THE ADMIN PROMPT" Style="{StaticResource Caption}" Margin="0,16,0,6"/>
+              <TextBlock x:Name="TxtPerfLog" Style="{StaticResource Hint}" Margin="0,0,0,10"/>
+              <Button x:Name="BtnPerfLog" Style="{StaticResource Btn}" Content="Allow it for my account (one-time)" HorizontalAlignment="Left"/>
             </StackPanel>
           </Border>
 
@@ -761,6 +781,9 @@ foreach ($m in [regex]::Matches($Xaml, 'x:Name="(\w+)"')) {
     if ($el) { $ui[$n] = $el }
 }
 $Xaml = $null
+if (Test-Path -LiteralPath $IconPath) {
+    try { $Window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create((New-Object Uri($IconPath))) } catch { }
+}
 
 # ---- palette for code-built elements -------------------------------
 function New-GpBrush([string]$Hex) {
@@ -879,9 +902,8 @@ function Start-GpJob([scriptblock]$Work, [hashtable]$Vars, [scriptblock]$OnDone,
     $JobTimer.Start()
 }
 
-function Start-GpProcessJob([string]$Arguments, [scriptblock]$OnDone, $Context = $null) {
-    $p = Start-Process powershell.exe -ArgumentList $Arguments -WindowStyle Hidden -PassThru
-    [void]$Jobs.Add(@{ Process = $p; OnDone = $OnDone; Context = $Context })
+function Add-GpProcessJob([Diagnostics.Process]$Process, [scriptblock]$OnDone, $Context = $null) {
+    [void]$Jobs.Add(@{ Process = $Process; OnDone = $OnDone; Context = $Context })
     $JobTimer.Start()
 }
 
@@ -991,7 +1013,7 @@ function Read-GpRecordUi {
 }
 
 # ---- live session --------------------------------------------------
-$State = @{ Logging = $false; Dir = $null; Started = $null; PendingMinimize = $false; Stopping = $false }
+$State = @{ Logging = $false; Dir = $null; Started = $null; PendingMinimize = $false; Stopping = $false; SeenStatus = $false; WorkerPid = 0 }
 $FpsHist = New-Object System.Collections.Generic.List[double]
 $LiveTimer = New-Object System.Windows.Threading.DispatcherTimer
 $LiveTimer.Interval = [TimeSpan]::FromSeconds(1)
@@ -1020,15 +1042,15 @@ function Start-GpLogging {
     $useFrames = $Settings.CaptureFrames -and [bool]$pm
     $req = [ordered]@{
         Game = $Settings.Game; Mode = $Settings.Mode; TargetFps = $target; Label = $label
-        NoFrames = -not $useFrames; PresentMon = [string]$pm; MarkerKey = $Settings.MarkerKey; NoBeep = -not $Settings.MarkerBeep
+        NoFrames = -not $useFrames; PresentMon = [string]$pm; MarkerKey = $Settings.MarkerKey; Beep = [bool]$Settings.MarkerBeep
         StopWithGame = $Settings.StopWithGame; ParentPid = $PID; ConfigFiles = @($pinned)
     }
     Write-GpJson -Path (Join-Path $dir 'request.json') -Object $req
-    $argLine = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$LoggerPath`" -SessionDir `"$dir`" -Quiet"
-    $elevate = $useFrames -and $Settings.RunElevated -and -not (Test-GpAdmin)
+    # The recorder never has a window. It needs admin only for per-frame timing,
+    # and not even then once the account is in Performance Log Users.
+    $elevate = $useFrames -and $Settings.RunElevated -and -not (Test-GpAdmin) -and -not (Test-GpPerfLogUser)
     try {
-        if ($elevate) { Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList $argLine -ErrorAction Stop | Out-Null }
-        else { Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $argLine -ErrorAction Stop | Out-Null }
+        [void](Start-GpHidden -Mode '--logger' -Argument $dir -Elevated:$elevate)
     } catch {
         if (-not $elevate -or -not (Ask-Gp "The administrator prompt was cancelled.`n`nLog anyway without per-frame timing? (The 1 Hz system log still works.)")) {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -1036,9 +1058,10 @@ function Start-GpLogging {
         }
         $req.NoFrames = $true
         Write-GpJson -Path (Join-Path $dir 'request.json') -Object $req
-        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $argLine | Out-Null
+        try { [void](Start-GpHidden -Mode '--logger' -Argument $dir) }
+        catch { Show-GpError "The recorder could not be started.`n`n$($_.Exception.Message)"; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue; return }
     }
-    $State.Logging = $true; $State.Dir = $dir; $State.Started = Get-Date; $State.Stopping = $false
+    $State.Logging = $true; $State.Dir = $dir; $State.Started = Get-Date; $State.Stopping = $false; $State.SeenStatus = $false; $State.WorkerPid = 0
     $State.PendingMinimize = $Settings.MinimizeWhileLogging
     $FpsHist.Clear()
     foreach ($t in $Live.Values) { $t.Value.Text = '-'; $t.Sub.Text = '' }
@@ -1046,6 +1069,7 @@ function Start-GpLogging {
     $ui.TxtLiveState.Text = 'Starting the logger...'
     $ui.TxtLiveSub.Text = $dir
     $ui.TxtLiveWarn.Text = ''
+    $ui.TxtLiveLog.Text = ''
     $ui.LiveDot.Fill = $C.Warn
     Set-GpStartButton 'stop'
     Set-GpStatusChip 'Starting...' $C.Warn
@@ -1068,11 +1092,15 @@ function Complete-GpLogging([string]$Note = '') {
     Set-GpStatusChip 'Idle' $C.Mute
     $ui.LiveDot.Fill = $C.Mute
     if ($Note) { $ui.TxtLiveState.Text = $Note } else { $ui.TxtLiveState.Text = 'Session saved.' }
-    if ($Window.WindowState -eq 'Minimized') { $Window.WindowState = 'Normal' }
-    try { [void]$Window.Activate() } catch { }
     if (Test-Path -LiteralPath (Join-Path $dir 'summary.json')) {
         Update-GpSessionList $dir
         Show-GpPage 'Results'
+    }
+    # Never jump in front of a game or the desktop: while minimised, the
+    # taskbar button flashes and the results wait until you open the window.
+    if ($Window.WindowState -eq 'Minimized') {
+        Set-GpStatusChip 'Session ready' $C.Accent
+        if ($NativeOk) { [GamePerf.Native.Win]::FlashTaskbar((New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle) }
     }
 }
 
@@ -1109,9 +1137,13 @@ $LiveTimer.Add_Tick({
         if (-not $State.Logging) { $LiveTimer.Stop(); return }
         $st = Read-GpJson (Join-Path $State.Dir 'status.json')
         if (-not $st) {
-            if (((Get-Date) - $State.Started).TotalSeconds -gt 45) { Complete-GpLogging 'The logger did not start. Was the administrator prompt cancelled?' }
+            # A missed read is normal now and then (antivirus, OneDrive). Only a
+            # recorder that never reported at all counts as "did not start".
+            if (-not $State.SeenStatus -and ((Get-Date) - $State.Started).TotalSeconds -gt 45) { Complete-GpLogging 'The recorder did not start. Was the administrator prompt cancelled?' }
             return
         }
+        $State.SeenStatus = $true
+        if ($st.pid) { $State.WorkerPid = [int]$st.pid }
         if ($State.PendingMinimize -and $st.state -in @('waiting', 'logging')) {
             $State.PendingMinimize = $false
             $Window.WindowState = 'Minimized'
@@ -1120,9 +1152,18 @@ $LiveTimer.Add_Tick({
         try { $hb = [DateTime]::Parse([string]$st.heartbeat, $GpInv) } catch { }
         $stale = $hb -and ((Get-Date) - $hb).TotalSeconds -gt 15
         if ($st.state -eq 'done') { Complete-GpLogging; return }
-        if ($stale -and $st.state -ne 'analyzing') {
-            if (((Get-Date) - $hb).TotalSeconds -gt 60) { Complete-GpLogging 'The logger stopped responding. Whatever it recorded is in the session folder.'; return }
-            $ui.TxtLiveWarn.Text = 'The logger has not reported for a while...'
+        if ($stale) {
+            # Analysis cannot heartbeat, so judge by whether the recorder process still exists.
+            $alive = $true
+            if ($State.WorkerPid -gt 0) { $alive = [bool](Get-Process -Id $State.WorkerPid -ErrorAction SilentlyContinue) }
+            if (-not $alive) { Complete-GpLogging 'The recorder stopped unexpectedly. Whatever it recorded is in the session folder - Re-analyse it from Results.'; return }
+            if ($st.state -ne 'analyzing' -and ((Get-Date) - $hb).TotalSeconds -gt 60) {
+                # Give up on it - but tell it to stop, so it never keeps recording unattended.
+                try { New-Item -ItemType File -Force -Path (Join-Path $State.Dir 'stop.flag') | Out-Null } catch { }
+                Complete-GpLogging 'The recorder stopped responding and was asked to stop. Whatever it recorded is in the session folder.'
+                return
+            }
+            if ($st.state -ne 'analyzing') { $ui.TxtLiveWarn.Text = 'The recorder has not reported for a while...' }
         }
         switch ([string]$st.state) {
             'waiting' {
@@ -1177,6 +1218,8 @@ $LiveTimer.Add_Tick({
         if (-not [double]::IsNaN($lm)) { $Live['Logger'].Value.Text = (Format-GpNum $lm 0) + ' ms'; $Live['Logger'].Sub.Text = 'per 1 s sample' }
         $w = @($st.warnings) | Where-Object { $_ }
         $ui.TxtLiveWarn.Text = (@($w) -join "`n")
+        $logText = Read-GpTextFile -Path (Join-Path $State.Dir 'logger.log')
+        if ($logText) { $ui.TxtLiveLog.Text = (@($logText -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 4) -join "`n") }
         Draw-GpSpark
     } catch { }
 })
@@ -1451,10 +1494,12 @@ $ui.BtnReanalyze.Add_Click({
     $dir = $Current.Dir
     $ui.TxtResAction.Text = 'Analysing...'
     $ui.BtnReanalyze.IsEnabled = $false
-    Start-GpProcessJob "-NoProfile -ExecutionPolicy Bypass -File `"$AnalyzePath`" -SessionDir `"$dir`" -Quiet" -Context $dir -OnDone {
-        param($code, $sessionDir)
+    Start-GpJob -Vars @{ Analyze = $AnalyzePath; Dir = $dir } -Context $dir -Work {
+        try { & $V.Analyze -SessionDir $V.Dir -Quiet | Out-Null; @{ ok = $true } } catch { @{ ok = $false; error = $_.Exception.Message } }
+    } -OnDone {
+        param($r, $sessionDir)
         $ui.BtnReanalyze.IsEnabled = $true
-        $ui.TxtResAction.Text = $(if ($code -eq 0) { 'Analysis updated.' } else { "The analysis failed (exit code $code)." })
+        $ui.TxtResAction.Text = $(if ($r -and $r.ok) { 'Analysis updated.' } else { "The analysis failed: $($r.error)" })
         Update-GpSessionList $sessionDir
     }
 })
@@ -1666,7 +1711,15 @@ function Import-GpAiSession([string]$Dir) {
     }
     Show-GpAiConversation
 }
-$ui.CmbAiSession.Add_SelectionChanged({ if ($ui.CmbAiSession.SelectedItem) { Import-GpAiSession ([string]$ui.CmbAiSession.SelectedItem.Tag) } })
+# Refilling the list (after Save, Re-analyse, a new session...) reselects the
+# same session; only a real change of session may reset the conversation.
+$ui.CmbAiSession.Add_SelectionChanged({
+    if (-not $ui.CmbAiSession.SelectedItem) { return }
+    $dir = [string]$ui.CmbAiSession.SelectedItem.Tag
+    if ($dir -eq $Ai.Dir) { return }
+    if ($Ai.Busy) { Select-GpAiSession $Ai.Dir; return }
+    Import-GpAiSession $dir
+})
 
 $ui.BtnAiAddFile.Add_Click({
     $d = New-Object Microsoft.Win32.OpenFileDialog
@@ -1926,14 +1979,64 @@ $ui.BtnSaveSettings.Add_Click({
 # ================================================================
 #  STARTUP / SHUTDOWN
 # ================================================================
+# ---- launch + permissions card -------------------------------------
+function Update-GpLaunchUi {
+    $launcher = Get-GpLauncherPath
+    $ui.BtnShortcutDesktop.IsEnabled = [bool]$launcher
+    $ui.BtnShortcutStart.IsEnabled = [bool]$launcher
+    if (-not $launcher) { $ui.TxtShortcut.Text = 'GamePerf.exe is missing from the GamePerf folder - re-extract the kit.' }
+    else {
+        $have = @()
+        if (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'GamePerf.lnk')) { $have += 'desktop' }
+        if (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'GamePerf.lnk')) { $have += 'Start menu' }
+        $ui.TxtShortcut.Text = $(if ($have.Count) { "GamePerf is on your $($have -join ' and ')." } else { '' })
+    }
+    $member = Test-GpPerfLogUser
+    if ($member -and $Settings.PerfLogPending) { $Settings.PerfLogPending = $false; Export-GpSettings $Settings }
+    if (Test-GpAdmin) {
+        $ui.TxtPerfLog.Text = 'GamePerf is running as administrator, so per-frame timing never needs a prompt.'
+        $ui.BtnPerfLog.IsEnabled = $false
+        $ui.TxtAdminHint.Text = ''
+    } elseif ($member) {
+        $ui.TxtPerfLog.Text = 'On. Your account is in Performance Log Users, so per-frame timing starts without an admin prompt.'
+        $ui.BtnPerfLog.IsEnabled = $false; $ui.BtnPerfLog.Content = 'Already allowed'
+        $ui.TxtAdminHint.Text = 'Not needed on this PC: your account can record per-frame timing without admin.'
+    } elseif ($Settings.PerfLogPending) {
+        $ui.TxtPerfLog.Text = 'Added. Sign out of Windows and back in once to finish - until then, Start still asks for admin.'
+        $ui.BtnPerfLog.IsEnabled = [bool]$launcher
+        $ui.TxtAdminHint.Text = 'Sign out of Windows and back in once and this prompt goes away.'
+    } else {
+        $ui.TxtPerfLog.Text = 'Per-frame timing uses Windows event tracing, which normally means an admin prompt every time you press Start. Adding your account to the built-in "Performance Log Users" group grants just that permission - nothing else. One admin prompt now, then sign out and back in once.'
+        $ui.BtnPerfLog.IsEnabled = [bool]$launcher
+        $ui.TxtAdminHint.Text = 'Tip: Settings > "Allow it for my account" removes this prompt for good.'
+    }
+}
+
+$ui.BtnShortcutDesktop.Add_Click({ try { [void](New-GpShortcut 'Desktop') } catch { Show-GpError $_.Exception.Message }; Update-GpLaunchUi })
+$ui.BtnShortcutStart.Add_Click({ try { [void](New-GpShortcut 'StartMenu') } catch { Show-GpError $_.Exception.Message }; Update-GpLaunchUi })
+$ui.BtnPerfLog.Add_Click({
+    if (-not (Ask-Gp "Add your Windows account to the built-in Performance Log Users group?`n`nMembers may record performance traces - what per-frame timing needs - without being an administrator. Windows asks for admin once now; afterwards, sign out and back in.")) { return }
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    try { $p = Start-GpHidden -Mode '--grant-perflog' -Argument $sid -Elevated } catch { $ui.TxtPerfLog.Text = "Not changed ($($_.Exception.Message))."; return }
+    $ui.BtnPerfLog.IsEnabled = $false
+    $ui.TxtPerfLog.Text = 'Working...'
+    Add-GpProcessJob -Process $p -OnDone {
+        param($code)
+        if ($code -eq 0 -or $code -eq 2) {
+            $Settings.PerfLogPending = $true
+            Export-GpSettings $Settings
+            [void][System.Windows.MessageBox]::Show($Window, "Done. Sign out of Windows and back in once - after that, GamePerf records per-frame timing without asking for admin.", 'GamePerf')
+        } else { Show-GpError 'Windows did not accept the change. Details are in %LOCALAPPDATA%\GamePerf\launcher.log.' }
+        Update-GpLaunchUi
+    }
+})
+
 $ui.TxtVersion.Text = "v$GamePerfVersion  -  iRacing X3D Tuning kit"
 $ui.TxtAbout.Text = "GamePerf $GamePerfVersion. Part of the iRacing X3D Tuning kit (MIT). Uses Intel PresentMon for per-frame timing and the kit's CPU detection (scripts\X3D-Profiles.ps1). Settings: $(Get-GpSettingsPath)"
 
 $Window.Add_SourceInitialized({
     try {
-        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle
-        $on = 1
-        if ([GamePerfUi.Win32]::DwmSetWindowAttribute($hwnd, 20, [ref]$on, 4) -ne 0) { [void][GamePerfUi.Win32]::DwmSetWindowAttribute($hwnd, 19, [ref]$on, 4) }
+        if ($NativeOk) { [GamePerf.Native.Win]::DarkTitleBar((New-Object System.Windows.Interop.WindowInteropHelper($Window)).Handle) }
     } catch { }
 })
 
@@ -1946,13 +2049,24 @@ $Window.Add_Closing({
     try { $LiveTimer.Stop(); $JobTimer.Stop() } catch { }
 })
 
+$Window.Add_Activated({ if ($ui.TxtStatus.Text -eq 'Session ready') { Set-GpStatusChip 'Idle' $C.Mute } })
+
 $Window.Add_Loaded({
     Set-GpSettingsUi
     Update-GpGameList
     Update-GpPmStatus
     Update-GpSessionList
     Update-GpAiHeader
+    Update-GpLaunchUi
     Show-GpPage 'Record'
+    if (-not $Settings.FirstRunDone) {
+        $Settings.FirstRunDone = $true
+        Export-GpSettings $Settings
+        if ((Get-GpLauncherPath) -and (Ask-Gp "Welcome to GamePerf.`n`nAdd a GamePerf icon to your desktop and Start menu?")) {
+            try { [void](New-GpShortcut 'Desktop'); [void](New-GpShortcut 'StartMenu') } catch { Show-GpError "Could not create the shortcuts: $($_.Exception.Message)" }
+            Update-GpLaunchUi
+        }
+    }
 })
 
 [void]$Window.ShowDialog()

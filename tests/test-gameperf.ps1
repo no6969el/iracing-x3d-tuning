@@ -207,8 +207,81 @@ $fixCols = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'gameperf-fixtures
 $m3 = [regex]::Match($fixCols, "\`$cols = '([^']+)'")
 Check (($m3.Groups[1].Value -split ',') -join ',' -eq ($logCols -join ',')) 'the test fixture writes the logger''s exact header'
 
+"--- GamePerf.exe: the icon you double-click ---"
+$launcherDir = Join-Path $App 'launcher'
+$lsrc = Join-Path $launcherDir 'GamePerfLauncher.cs'
+$exe = Join-Path $App 'GamePerf.exe'
+if ($csc -or $mcs) {
+    $out = Join-Path $Tmp 'launcher-check.exe'
+    if ($csc) { $o = & $csc /nologo /langversion:5 /target:winexe "/out:$out" $lsrc 2>&1 }
+    else      { $o = & $mcs.Source -langversion:5 -target:winexe "-out:$out" -r:System.dll $lsrc 2>&1 }
+    Check ($LASTEXITCODE -eq 0) ("the launcher compiles as C# 5" + $(if ($LASTEXITCODE) { ": $($o | Select-Object -First 3)" }))
+}
+Check (Test-Path -LiteralPath $exe) 'GamePerf.exe is shipped next to the app'
+$vi = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+Check ($vi.ProductName -eq 'GamePerf' -and $vi.FileDescription -eq 'GamePerf') "it is called GamePerf in Task Manager ($($vi.FileDescription))"
+$expect = Get-GpLauncherInformationalVersion ([IO.File]::ReadAllText($lsrc))
+Check ($vi.ProductVersion -eq $expect) "the committed exe was built from the committed source ($($vi.ProductVersion) vs $expect) - rebuild with launcher\Build-Launcher.ps1"
+Check ($vi.FileVersion -eq "$GamePerfVersion.0") "exe version matches GamePerf $GamePerfVersion"
+$hdr = [IO.File]::ReadAllBytes($exe)
+$peOff = [BitConverter]::ToInt32($hdr, 0x3C)
+Check ([BitConverter]::ToUInt16($hdr, $peOff + 24 + 68) -eq 2) 'GamePerf.exe is a Windows GUI program - it never opens a console window'
+[xml]$mani = Get-Content -LiteralPath (Join-Path $launcherDir 'GamePerf.exe.manifest') -Raw
+$lvl = $mani.SelectSingleNode("//*[local-name()='requestedExecutionLevel']").level
+Check ($lvl -eq 'asInvoker') 'opening the app never asks for admin (asInvoker)'
+Check ($null -ne $mani.SelectSingleNode("//*[local-name()='assemblyIdentity' and @name='Microsoft.Windows.Common-Controls']")) 'modern themed dialogs (Common Controls 6)'
+$ico = [IO.File]::ReadAllBytes((Join-Path $launcherDir 'GamePerf.ico'))
+$sizes = @(); for ($i = 0; $i -lt [BitConverter]::ToUInt16($ico, 4); $i++) { $w = $ico[6 + 16 * $i]; if ($w -eq 0) { $w = 256 }; $sizes += $w }
+Check (($sizes -contains 16) -and ($sizes -contains 32) -and ($sizes -contains 48) -and ($sizes -contains 256)) "the icon carries every size Windows asks for ($($sizes -join ', '))"
+
+"--- the launcher hosts PowerShell in-process ---"
+$refs = @()
+if ($PSVersionTable.PSEdition -eq 'Core') { $refs = @('System.Text.RegularExpressions', 'System.Collections', 'System.Collections.NonGeneric', 'System.Runtime.InteropServices', 'System.Threading', 'System.Threading.Thread', 'System.Console') }
+$hostOk = $false
+try {
+    if (-not ('GamePerf.Launcher.ScriptHost' -as [type])) {
+        $p = @{ TypeDefinition = [IO.File]::ReadAllText($lsrc); ErrorAction = 'Stop' }
+        if ($refs.Count) { $p.ReferencedAssemblies = $refs }
+        Add-Type @p
+    }
+    $hostOk = $true
+} catch { "    note: $($_.Exception.Message)" }
+Check $hostOk 'launcher source loads'
+if ($hostOk) {
+    $hd = Join-Path $Tmp "it's a dir"
+    New-Item -ItemType Directory -Force -Path $hd | Out-Null
+    Set-Content -LiteralPath (Join-Path $hd 'probe.ps1') -Value "param([string]`$SessionDir, [switch]`$Quiet)`n`"quiet=`$Quiet root=`$PSScriptRoot`"`nSet-Content -LiteralPath (Join-Path `$SessionDir 'ran.txt') -Value ok`nWrite-Error 'soft error'"
+    $err = New-Object Text.StringBuilder
+    $res = [GamePerf.Launcher.ScriptHost]::Run('& ' + [GamePerf.Launcher.ScriptHost]::Quote((Join-Path $hd 'probe.ps1')) + ' -SessionDir ' + [GamePerf.Launcher.ScriptHost]::Quote($hd) + ' -Quiet', $err)
+    Check (Test-Path -LiteralPath (Join-Path $hd 'ran.txt')) 'a script runs in-process, with a quote in its path'
+    Check ((@($res) -join '') -match 'quiet=True' -and (@($res) -join '') -match [regex]::Escape($hd)) 'parameters and $PSScriptRoot arrive intact'
+    Check ($err.ToString() -match 'soft error') 'script errors are captured for the launcher log'
+    $threw = $false
+    try { [void][GamePerf.Launcher.ScriptHost]::Run("throw 'boom'", $err) } catch { $threw = $true }
+    Check $threw 'a terminating error reaches the launcher'
+}
+
+"--- silent: nothing the recorder does can open a window ---"
+$lt = Get-Content -LiteralPath (Join-Path $Lib 'GamePerf-Logger.ps1') -Raw
+$noisy = @([regex]::Matches($lt, '(?m)^(?!\s*#).*(Start-Process|powercfg|&\s*\$SmiExe|&\s*\$PmExe).*$') | ForEach-Object { $_.Value.Trim() })
+Check ($noisy.Count -eq 0) ("the recorder starts helpers only through the windowless launcher" + $(if ($noisy.Count) { ": $($noisy -join ' | ')" }))
+Check ($lt -match '\[switch\]\$Beep' -and $lt -notmatch 'NoBeep') 'the marker sound is opt-in'
+Check (-not (Get-GpDefaultSettings).MarkerBeep) 'the app ships with the marker sound off'
+$gt = Get-Content -LiteralPath (Join-Path $App 'GamePerf.ps1') -Raw
+Check (@([regex]::Matches($gt, 'Start-Process powershell')).Count -eq 1) 'the app starts the recorder without a PowerShell window (only the STA fallback relaunch remains)'
+Check ($gt -match "Start-GpHidden -Mode '--logger'") 'the recorder is started through Start-GpHidden'
+$ct = Get-Content -LiteralPath (Join-Path $Lib 'GamePerf-Common.ps1') -Raw
+Check ($ct -match 'CreateNoWindow = \$true') 'Start-GpHidden uses CreateNoWindow'
+Check ($gt -notmatch '\.Activate\(\)') 'finishing a session never pulls the window in front of the game'
+
+"--- status file is replaced atomically ---"
+$sp = Join-Path $Tmp 'status.json'
+Write-GpJson -Path $sp -Object @{ n = 1 }
+Write-GpJson -Path $sp -Object @{ n = 2 }
+Check ((Read-GpJson $sp).n -eq 2 -and -not (Test-Path -LiteralPath "$sp.tmp")) 'a rewrite replaces the file and leaves no temp file'
+
 "--- scripts load on Windows PowerShell 5.1 ---"
-$scripts = @(Get-ChildItem -LiteralPath $App -Filter *.ps1) + @(Get-ChildItem -LiteralPath $Lib -Filter *.ps1)
+$scripts = @(Get-ChildItem -LiteralPath $App -Filter *.ps1) + @(Get-ChildItem -LiteralPath $Lib -Filter *.ps1) + @(Get-ChildItem -LiteralPath (Join-Path $App 'launcher') -Filter *.ps1)
 foreach ($sc in $scripts) {
     $errs = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($sc.FullName, [ref]$null, [ref]$errs)

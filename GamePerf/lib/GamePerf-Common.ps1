@@ -109,7 +109,7 @@ function Get-GpDefaultSettings {
         RunElevated          = $true
         StopWithGame         = $false
         MarkerKey            = 'ScrollLock'
-        MarkerBeep           = $true
+        MarkerBeep           = $false      # the logger is silent unless you turn this on
         MinimizeWhileLogging = $true
         PresentMonPath       = ''
         Goals                = (Get-GpDefaultGoals)
@@ -121,6 +121,8 @@ function Get-GpDefaultSettings {
         IncludePrevious      = $true
         Redact               = $true
         GameConfigs          = @{}         # game exe -> @(extra config paths the user pinned)
+        FirstRunDone         = $false
+        PerfLogPending       = $false      # added to Performance Log Users, waiting for a sign-out
     }
 }
 
@@ -307,8 +309,10 @@ function Write-GpJson {
     Write-GpTextFile -Path $tmp -Text $json
     for ($i = 0; $i -lt 5; $i++) {
         try {
-            if (Test-Path -LiteralPath $Path) { [IO.File]::Delete($Path) }
-            [IO.File]::Move($tmp, $Path)
+            # Replace swaps the file in one step: a reader sees the old document
+            # or the new one, never a missing or half-written file.
+            if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tmp, $Path, $null) }
+            else { [IO.File]::Move($tmp, $Path) }
             return
         } catch { Start-Sleep -Milliseconds 20 }
     }
@@ -487,6 +491,83 @@ function Install-GpPresentMon {
     }
     Move-Item -LiteralPath $tmp -Destination $out -Force
     return $out
+}
+
+# ================================================================
+#  LAUNCHER (GamePerf.exe)
+# ================================================================
+function Get-GpLauncherPath {
+    <# GamePerf.exe: the one that started us, else the one in the app folder. $null when running as plain scripts. #>
+    if ($env:GAMEPERF_LAUNCHER -and (Test-Path -LiteralPath $env:GAMEPERF_LAUNCHER)) { return $env:GAMEPERF_LAUNCHER }
+    $p = Join-Path $GpAppDir 'GamePerf.exe'
+    if (Test-Path -LiteralPath $p) { return $p }
+    return $null
+}
+
+function Get-GpLauncherInformationalVersion {
+    <#
+        "<version>+src.<hash>" for GamePerfLauncher.cs. Build-Launcher.ps1
+        stamps it into GamePerf.exe; the tests recompute it from the source,
+        so a committed exe that was not rebuilt after an edit is caught.
+    #>
+    param([Parameter(Mandatory)][string]$Source)
+    $norm = ($Source -replace "`r`n", "`n") -replace 'AssemblyInformationalVersion\("[^"]*"\)', 'AssemblyInformationalVersion("")'
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hex = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($norm))) -replace '-', '').Substring(0, 12).ToLowerInvariant() }
+    finally { $sha.Dispose() }
+    return "$GamePerfVersion+src.$hex"
+}
+
+function Test-GpPerfLogUser {
+    <# True when this account's token carries Performance Log Users - per-frame timing then needs no admin prompt. #>
+    try {
+        $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+        return $p.IsInRole((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-559')))
+    } catch { return $false }
+}
+
+function Start-GpHidden {
+    <#
+        Start a GamePerf worker with no window: through GamePerf.exe when it is
+        there (the process is then "GamePerf" everywhere, and a UAC prompt names
+        it), otherwise a hidden Windows PowerShell. -Elevated asks for admin.
+        Returns the Process. Throws if the user cancels the UAC prompt.
+    #>
+    param([Parameter(Mandatory)][ValidateSet('--logger', '--analyze', '--grant-perflog')][string]$Mode,
+          [Parameter(Mandatory)][string]$Argument, [switch]$Elevated)
+    $launcher = Get-GpLauncherPath
+    if ($launcher) {
+        $file = $launcher
+        $argLine = "$Mode `"$Argument`""
+    } else {
+        $file = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $script = switch ($Mode) { '--logger' { 'GamePerf-Logger.ps1' } '--analyze' { 'GamePerf-Analyze.ps1' } default { $null } }
+        if (-not $script) { throw 'This option needs GamePerf.exe.' }
+        $argLine = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $GpLibDir $script)`" -SessionDir `"$Argument`" -Quiet"
+    }
+    $psi = New-Object Diagnostics.ProcessStartInfo($file, $argLine)
+    if ($Elevated) { $psi.UseShellExecute = $true; $psi.Verb = 'runas'; $psi.WindowStyle = 'Hidden' }
+    else { $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true }
+    return [Diagnostics.Process]::Start($psi)
+}
+
+function New-GpShortcut {
+    <# A .lnk to GamePerf.exe (with its icon) on the desktop or in the Start menu. Returns the path. #>
+    param([Parameter(Mandatory)][ValidateSet('Desktop', 'StartMenu')][string]$Where)
+    $target = Get-GpLauncherPath
+    if (-not $target) { throw 'GamePerf.exe was not found next to the app.' }
+    $dir = $(if ($Where -eq 'Desktop') { [Environment]::GetFolderPath('Desktop') } else { [Environment]::GetFolderPath('Programs') })
+    $lnk = Join-Path $dir 'GamePerf.lnk'
+    $sh = New-Object -ComObject WScript.Shell
+    try {
+        $s = $sh.CreateShortcut($lnk)
+        $s.TargetPath = $target
+        $s.WorkingDirectory = Split-Path -Parent $target
+        $s.IconLocation = "$target,0"
+        $s.Description = 'GamePerf - frame-time logger and AI analyst'
+        $s.Save()
+    } finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($sh) }
+    return $lnk
 }
 
 # ================================================================

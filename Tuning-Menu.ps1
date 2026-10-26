@@ -431,10 +431,14 @@ $Window.FindName("BtnTroubleshoot").Add_Click({ Show-Page 'PageTroubleshoot' })
 $Window.FindName("BtnEachRace").Add_Click({ Show-Page 'PageEachRace' })
 $Window.FindName("BtnAdvanced").Add_Click({ Show-Page 'PageAdvanced' })
 $Window.FindName("BtnGamePerf").Add_Click({
-    $gp = Join-Path $Root 'GamePerf\GamePerf.ps1'
-    if (-not (Test-Path $gp)) { [System.Windows.MessageBox]::Show("Cannot find GamePerf\GamePerf.ps1 next to this menu.","File missing"); return }
-    try { Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$gp`"" -WindowStyle Hidden }
-    catch { [System.Windows.MessageBox]::Show("GamePerf could not be started.","Error") }
+    # GamePerf.exe is the app's own windowless starter; the script is the fallback.
+    $exe = Join-Path $Root 'GamePerf\GamePerf.exe'
+    $gp  = Join-Path $Root 'GamePerf\GamePerf.ps1'
+    try {
+        if (Test-Path $exe) { Start-Process $exe }
+        elseif (Test-Path $gp) { Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$gp`"" -WindowStyle Hidden }
+        else { [System.Windows.MessageBox]::Show("Cannot find the GamePerf folder next to this menu.","File missing") }
+    } catch { [System.Windows.MessageBox]::Show("GamePerf could not be started.","Error") }
 })
 $Window.FindName("BtnHelp").Add_Click({ Show-Page 'PageHelp' })
 $Window.FindName("BtnChip").Add_Click({ Show-Page 'PageChip' })

@@ -18,11 +18,14 @@ GamePerf is built on the kit's **FullTrace** logger. It uses the same measuremen
 
 ## Quick start
 
-1. Double-click **`Start-GamePerf.bat`** (in this folder, or the one in the kit's root folder).
+1. Double-click **`GamePerf.exe`** in this folder. The first launch offers to put a GamePerf icon on your desktop and in the Start menu.
 2. **Settings → Download PresentMon** once. This is Intel's free frame-timing tool. GamePerf keeps the download only if it carries Intel's signature.
-3. On **Record**, pick the game, or leave it on *Auto-detect*. Choose **Monitor** or **VR headset**, and set the target FPS: your headset refresh rate in VR (90, 120…), or 0 to use the monitor's.
-4. Press **START LOGGING**, accept the admin prompt (per-frame timing needs it) and play. Press **Scroll Lock** whenever you feel a stutter.
-5. Press **STOP**, or just quit the game if *Stop when the game closes* is on. The Results page opens with the analysis.
+3. Optional, recommended: **Settings → Allow it for my account**. It asks for admin once, then you sign out and back in. After that, per-frame timing never asks for admin again.
+4. On **Record**, pick the game, or leave it on *Auto-detect*. Choose **Monitor** or **VR headset**, and set the target FPS: your headset refresh rate in VR (90, 120…), or 0 to use the monitor's.
+5. Press **START LOGGING** and play. The window gets out of the way. Press **Scroll Lock** whenever you feel a stutter.
+6. Press **STOP**, or just quit the game if *Stop when the game closes* is on. When the analysis is ready, GamePerf's taskbar button flashes; open it to see the Results.
+
+> **"Windows protected your PC"** may appear the first time you open `GamePerf.exe`. The exe is new and not code-signed, so SmartScreen has never seen it. Click **More info → Run anyway**. If you prefer, build your own copy on your PC. A locally built exe never triggers SmartScreen. Run `powershell -ExecutionPolicy Bypass -File launcher\Build-Launcher.ps1`, which uses the C# compiler that comes with Windows. `Start-GamePerf.bat` also starts the same app.
 
 Then, from Results:
 - Use **Analyse with AI** if you connected a provider in Settings.
@@ -127,6 +130,16 @@ These are set in **Settings → Your goals** and sent with every analysis. The d
 
 ---
 
+## Silent while you play
+
+The recorder must never be the thing that causes a stutter, or that pulls you out of the game.
+
+- **No window, ever.** The recorder runs inside `GamePerf.exe`, a Windows GUI program with no console. Everything it starts (`nvidia-smi`, PresentMon) has no console either. The power plan is read through the power API, so nothing is launched every few seconds.
+- **No sound** unless you turn on the marker click in Settings.
+- **No focus stealing.** When a session ends, the app flashes its taskbar button and waits. It does not jump in front of the game or the desktop.
+- **The app holds it all.** The Record page shows the recorder's live readings and its latest messages. Stop, or closing the app, ends it cleanly. A recorder that loses its app stops by itself.
+- **No admin prompt mid-flow** once *Allow it for my account* is done. Per-frame timing uses Windows event tracing. The built-in *Performance Log Users* group allows exactly that, without being an administrator.
+
 ## Light on resources
 
 - The logger is a separate, hidden process. Its per-second work runs in compiled code. Each sample is three performance-counter reads, one long-running `nvidia-smi` (not one launch a second), a shared-memory read and a tail of PresentMon's file.
@@ -146,7 +159,9 @@ powershell -ExecutionPolicy Bypass -File GamePerf\lib\GamePerf-Logger.ps1 -Game 
 powershell -ExecutionPolicy Bypass -File GamePerf\lib\GamePerf-Analyze.ps1 -SessionDir "$env:USERPROFILE\Documents\GamePerf\Sessions\<session>"
 ```
 
-Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause|F8|F9|F10|Insert|NumPad0`, `-StopWithGame`, `-NoBeep`, `-NoAnalyze`, `-MaxMinutes`.
+Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause|F8|F9|F10|Insert|NumPad0`, `-StopWithGame`, `-Beep`, `-NoAnalyze`, `-MaxMinutes`.
+
+`GamePerf.exe --logger <session folder>` and `GamePerf.exe --analyze <session folder>` do the same windowlessly. The app uses these, reading the options from the session's `request.json`.
 
 ---
 
@@ -163,7 +178,8 @@ Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause
 
 | Symptom | Fix |
 |---|---|
-| "PresentMon stopped immediately" / no frames | Keep *Run the logger as administrator* on, and accept the prompt. |
+| "PresentMon stopped immediately" / no frames | Use **Settings → Allow it for my account**, or keep *Ask for admin when per-frame timing needs it* on and accept the prompt. |
+| `GamePerf.exe` does nothing | See `%LOCALAPPDATA%\GamePerf\launcher.log`. Antivirus may have quarantined the new exe. Build your own copy with `launcher\Build-Launcher.ps1`, or use `Start-GamePerf.bat`. |
 | CPU columns blank | Performance counters are damaged. Run the kit's `scripts\Repair-PerfCounters.ps1` (admin), then reboot. |
 | No GPU data on AMD/Intel | Start MSI Afterburner. Without it, GamePerf falls back to Windows' GPU counters (load and VRAM only). |
 | The wrong game was picked | Choose it in the list instead of *Auto-detect*. Auto-detect takes the first known game it sees running, otherwise the app that keeps focus for 4 s. |
@@ -176,8 +192,10 @@ Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause
 
 | File | Role |
 |---|---|
+| `GamePerf.exe` | The starter you double-click: hosts the app and the recorder on Windows' built-in PowerShell 5.1 engine, with no window of its own |
 | `GamePerf.ps1` | The app (WPF) |
-| `Start-GamePerf.bat` | Launcher |
+| `Start-GamePerf.bat` | Fallback starter, if your antivirus holds the exe back |
+| `launcher\` | `GamePerf.exe`'s source, icon and manifest, plus `Build-Launcher.ps1` to rebuild it |
 | `lib\GamePerf-Logger.ps1` | Recording worker (also usable on its own) |
 | `lib\GamePerf-Analyze.ps1` | Analysis → `summary.json`, `report.md`, `ai-prompt.md` |
 | `lib\GamePerf-AI.ps1` | AI providers |

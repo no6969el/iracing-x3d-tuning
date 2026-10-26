@@ -64,7 +64,7 @@ elevated PowerShell (right-click > Run as administrator). Marked below.
 GamePerf (..\GamePerf\)  FullTrace's method for ANY game, monitor or VR, with
                          per-frame timing (PresentMon), stutter attribution,
                          a report and an AI-ready brief incl. config files.
-                         Start-GamePerf.bat, or the menu's GAMEPERF button.
+                         GamePerf\GamePerf.exe, or the menu's GAMEPERF button.
 FullTrace.ps1            MAIN logger. Run, race, read the CSV on your Desktop.
                          Time-gaps in it = system-wide stalls.            (no admin)
                          Run it ELEVATED (or use the menu's "Hard faults"

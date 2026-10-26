@@ -12,7 +12,11 @@ The project ships as a script kit plus a web guide at
 
 FullTrace answers "what was my PC doing?" for iRacing. GamePerf asks the same question of any game, on a monitor or in VR, and goes one step further. It turns the answer into a brief an AI can act on: your goals, the data, and the game's own config files.
 
-- **App.** `Start-GamePerf.bat`, or the dashboard's new **GAMEPERF** button, opens a WPF app with four pages: Record, Results, AI analyst and Settings.
+- **App.** **`GamePerf\GamePerf.exe`** opens a WPF app with four pages: Record, Results, AI analyst and Settings. So does the dashboard's new **GAMEPERF** button.
+  - The exe is a windowless starter with its own icon. It hosts the app on Windows' built-in PowerShell 5.1 engine, so there is no PowerShell window, and Task Manager, the taskbar and the UAC prompt all show "GamePerf".
+  - The first launch offers a desktop and Start-menu icon.
+  - Its source, icon and manifest are in `GamePerf\launcher\`. `Build-Launcher.ps1` rebuilds it with the C# compiler that ships with Windows.
+  - `Start-GamePerf.bat` remains as a fallback.
 - **One-button recording.** Press Start logging, play, press Stop. Auto-detect follows whichever game you switch to.
 - **Per-frame timing (Intel PresentMon).** Average FPS, 1% and 0.1% lows, frames over the target's budget, and stutters. Every frame is classed as GPU-bound, CPU-side or capped. Every stutter is classed as a GPU spike, a game-thread spike or a stall, and is lined up with the 1 Hz system log around it.
 - **The 1 Hz log is FullTrace's**, generalised to any game. It keeps the same locale-safe CSV rules and the same `hardfaults_s` warning, and adds the game's busiest-thread load, effective CPU clock, disk throughput, commit charge, timer resolution and the driver's clock-event reasons.
@@ -21,6 +25,14 @@ FullTrace answers "what was my PC doing?" for iRacing. GamePerf asks the same qu
 - **Config discovery.** A catalog covers iRacing, ACC, AC/CSP, AMS2, rF2, LMU, MSFS 2020/2024, DCS, X-Plane 12, F1, WRC, BeamNG and more, across all Steam libraries. A name-based search catches anything else, including Unreal Engine `GameUserSettings.ini` files. In VR it adds the runtime's settings and every implicit OpenXR API layer, so an enabled quad-views or foveated layer is flagged.
 - **AI, optional.** You can paste `ai-prompt.md` anywhere, or connect xAI Grok, OpenAI, Anthropic Claude, Google Gemini, OpenRouter, Ollama / LM Studio, or any OpenAI-compatible server. Follow-up questions are supported, and every conversation is saved next to the session.
 - **Privacy.** Keys are DPAPI-encrypted. Briefs are scrubbed of your user name, PC name and credential-looking values. **Preview what is sent** shows the exact text first.
+
+### Silent while you play
+
+- **No window.** The recorder runs windowless inside `GamePerf.exe`. Everything it starts (`nvidia-smi`, PresentMon) runs with `CreateNoWindow`. FullTrace's every-10-seconds `powercfg` call is replaced by the Windows power API.
+- **No sound.** The marker click is off by default.
+- **No focus stealing.** A finished session flashes the taskbar button instead of pulling the window in front of the game.
+- **Contained.** The Record page shows the recorder's live readings and latest log lines.
+- **No admin prompt.** **Allow it for my account** adds the account to the built-in *Performance Log Users* group, once, by SID. After that, per-frame timing needs no admin prompt at all.
 
 ### Light by design
 
@@ -41,6 +53,24 @@ FullTrace answers "what was my PC doing?" for iRacing. GamePerf asks the same qu
 - that every script stays ASCII and PowerShell 5.1-compatible.
 
 `tests/test-gameperf-xaml.ps1` checks the window's markup.
+
+The tests also check that:
+
+- `GamePerf.exe` is a GUI-subsystem program;
+- its manifest is `asInvoker`;
+- its icon carries every size;
+- it was built from the committed launcher source (the source hash is stamped into its version);
+- the in-process host runs scripts correctly;
+- the recorder cannot start anything that opens a window.
+
+### Fixed during review
+
+- **Missed status reads.** A `status.json` read that landed mid-rewrite could make the app give up on a live recording. The file is now swapped atomically with `File.Replace`. The app only gives up when a recorder never reported, and it signals the recorder to stop before giving up.
+- **Elevated or protected games.** Process liveness, CPU and thread times now use `PROCESS_QUERY_LIMITED_INFORMATION` handles. .NET's `Process.HasExited` is refused for an elevated or anti-cheat-protected game, which made the game look like it had exited every second.
+- **Memory.** Per-frame CSVs are read in two passes instead of being held in memory row by row.
+- **Unexpected exceptions.** One inside the sampling loop is logged and skipped; it no longer ends the recording.
+- **AI conversations.** Refreshing the session list no longer wipes the conversation on the AI page.
+- **Stuck on "Analysing".** The app no longer waits forever if the recorder process dies mid-analysis.
 
 ---
 

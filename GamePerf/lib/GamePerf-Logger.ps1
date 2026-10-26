@@ -33,6 +33,13 @@
     and PresentMon pin themselves to the frequency die so they never
     compete with the game for V-Cache cores.
 
+    SILENT BY DESIGN
+    ----------------
+    No window, ever, and no sound unless you ask for one (-Beep). It runs
+    inside GamePerf.exe (or a hidden PowerShell), and everything it starts -
+    nvidia-smi, PresentMon - is started with no console at all, so nothing
+    flashes over the game or steals focus. The app shows its progress.
+
     RUNNING IT
     ----------
     From the app: Start logging. On its own:
@@ -60,7 +67,8 @@ param(
     [switch]$NoFrames,
     [string]$PresentMon = '',
     [string]$MarkerKey = 'ScrollLock',
-    [switch]$NoBeep,
+    # off by default: the logger is silent unless you want a confirmation sound
+    [switch]$Beep,
     [switch]$StopWithGame,
     [int]$ParentPid = 0,
     [switch]$NoAnalyze,
@@ -92,7 +100,7 @@ if ($req) {
             'NoFrames'     { $NoFrames = [bool]$p.Value }
             'PresentMon'   { $PresentMon = [string]$p.Value }
             'MarkerKey'    { $MarkerKey = [string]$p.Value }
-            'NoBeep'       { $NoBeep = [bool]$p.Value }
+            'Beep'         { $Beep = [bool]$p.Value }
             'StopWithGame' { $StopWithGame = [bool]$p.Value }
             'ParentPid'    { $ParentPid = [int]$p.Value }
             'ConfigFiles'  { $ConfigFiles = @($p.Value | ForEach-Object { [string]$_ }) }
@@ -123,7 +131,7 @@ function Add-GpWarning([string]$Text) {
     if ($Warnings -notcontains $Text) { [void]$Warnings.Add($Text); Write-GpLog "WARNING: $Text" 'Yellow' }
 }
 
-$Status = @{ state = 'starting'; session = $SessionDir; warnings = @() }
+$Status = @{ state = 'starting'; session = $SessionDir; warnings = @(); pid = $PID }
 function Publish-GpStatus {
     $Status.heartbeat = [DateTime]::Now.ToString('o', $GpInv)
     $Status.warnings = $Warnings.ToArray()
@@ -157,7 +165,7 @@ try {
         if ($cl -match '--session_name\s+(GamePerf_(\d+))') {
             $old = $Matches[1]
             if (Get-Process -Id ([int]$Matches[2]) -ErrorAction SilentlyContinue) { continue }
-            try { $t = Start-Process -FilePath $p.ExecutablePath -ArgumentList "--terminate_existing_session --session_name $old" -WindowStyle Hidden -PassThru; [void]$t.WaitForExit(5000) } catch { }
+            try { $t = [GamePerf.Native.Run]::Start($p.ExecutablePath, "--terminate_existing_session --session_name $old"); [void]$t.WaitForExit(5000) } catch { }
             Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
             Write-GpLog "Stopped an orphaned PresentMon capture ($old)."
         }
@@ -205,11 +213,8 @@ function Get-GpRegValue([string]$Key, [string]$Name) {
 }
 
 function Get-GpPowerPlan {
-    try {
-        $l = (powercfg /getactivescheme) -join ' '
-        if ($l -match '\(([^)]+)\)') { return $Matches[1] }
-    } catch { }
-    return ''
+    # The power API, not powercfg: no process start and no console window.
+    try { return [GamePerf.Native.Win]::ActivePowerPlanName() } catch { return '' }
 }
 
 function Get-GpMachineSnapshot {
@@ -284,7 +289,8 @@ $SmiInfo = [ordered]@{}
 $SmiProc = $null; $SmiTail = $null; $SmiFields = @(); $SmiLast = $null; $SmiLastSeen = $null; $SmiSpawnMode = $false
 if ($SmiExe) {
     try {
-        $probe = (& $SmiExe -i 0 --query-gpu=name,driver_version,memory.total,pcie.link.gen.max,pcie.link.gen.current,pcie.link.width.current,pcie.link.width.max,power.limit,power.max_limit,clocks.max.graphics,clocks.max.memory --format=csv,noheader,nounits 2>$null) -join ''
+        $probe = [string][GamePerf.Native.Run]::Capture($SmiExe, '-i 0 --query-gpu=name,driver_version,memory.total,pcie.link.gen.max,pcie.link.gen.current,pcie.link.width.current,pcie.link.width.max,power.limit,power.max_limit,clocks.max.graphics,clocks.max.memory --format=csv,noheader,nounits', 8000)
+        $probe = $probe.Trim()
         $f = $probe -split ','
         if ($f.Count -ge 11) {
             $SmiInfo = [ordered]@{ name = $f[0].Trim(); driver = $f[1].Trim(); vram_mb = $f[2].Trim()
@@ -295,7 +301,7 @@ if ($SmiExe) {
     $thr = ''
     foreach ($cand in 'clocks_event_reasons.active', 'clocks_throttle_reasons.active') {
         try {
-            $p = (& $SmiExe -i 0 --query-gpu=$cand --format=csv,noheader,nounits 2>&1) -join ''
+            $p = [string][GamePerf.Native.Run]::Capture($SmiExe, "-i 0 --query-gpu=$cand --format=csv,noheader,nounits", 8000)
             if ($p -match '0x[0-9A-Fa-f]+') { $thr = $cand; break }
         } catch { }
     }
@@ -303,7 +309,7 @@ if ($SmiExe) {
     if ($thr) { $SmiFields += $thr }
     try {
         $SmiArgs = "-i 0 --query-gpu=$($SmiFields -join ',') --format=csv,noheader,nounits -lms 1000 -f `"$SmiCsv`""
-        $SmiProc = Start-Process -FilePath $SmiExe -ArgumentList $SmiArgs -WindowStyle Hidden -PassThru
+        $SmiProc = [GamePerf.Native.Run]::Start($SmiExe, $SmiArgs)
         Set-GpBackgroundAffinity $SmiProc
         $SmiTail = [GamePerf.Native.FileTail]::new($SmiCsv)
         $SmiLastSeen = Get-Date
@@ -326,7 +332,7 @@ function Read-GpSmi {
         }
     }
     if ($script:SmiSpawnMode -and ($script:Iter % 2 -eq 0)) {
-        try { $line = (& $SmiExe -i 0 "--query-gpu=$($SmiFields -join ',')" --format=csv,noheader,nounits 2>$null) -join '' } catch { }
+        try { $line = ([string][GamePerf.Native.Run]::Capture($SmiExe, "-i 0 --query-gpu=$($SmiFields -join ',') --format=csv,noheader,nounits", 3000)).Trim() } catch { }
     }
     if ($line) {
         $v = $line -split ','
@@ -389,7 +395,7 @@ $PmExe = $null
 if (-not $NoFrames) {
     if ($PresentMon -and (Test-Path -LiteralPath $PresentMon)) { $PmExe = $PresentMon } else { $PmExe = Find-GpPresentMon $Settings }
     if (-not $PmExe) { Add-GpWarning 'PresentMon not found - per-frame capture is off. Use "Get PresentMon" in the app.' }
-    elseif (-not (Test-GpAdmin)) { Add-GpWarning 'Not running as administrator - PresentMon may be refused unless you are in the "Performance Log Users" group.' }
+    elseif (-not (Test-GpAdmin) -and -not (Test-GpPerfLogUser)) { Add-GpWarning 'Not running as administrator - PresentMon will be refused. Settings > "Allow it for my account" fixes this for good.' }
 }
 $PmSession = "GamePerf_$PID"
 $PmProc = $null; $PmIndex = 0; $PmStart = $null; $PmState = 'off'; $PmFailedForPid = 0
@@ -404,7 +410,7 @@ function Start-GpFrames([string]$Exe, [int]$GamePid) {
     $a = @('--process_name', "`"$Exe`"", '--output_file', "`"$out`"", '--session_name', $PmSession,
            '--stop_existing_session', '--terminate_on_proc_exit', '--no_console_stats', '--qpc_time')
     try {
-        $script:PmProc = Start-Process -FilePath $PmExe -ArgumentList ($a -join ' ') -WindowStyle Hidden -PassThru
+        $script:PmProc = [GamePerf.Native.Run]::Start($PmExe, ($a -join ' '))
         Set-GpBackgroundAffinity $PmProc
         $script:PmStart = Get-Date
         $script:PmState = 'running'
@@ -423,7 +429,7 @@ function Stop-GpFrames {
     try {
         if (-not $PmProc.HasExited) {
             # Stopping the ETW session makes the capturing PresentMon flush its CSV and exit.
-            $t = Start-Process -FilePath $PmExe -ArgumentList "--terminate_existing_session --session_name $PmSession" -WindowStyle Hidden -PassThru
+            $t = [GamePerf.Native.Run]::Start($PmExe, "--terminate_existing_session --session_name $PmSession")
             [void]$t.WaitForExit(5000)
             if (-not $PmProc.WaitForExit(5000)) { $PmProc.Kill() }
         }
@@ -616,6 +622,7 @@ $KeyWasDown = $false
 $Plan = $Machine.power_plan
 $LastTimerRes = $Machine.timer_res_ms
 $LoopSum = 0.0
+$LoopErrors = 0
 $StopReason = 'stopped'
 $LastFg = 0
 $Status.state = 'waiting'
@@ -623,152 +630,160 @@ $Status.state = 'waiting'
 try {
 while ($true) {
     $t0 = [Diagnostics.Stopwatch]::StartNew()
-    $now = Get-Date
-    $q = [GamePerf.Native.Win]::Qpc()
-    $tS = ($q - $QpcStart) / $QpcFreq
+    # One bad sample must never end a recording (inside try, any .NET
+    # exception would leave the loop): log it, sparingly, and carry on.
+    try {
+        $now = Get-Date
+        $q = [GamePerf.Native.Win]::Qpc()
+        $tS = ($q - $QpcStart) / $QpcFreq
 
-    # ---- game attach / detach -----------------------------------------
-    if (-not $GameTracker -and ($Iter % 2 -eq 0)) {
-        $gp = Find-GpGameProcess
-        if ($gp) { Connect-GpGame $gp }
-    }
-    $g = $null
-    if ($GameTracker) {
-        $g = $GameTracker.Sample()
-        if (-not $g.Alive) {
-            Add-GpEvent 'game_exit' $GameExe
-            Write-GpLog "$GameExe exited." 'Yellow'
-            Stop-GpFrames
-            $GameTracker = $null; $GamePid = 0; $g = $null
-            if ($StopWithGame) { $StopReason = 'game exited'; break }
+        # ---- game attach / detach -----------------------------------------
+        if (-not $GameTracker -and ($Iter % 2 -eq 0)) {
+            $gp = Find-GpGameProcess
+            if ($gp) { Connect-GpGame $gp }
         }
-    }
-    # PresentMon dying within seconds while the game lives = refused (no admin / not in Performance Log Users).
-    if ($PmProc -and $PmProc.HasExited) {
-        $life = ((Get-Date) - $PmStart).TotalSeconds
-        if ($GameTracker -and $life -lt 10) {
-            $script:PmFailedForPid = $GamePid
-            $PmState = 'failed'
-            Add-GpWarning 'PresentMon stopped immediately - per-frame capture needs the logger to run as administrator.'
+        $g = $null
+        if ($GameTracker) {
+            $g = $GameTracker.Sample()
+            if (-not $g.Alive) {
+                Add-GpEvent 'game_exit' $GameExe
+                Write-GpLog "$GameExe exited." 'Yellow'
+                Stop-GpFrames
+                $GameTracker = $null; $GamePid = 0; $g = $null
+                if ($StopWithGame) { $StopReason = 'game exited'; break }
+            }
         }
-        $PmProc = $null
-    }
-
-    # ---- counters ------------------------------------------------------
-    $c = $Cpu.Sample()
-    $s = $Sys.Sample()
-    $vrCpu = $VrGroup.Sample()
-    if ($Iter % 10 -eq 5) { $VrGroup.Rescan() }
-
-    $smi = Read-GpSmi
-    $ab = [GamePerf.Native.Afterburner]::Read()
-    if ($ab.Count -and ($AbNames.Count -eq 0 -or $Iter % 30 -eq 0)) { Update-GpAbNames $ab }
-
-    $gpuUtil = ''; $gpuMem = ''; $vramUsed = ''; $vramTot = ''; $gpuW = ''; $gclk = ''; $mclk = ''; $gtemp = ''; $fan = ''; $pstate = ''; $thrHex = ''
-    if ($smi) {
-        $gpuUtil = $smi['utilization.gpu']; $gpuMem = $smi['utilization.memory']; $vramUsed = $smi['memory.used']; $vramTot = $smi['memory.total']
-        $gpuW = $smi['power.draw']; $gclk = $smi['clocks.gr']; $mclk = $smi['clocks.mem']; $gtemp = $smi['temperature.gpu']; $fan = $smi['fan.speed']; $pstate = $smi['pstate']
-        if ($SmiFields.Count -gt 11) { $thrHex = $smi[$SmiFields[11]] }
-    } elseif ($ab.Count) {
-        # AMD / Intel with Afterburner: its own sensors.
-        $gpuUtil = Get-GpAb $ab 'usage'; $gtemp = Get-GpAb $ab 'temp'; $gclk = Get-GpAb $ab 'gclk'; $mclk = Get-GpAb $ab 'mclk'; $vramUsed = Get-GpAb $ab 'vram'
-    } elseif ($GpuEng) {
-        $ge = $GpuEng.Sample($GamePid)
-        $gpuUtil = $ge[0]; $vramUsed = $ge[2]
-    }
-
-    # ---- frames since last sample -------------------------------------
-    $fw = $null
-    if ($Live) { $fw = $Live.Poll() }
-
-    # ---- slow-changing state ------------------------------------------
-    if ($Iter % 10 -eq 0) {
-        $p2 = Get-GpPowerPlan
-        if ($p2 -and $Plan -and $p2 -ne $Plan) { Add-GpEvent 'power_plan_changed' "$Plan -> $p2"; Add-GpWarning "Power plan changed mid-session: $Plan -> $p2" }
-        if ($p2) { $Plan = $p2 }
-    }
-    $timerRes = [GamePerf.Native.Win]::TimerResolutionMs()
-    if (-not [double]::IsNaN($timerRes) -and -not [double]::IsNaN([double]$LastTimerRes) -and [math]::Abs($timerRes - $LastTimerRes) -gt 0.05) {
-        Add-GpEvent 'timer_resolution_changed' ('{0} -> {1} ms' -f (Inv $LastTimerRes), (Inv $timerRes))
-    }
-    $LastTimerRes = $timerRes
-    $fgPid = [GamePerf.Native.Win]::ForegroundPid()
-    $fgGame = ''
-    if ($GamePid) {
-        $fgGame = [int]($fgPid -eq $GamePid)
-        if ($Iter -gt 0 -and $LastFg -eq $GamePid -and $fgPid -ne $GamePid) {
-            $fgName = ''
-            try { $fgName = (Get-Process -Id $fgPid -ErrorAction Stop).ProcessName } catch { }
-            Add-GpEvent 'focus_lost' $fgName
+        # PresentMon dying within seconds while the game lives = refused (no admin / not in Performance Log Users).
+        if ($PmProc -and $PmProc.HasExited) {
+            $life = ((Get-Date) - $PmStart).TotalSeconds
+            if ($GameTracker -and $life -lt 10) {
+                $script:PmFailedForPid = $GamePid
+                $PmState = 'failed'
+                Add-GpWarning 'PresentMon stopped immediately - per-frame capture needs the logger to run as administrator.'
+            }
+            $PmProc = $null
         }
+
+        # ---- counters ------------------------------------------------------
+        $c = $Cpu.Sample()
+        $s = $Sys.Sample()
+        $vrCpu = $VrGroup.Sample()
+        if ($Iter % 10 -eq 5) { $VrGroup.Rescan() }
+
+        $smi = Read-GpSmi
+        $ab = [GamePerf.Native.Afterburner]::Read()
+        if ($ab.Count -and ($AbNames.Count -eq 0 -or $Iter % 30 -eq 0)) { Update-GpAbNames $ab }
+
+        $gpuUtil = ''; $gpuMem = ''; $vramUsed = ''; $vramTot = ''; $gpuW = ''; $gclk = ''; $mclk = ''; $gtemp = ''; $fan = ''; $pstate = ''; $thrHex = ''
+        if ($smi) {
+            $gpuUtil = $smi['utilization.gpu']; $gpuMem = $smi['utilization.memory']; $vramUsed = $smi['memory.used']; $vramTot = $smi['memory.total']
+            $gpuW = $smi['power.draw']; $gclk = $smi['clocks.gr']; $mclk = $smi['clocks.mem']; $gtemp = $smi['temperature.gpu']; $fan = $smi['fan.speed']; $pstate = $smi['pstate']
+            if ($SmiFields.Count -gt 11) { $thrHex = $smi[$SmiFields[11]] }
+        } elseif ($ab.Count) {
+            # AMD / Intel with Afterburner: its own sensors.
+            $gpuUtil = Get-GpAb $ab 'usage'; $gtemp = Get-GpAb $ab 'temp'; $gclk = Get-GpAb $ab 'gclk'; $mclk = Get-GpAb $ab 'mclk'; $vramUsed = Get-GpAb $ab 'vram'
+        } elseif ($GpuEng) {
+            $ge = $GpuEng.Sample($GamePid)
+            $gpuUtil = $ge[0]; $vramUsed = $ge[2]
+        }
+
+        # ---- frames since last sample -------------------------------------
+        $fw = $null
+        if ($Live) { $fw = $Live.Poll() }
+
+        # ---- slow-changing state ------------------------------------------
+        if ($Iter % 10 -eq 0) {
+            $p2 = Get-GpPowerPlan
+            if ($p2 -and $Plan -and $p2 -ne $Plan) { Add-GpEvent 'power_plan_changed' "$Plan -> $p2"; Add-GpWarning "Power plan changed mid-session: $Plan -> $p2" }
+            if ($p2) { $Plan = $p2 }
+        }
+        $timerRes = [GamePerf.Native.Win]::TimerResolutionMs()
+        if (-not [double]::IsNaN($timerRes) -and -not [double]::IsNaN([double]$LastTimerRes) -and [math]::Abs($timerRes - $LastTimerRes) -gt 0.05) {
+            Add-GpEvent 'timer_resolution_changed' ('{0} -> {1} ms' -f (Inv $LastTimerRes), (Inv $timerRes))
+        }
+        $LastTimerRes = $timerRes
+        $fgPid = [GamePerf.Native.Win]::ForegroundPid()
+        $fgGame = ''
+        if ($GamePid) {
+            $fgGame = [int]($fgPid -eq $GamePid)
+            if ($Iter -gt 0 -and $LastFg -eq $GamePid -and $fgPid -ne $GamePid) {
+                $fgName = ''
+                try { $fgName = (Get-Process -Id $fgPid -ErrorAction Stop).ProcessName } catch { }
+                Add-GpEvent 'focus_lost' $fgName
+            }
+        }
+        $LastFg = $fgPid
+        if ($Iter % 30 -eq 29) {
+            $top = $Census.Take()
+            $list = @($top.GetEnumerator() | Where-Object { $_.Key -ne 'Idle' -and $_.Key -ne ($GameExe -replace '\.exe$', '') } | Sort-Object Value -Descending | Select-Object -First 5 |
+                      ForEach-Object { '{0} {1}%' -f $_.Key, (Inv ([math]::Round($_.Value, 1))) })
+            if ($list.Count) { Add-GpEvent 'background_cpu' ($list -join '; ') }
+        }
+
+        # ---- write the row ------------------------------------------------
+        $phase = 'wait'
+        if ($g) { $phase = 'game' }
+        $abFps = Get-GpAb $ab 'fps'
+        $row = @(
+            $now.ToString('HH:mm:ss.fff', $GpInv), (Inv $tS), (Inv $q), $phase, (Inv $(if ($GamePid) { $GamePid } else { '' })), (Inv $fgGame), (Inv $MarkerThisSecond),
+            (Inv $c.Total), (Inv $c.Group0), (Inv $c.Group1), (Inv $(if ($c.BusyCore -ge 0) { $c.BusyCore } else { '' })), (Inv $c.BusyPct), (Inv $c.EffMhz),
+            (Inv $c.Cpu0Int), (Inv $c.Cpu0Dpc), (Inv $c.SplitInt), (Inv $c.SplitDpc), (Inv $c.TotInt), (Inv $c.TotDpc)
+        )
+        if ($g) {
+            $aff = ''
+            if ($g.Affinity) { $aff = '0x' + $g.Affinity.ToString('X') }
+            $row += @((Inv $g.CpuPct), (Inv $g.Cores), (Inv $g.TopThreadPct), (Inv $g.Threads), (Inv $g.WorkingSetMb), (Inv $g.PrivateMb), $aff)
+        } else { $row += @('', '', '', '', '', '', '') }
+        $row += @((Inv $vrCpu),
+            (Inv $s.AvailMb), (Inv $s.CommitPct), (Inv $s.HardFaults), (Inv $s.DiskReadMBs), (Inv $s.DiskWriteMBs), (Inv $s.DiskBusyPct), (Inv $s.DiskQueue),
+            (Inv $gpuUtil), (Inv $gpuMem), (Inv $vramUsed), (Inv $vramTot), (Inv $gpuW), (Inv $gclk), (Inv $mclk), (Inv $gtemp), (Inv $fan), (Inv $pstate), (Inv $thrHex),
+            (Inv (ConvertTo-GpMillivolts (Get-GpAb $ab 'volt'))), (Inv (Get-GpAb $ab 'voltlim')), (Inv (Get-GpAb $ab 'pwrlim')), (Inv (Get-GpAb $ab 'templim')), (Inv (Get-GpAb $ab 'noload')),
+            (Inv (Get-GpAb $ab 'bus')), (Inv (Get-GpAb $ab 'fb')), (Inv (Get-GpAb $ab 'memtemp')), (Inv (Get-GpAb $ab 'fanrpm')), (Inv $abFps), (Inv (Get-GpAb $ab 'ftime')))
+        if ($fw -and $fw.Frames -gt 0) {
+            $row += @((Inv $fw.Frames), (Inv (1000.0 / $fw.FtAvg)), (Inv $fw.FtAvg), (Inv $fw.FtMax), (Inv $fw.GpuBusyAvg), (Inv $fw.CpuBusyAvg), (Inv $fw.OverBudget))
+        } else { $row += @((Inv $(if ($fw) { 0 } else { '' })), '', '', '', '', '', '') }
+        $loopMs = $t0.Elapsed.TotalMilliseconds
+        $row += @((Inv $timerRes), (Txt $Plan), (Inv $loopMs))
+        $SysWriter.WriteLine($row -join ',')
+        $LoopSum += $loopMs
+
+        # ---- live status for the app --------------------------------------
+        $Status.state = $(if ($GameTracker) { 'logging' } else { 'waiting' })
+        $Status.elapsed_s = [math]::Round($tS, 1)
+        $Status.game = $Meta.game_name
+        $Status.game_exe = $GameExe
+        $Status.waiting_for = $(if ($WantNames.Count) { ($WantNames -join ', ') } else { 'the focused game' })
+        $Status.presentmon = $PmState
+        $Status.markers = $Markers
+        $Status.frames_total = $(if ($Live) { $Live.TotalFrames } else { 0 })
+        $Status.fps = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round(1000.0 / $fw.FtAvg, 1) } elseif (-not [double]::IsNaN($abFps)) { [math]::Round($abFps, 1) } else { $null })
+        $Status.ft_max = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round($fw.FtMax, 1) } else { $null })
+        $Status.gpu_busy = $(if ($fw -and -not [double]::IsNaN($fw.GpuBusyAvg)) { [math]::Round($fw.GpuBusyAvg, 1) } else { $null })
+        $Status.budget_ms = $BudgetMs
+        $Status.gpu_util = ConvertTo-GpDouble $gpuUtil
+        $Status.gpu_temp = ConvertTo-GpDouble $gtemp
+        $Status.gpu_power = ConvertTo-GpDouble $gpuW
+        $Status.vram_used = ConvertTo-GpDouble $vramUsed
+        $Status.vram_total = ConvertTo-GpDouble $vramTot
+        $Status.cpu_total = [math]::Round($c.Total, 1)
+        $Status.game_thread = $(if ($g) { [math]::Round($g.TopThreadPct, 0) } else { $null })
+        $Status.loop_ms = [math]::Round($loopMs, 1)
+        foreach ($k in @($Status.Keys)) { if ($Status[$k] -is [double] -and [double]::IsNaN($Status[$k])) { $Status[$k] = $null } }
+        Publish-GpStatus
+
+        if (-not $Quiet -and $Iter % 5 -eq 0) {
+            Write-Host ('  {0}  {1,-9} fps {2,6}  ftmax {3,6}  GPU {4,4}%  CPU {5,4}%  thread {6,4}%  markers {7}' -f
+                $now.ToString('HH:mm:ss', $GpInv), $Status.state, (Format-GpNum $Status.fps 1), (Format-GpNum $Status.ft_max 1),
+                (Format-GpNum $Status.gpu_util 0), (Format-GpNum $Status.cpu_total 0), (Format-GpNum $Status.game_thread 0), $Markers) -ForegroundColor Gray
+        }
+
+        $Iter++
+        $MarkerThisSecond = 0
+    } catch {
+        $LoopErrors++
+        if ($LoopErrors -le 5 -or $LoopErrors % 60 -eq 0) { Write-GpLog "Sample $Iter failed: $($_.Exception.Message)" 'Yellow' }
+        $Iter++
     }
-    $LastFg = $fgPid
-    if ($Iter % 30 -eq 29) {
-        $top = $Census.Take()
-        $list = @($top.GetEnumerator() | Where-Object { $_.Key -ne 'Idle' -and $_.Key -ne ($GameExe -replace '\.exe$', '') } | Sort-Object Value -Descending | Select-Object -First 5 |
-                  ForEach-Object { '{0} {1}%' -f $_.Key, (Inv ([math]::Round($_.Value, 1))) })
-        if ($list.Count) { Add-GpEvent 'background_cpu' ($list -join '; ') }
-    }
-
-    # ---- write the row ------------------------------------------------
-    $phase = 'wait'
-    if ($g) { $phase = 'game' }
-    $abFps = Get-GpAb $ab 'fps'
-    $row = @(
-        $now.ToString('HH:mm:ss.fff', $GpInv), (Inv $tS), (Inv $q), $phase, (Inv $(if ($GamePid) { $GamePid } else { '' })), (Inv $fgGame), (Inv $MarkerThisSecond),
-        (Inv $c.Total), (Inv $c.Group0), (Inv $c.Group1), (Inv $(if ($c.BusyCore -ge 0) { $c.BusyCore } else { '' })), (Inv $c.BusyPct), (Inv $c.EffMhz),
-        (Inv $c.Cpu0Int), (Inv $c.Cpu0Dpc), (Inv $c.SplitInt), (Inv $c.SplitDpc), (Inv $c.TotInt), (Inv $c.TotDpc)
-    )
-    if ($g) {
-        $aff = ''
-        if ($g.Affinity) { $aff = '0x' + $g.Affinity.ToString('X') }
-        $row += @((Inv $g.CpuPct), (Inv $g.Cores), (Inv $g.TopThreadPct), (Inv $g.Threads), (Inv $g.WorkingSetMb), (Inv $g.PrivateMb), $aff)
-    } else { $row += @('', '', '', '', '', '', '') }
-    $row += @((Inv $vrCpu),
-        (Inv $s.AvailMb), (Inv $s.CommitPct), (Inv $s.HardFaults), (Inv $s.DiskReadMBs), (Inv $s.DiskWriteMBs), (Inv $s.DiskBusyPct), (Inv $s.DiskQueue),
-        (Inv $gpuUtil), (Inv $gpuMem), (Inv $vramUsed), (Inv $vramTot), (Inv $gpuW), (Inv $gclk), (Inv $mclk), (Inv $gtemp), (Inv $fan), (Inv $pstate), (Inv $thrHex),
-        (Inv (ConvertTo-GpMillivolts (Get-GpAb $ab 'volt'))), (Inv (Get-GpAb $ab 'voltlim')), (Inv (Get-GpAb $ab 'pwrlim')), (Inv (Get-GpAb $ab 'templim')), (Inv (Get-GpAb $ab 'noload')),
-        (Inv (Get-GpAb $ab 'bus')), (Inv (Get-GpAb $ab 'fb')), (Inv (Get-GpAb $ab 'memtemp')), (Inv (Get-GpAb $ab 'fanrpm')), (Inv $abFps), (Inv (Get-GpAb $ab 'ftime')))
-    if ($fw -and $fw.Frames -gt 0) {
-        $row += @((Inv $fw.Frames), (Inv (1000.0 / $fw.FtAvg)), (Inv $fw.FtAvg), (Inv $fw.FtMax), (Inv $fw.GpuBusyAvg), (Inv $fw.CpuBusyAvg), (Inv $fw.OverBudget))
-    } else { $row += @((Inv $(if ($fw) { 0 } else { '' })), '', '', '', '', '', '') }
-    $loopMs = $t0.Elapsed.TotalMilliseconds
-    $row += @((Inv $timerRes), (Txt $Plan), (Inv $loopMs))
-    $SysWriter.WriteLine($row -join ',')
-    $LoopSum += $loopMs
-
-    # ---- live status for the app --------------------------------------
-    $Status.state = $(if ($GameTracker) { 'logging' } else { 'waiting' })
-    $Status.elapsed_s = [math]::Round($tS, 1)
-    $Status.game = $Meta.game_name
-    $Status.game_exe = $GameExe
-    $Status.waiting_for = $(if ($WantNames.Count) { ($WantNames -join ', ') } else { 'the focused game' })
-    $Status.presentmon = $PmState
-    $Status.markers = $Markers
-    $Status.frames_total = $(if ($Live) { $Live.TotalFrames } else { 0 })
-    $Status.fps = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round(1000.0 / $fw.FtAvg, 1) } elseif (-not [double]::IsNaN($abFps)) { [math]::Round($abFps, 1) } else { $null })
-    $Status.ft_max = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round($fw.FtMax, 1) } else { $null })
-    $Status.gpu_busy = $(if ($fw -and -not [double]::IsNaN($fw.GpuBusyAvg)) { [math]::Round($fw.GpuBusyAvg, 1) } else { $null })
-    $Status.budget_ms = $BudgetMs
-    $Status.gpu_util = ConvertTo-GpDouble $gpuUtil
-    $Status.gpu_temp = ConvertTo-GpDouble $gtemp
-    $Status.gpu_power = ConvertTo-GpDouble $gpuW
-    $Status.vram_used = ConvertTo-GpDouble $vramUsed
-    $Status.vram_total = ConvertTo-GpDouble $vramTot
-    $Status.cpu_total = [math]::Round($c.Total, 1)
-    $Status.game_thread = $(if ($g) { [math]::Round($g.TopThreadPct, 0) } else { $null })
-    $Status.loop_ms = [math]::Round($loopMs, 1)
-    foreach ($k in @($Status.Keys)) { if ($Status[$k] -is [double] -and [double]::IsNaN($Status[$k])) { $Status[$k] = $null } }
-    Publish-GpStatus
-
-    if (-not $Quiet -and $Iter % 5 -eq 0) {
-        Write-Host ('  {0}  {1,-9} fps {2,6}  ftmax {3,6}  GPU {4,4}%  CPU {5,4}%  thread {6,4}%  markers {7}' -f
-            $now.ToString('HH:mm:ss', $GpInv), $Status.state, (Format-GpNum $Status.fps 1), (Format-GpNum $Status.ft_max 1),
-            (Format-GpNum $Status.gpu_util 0), (Format-GpNum $Status.cpu_total 0), (Format-GpNum $Status.game_thread 0), $Markers) -ForegroundColor Gray
-    }
-
-    $Iter++
-    $MarkerThisSecond = 0
 
     # ---- stop conditions ----------------------------------------------
     if (Test-Path -LiteralPath $StopFlag) { $StopReason = 'stopped from the app'; break }
@@ -782,7 +797,7 @@ while ($true) {
         if ($down -and -not $KeyWasDown) {
             $Markers++; $MarkerThisSecond++
             Add-GpEvent 'marker' "#$Markers"
-            if (-not $NoBeep) { try { [System.Media.SystemSounds]::Asterisk.Play() } catch { } }
+            if ($Beep) { try { [System.Media.SystemSounds]::Asterisk.Play() } catch { } }
             if (-not $Quiet) { Write-Host "  >> marker #$Markers" -ForegroundColor Magenta }
         }
         $KeyWasDown = $down
