@@ -185,12 +185,106 @@ int SceneMaskOf(int scene) {
 }
 
 const char* HResultText(HRESULT hr) {
-    static char buf[64];
-    std::snprintf(buf, sizeof(buf), "0x%08X", (unsigned)hr);
+    static char buf[96];
+    std::snprintf(buf, sizeof(buf), "%s (0x%08X)", HResultName(hr), (unsigned)hr);
     return buf;
 }
 
+void (*g_d3dSink)(const std::string& line) = nullptr;
+std::string g_d3dFailure;
+std::string g_d3dFailureBrief;
+
+HRESULT EmitD3d(HRESULT hr, const char* call, const char* what, const char* detail) {
+    char line[512];
+    std::snprintf(line, sizeof(line), "D3D11 %s %s -> %s%s%s", call, what, HResultText(hr), detail[0] ? "  " : "",
+                  detail);
+    if (FAILED(hr)) {
+        g_d3dFailure = line;
+        g_d3dFailureBrief = std::string(call) + " " + what + " " + HResultName(hr);
+    }
+    if (g_d3dSink) g_d3dSink(line);
+    return hr;
+}
+
+void DescText(char* out, size_t size, const D3D11_TEXTURE2D_DESC& td) {
+    std::snprintf(out, size, "%ux%u %s samples %u array %u mips %u bind 0x%X misc 0x%X", td.Width, td.Height,
+                  DxgiFormatName(td.Format), td.SampleDesc.Count, td.ArraySize, td.MipLevels, td.BindFlags,
+                  td.MiscFlags);
+}
+
 }  // namespace
+
+void SetD3dLogSink(void (*sink)(const std::string& line)) { g_d3dSink = sink; }
+
+HRESULT LogD3d(HRESULT hr, const char* call, const char* what) { return EmitD3d(hr, call, what, ""); }
+
+HRESULT LogD3d(HRESULT hr, const char* call, const char* what, const D3D11_TEXTURE2D_DESC& td) {
+    char detail[256];
+    DescText(detail, sizeof(detail), td);
+    return EmitD3d(hr, call, what, detail);
+}
+
+HRESULT LogD3dView(HRESULT hr, const char* call, const char* what, DXGI_FORMAT viewFormat, ID3D11Resource* resource) {
+    char tex[256] = "unknown texture";
+    ComPtr<ID3D11Texture2D> tex2d;
+    if (resource && SUCCEEDED(resource->QueryInterface(IID_PPV_ARGS(&tex2d)))) {
+        D3D11_TEXTURE2D_DESC td{};
+        tex2d->GetDesc(&td);
+        DescText(tex, sizeof(tex), td);
+    }
+    char detail[320];
+    std::snprintf(detail, sizeof(detail), "view %s on %s",
+                  viewFormat == DXGI_FORMAT_UNKNOWN ? "default (null desc)" : DxgiFormatName(viewFormat), tex);
+    return EmitD3d(hr, call, what, detail);
+}
+
+std::string LastD3dFailure(bool brief) { return brief ? g_d3dFailureBrief : g_d3dFailure; }
+
+void ClearD3dFailure() {
+    g_d3dFailure.clear();
+    g_d3dFailureBrief.clear();
+}
+
+const char* DxgiFormatName(DXGI_FORMAT format) {
+    switch (format) {
+        case DXGI_FORMAT_UNKNOWN: return "UNKNOWN";
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS: return "R8G8B8A8_TYPELESS";
+        case DXGI_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return "R8G8B8A8_UNORM_SRGB";
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS: return "B8G8R8A8_TYPELESS";
+        case DXGI_FORMAT_B8G8R8A8_UNORM: return "B8G8R8A8_UNORM";
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return "B8G8R8A8_UNORM_SRGB";
+        case DXGI_FORMAT_R10G10B10A2_UNORM: return "R10G10B10A2_UNORM";
+        case DXGI_FORMAT_R16G16B16A16_FLOAT: return "R16G16B16A16_FLOAT";
+        case DXGI_FORMAT_R11G11B10_FLOAT: return "R11G11B10_FLOAT";
+        case DXGI_FORMAT_D32_FLOAT: return "D32_FLOAT";
+        case DXGI_FORMAT_D24_UNORM_S8_UINT: return "D24_UNORM_S8_UINT";
+        case DXGI_FORMAT_D16_UNORM: return "D16_UNORM";
+        default: {
+            static char buf[32];
+            std::snprintf(buf, sizeof(buf), "DXGI_FORMAT %d", (int)format);
+            return buf;
+        }
+    }
+}
+
+const char* HResultName(HRESULT hr) {
+    switch (hr) {
+        case S_OK: return "S_OK";
+        case S_FALSE: return "S_FALSE";
+        case E_INVALIDARG: return "E_INVALIDARG";
+        case E_OUTOFMEMORY: return "E_OUTOFMEMORY";
+        case E_FAIL: return "E_FAIL";
+        case E_NOTIMPL: return "E_NOTIMPL";
+        case DXGI_ERROR_INVALID_CALL: return "DXGI_ERROR_INVALID_CALL";
+        case DXGI_ERROR_UNSUPPORTED: return "DXGI_ERROR_UNSUPPORTED";
+        case DXGI_ERROR_DEVICE_REMOVED: return "DXGI_ERROR_DEVICE_REMOVED";
+        case DXGI_ERROR_DEVICE_HUNG: return "DXGI_ERROR_DEVICE_HUNG";
+        case DXGI_ERROR_DEVICE_RESET: return "DXGI_ERROR_DEVICE_RESET";
+        case DXGI_ERROR_DRIVER_INTERNAL_ERROR: return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+        default: return SUCCEEDED(hr) ? "success" : "HRESULT";
+    }
+}
 
 const char* SceneName(int scene) {
     switch (scene) {
@@ -220,12 +314,14 @@ bool Renderer::Compile(std::string& err) {
         err = errors ? (const char*)errors->GetBufferPointer() : "pixel shader failed";
         return false;
     }
-    hr = device_->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vs_);
+    hr = LogD3d(device_->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &vs_),
+                "CreateVertexShader", "scene");
     if (FAILED(hr)) {
         err = "CreateVertexShader failed";
         return false;
     }
-    hr = device_->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &ps_);
+    hr = LogD3d(device_->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &ps_),
+                "CreatePixelShader", "scene");
     if (FAILED(hr)) {
         err = "CreatePixelShader failed";
         return false;
@@ -237,7 +333,8 @@ bool Renderer::Compile(std::string& err) {
         {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
         {"TEXCOORD", 1, DXGI_FORMAT_R32_FLOAT, 0, 44, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    hr = device_->CreateInputLayout(layout, 5, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &layout_);
+    hr = LogD3d(device_->CreateInputLayout(layout, 5, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &layout_),
+                "CreateInputLayout", "scene");
     if (FAILED(hr)) {
         err = "CreateInputLayout failed";
         return false;
@@ -509,7 +606,7 @@ bool Renderer::BuildGeometry(std::string& err) {
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
     D3D11_SUBRESOURCE_DATA sd{};
     sd.pSysMem = verts.data();
-    HRESULT hr = device_->CreateBuffer(&bd, &sd, &vb_);
+    HRESULT hr = LogD3d(device_->CreateBuffer(&bd, &sd, &vb_), "CreateBuffer", "vertices");
     if (FAILED(hr)) {
         err = std::string("vertex buffer ") + HResultText(hr);
         return false;
@@ -517,7 +614,7 @@ bool Renderer::BuildGeometry(std::string& err) {
     bd.ByteWidth = (UINT)(indices.size() * sizeof(uint32_t));
     bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
     sd.pSysMem = indices.data();
-    hr = device_->CreateBuffer(&bd, &sd, &ib_);
+    hr = LogD3d(device_->CreateBuffer(&bd, &sd, &ib_), "CreateBuffer", "indices");
     if (FAILED(hr)) {
         err = std::string("index buffer ") + HResultText(hr);
         return false;
@@ -536,7 +633,7 @@ bool Renderer::MakeTextTexture(const wchar_t* text, int width, int height, float
     td.SampleDesc.Count = 1;
     td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     ComPtr<ID3D11Texture2D> tex;
-    HRESULT hr = device_->CreateTexture2D(&td, nullptr, &tex);
+    HRESULT hr = LogD3d(device_->CreateTexture2D(&td, nullptr, &tex), "CreateTexture2D", "text", td);
     if (FAILED(hr)) return false;
     ComPtr<IDXGISurface> surface;
     hr = tex->QueryInterface(IID_PPV_ARGS(&surface));
@@ -609,7 +706,8 @@ bool Renderer::MakeTextTexture(const wchar_t* text, int width, int height, float
     }
     hr = rt->EndDraw();
     if (FAILED(hr)) return false;
-    hr = device_->CreateShaderResourceView(tex.Get(), nullptr, srv);
+    hr = LogD3dView(device_->CreateShaderResourceView(tex.Get(), nullptr, srv), "CreateShaderResourceView", "text",
+                    DXGI_FORMAT_UNKNOWN, tex.Get());
     return SUCCEEDED(hr);
 }
 
@@ -646,7 +744,7 @@ bool Renderer::BuildText(std::string& err) {
     td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     td.SampleDesc.Count = 1;
     td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    hr = device_->CreateTexture2D(&td, nullptr, &hudTex_);
+    hr = LogD3d(device_->CreateTexture2D(&td, nullptr, &hudTex_), "CreateTexture2D", "HUD", td);
     if (FAILED(hr)) {
         err = "HUD texture failed";
         return false;
@@ -686,7 +784,8 @@ bool Renderer::BuildText(std::string& err) {
         if (draws_[i].tag >= 2 && draws_[i].tag <= 5) draws_[i].srv = label_[draws_[i].tag - 2];
         if (draws_[i].tag == 6) draws_[i].srv = nullptr;  // filled after HUD srv exists
     }
-    hr = device_->CreateShaderResourceView(hudTex_, nullptr, &hudSrv_);
+    hr = LogD3dView(device_->CreateShaderResourceView(hudTex_, nullptr, &hudSrv_), "CreateShaderResourceView", "HUD",
+                    DXGI_FORMAT_UNKNOWN, hudTex_);
     if (FAILED(hr)) {
         err = "HUD shader view failed";
         return false;
@@ -707,7 +806,7 @@ bool Renderer::Init(ID3D11Device* device, ID3D11DeviceContext* context, std::str
     bd.Usage = D3D11_USAGE_DYNAMIC;
     bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    if (FAILED(device_->CreateBuffer(&bd, nullptr, &cb_))) {
+    if (FAILED(LogD3d(device_->CreateBuffer(&bd, nullptr, &cb_), "CreateBuffer", "constants"))) {
         err = "constant buffer failed";
         return false;
     }
@@ -717,12 +816,12 @@ bool Renderer::Init(ID3D11Device* device, ID3D11DeviceContext* context, std::str
     rd.CullMode = D3D11_CULL_BACK;
     rd.FrontCounterClockwise = TRUE;
     rd.DepthClipEnable = TRUE;
-    if (FAILED(device_->CreateRasterizerState(&rd, &rsCull_))) {
+    if (FAILED(LogD3d(device_->CreateRasterizerState(&rd, &rsCull_), "CreateRasterizerState", "cull"))) {
         err = "rasterizer failed";
         return false;
     }
     rd.CullMode = D3D11_CULL_NONE;
-    if (FAILED(device_->CreateRasterizerState(&rd, &rsNone_))) {
+    if (FAILED(LogD3d(device_->CreateRasterizerState(&rd, &rsNone_), "CreateRasterizerState", "no cull"))) {
         err = "rasterizer failed";
         return false;
     }
@@ -731,20 +830,20 @@ bool Renderer::Init(ID3D11Device* device, ID3D11DeviceContext* context, std::str
     dd.DepthEnable = TRUE;
     dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
     dd.DepthFunc = D3D11_COMPARISON_LESS;
-    if (FAILED(device_->CreateDepthStencilState(&dd, &dsOn_))) {
+    if (FAILED(LogD3d(device_->CreateDepthStencilState(&dd, &dsOn_), "CreateDepthStencilState", "on"))) {
         err = "depth state failed";
         return false;
     }
     dd.DepthEnable = FALSE;
     dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    if (FAILED(device_->CreateDepthStencilState(&dd, &dsOff_))) {
+    if (FAILED(LogD3d(device_->CreateDepthStencilState(&dd, &dsOff_), "CreateDepthStencilState", "off"))) {
         err = "depth state failed";
         return false;
     }
 
     D3D11_BLEND_DESC blend{};
     blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(device_->CreateBlendState(&blend, &blendOpaque_))) {
+    if (FAILED(LogD3d(device_->CreateBlendState(&blend, &blendOpaque_), "CreateBlendState", "opaque"))) {
         err = "blend state failed";
         return false;
     }
@@ -755,14 +854,14 @@ bool Renderer::Init(ID3D11Device* device, ID3D11DeviceContext* context, std::str
     sd.MaxAnisotropy = 8;
     sd.MaxLOD = D3D11_FLOAT32_MAX;
     sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    if (FAILED(device_->CreateSamplerState(&sd, &sampWrap_))) {
+    if (FAILED(LogD3d(device_->CreateSamplerState(&sd, &sampWrap_), "CreateSamplerState", "wrap"))) {
         err = "sampler failed";
         return false;
     }
     sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.MaxAnisotropy = 1;
-    if (FAILED(device_->CreateSamplerState(&sd, &sampClamp_))) {
+    if (FAILED(LogD3d(device_->CreateSamplerState(&sd, &sampClamp_), "CreateSamplerState", "clamp"))) {
         err = "sampler failed";
         return false;
     }
@@ -779,22 +878,24 @@ bool Renderer::Init(ID3D11Device* device, ID3D11DeviceContext* context, std::str
     init.pSysMem = &whitePx;
     init.SysMemPitch = 4;
     ComPtr<ID3D11Texture2D> whiteTex;
-    if (FAILED(device_->CreateTexture2D(&td, &init, &whiteTex))) {
+    if (FAILED(LogD3d(device_->CreateTexture2D(&td, &init, &whiteTex), "CreateTexture2D", "white", td))) {
         err = "white texture failed";
         return false;
     }
-    if (FAILED(device_->CreateShaderResourceView(whiteTex.Get(), nullptr, &white_))) {
+    if (FAILED(LogD3dView(device_->CreateShaderResourceView(whiteTex.Get(), nullptr, &white_), "CreateShaderResourceView",
+                          "white", DXGI_FORMAT_UNKNOWN, whiteTex.Get()))) {
         err = "white view failed";
         return false;
     }
     const uint32_t blackPx = 0xff000000u;
     init.pSysMem = &blackPx;
     ComPtr<ID3D11Texture2D> blackTex;
-    if (FAILED(device_->CreateTexture2D(&td, &init, &blackTex))) {
+    if (FAILED(LogD3d(device_->CreateTexture2D(&td, &init, &blackTex), "CreateTexture2D", "sky placeholder", td))) {
         err = "placeholder sky failed";
         return false;
     }
-    if (FAILED(device_->CreateShaderResourceView(blackTex.Get(), nullptr, &sky_))) {
+    if (FAILED(LogD3dView(device_->CreateShaderResourceView(blackTex.Get(), nullptr, &sky_), "CreateShaderResourceView",
+                          "sky placeholder", DXGI_FORMAT_UNKNOWN, blackTex.Get()))) {
         err = "placeholder sky view failed";
         return false;
     }
@@ -842,28 +943,32 @@ bool Renderer::Resize(int width, int height, int samples, DXGI_FORMAT colorForma
     td.Format = DXGI_FORMAT_D32_FLOAT;
     td.SampleDesc.Count = (UINT)samples;
     td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    HRESULT hr = device_->CreateTexture2D(&td, nullptr, &depth_);
+    HRESULT hr = LogD3d(device_->CreateTexture2D(&td, nullptr, &depth_), "CreateTexture2D", "eye depth", td);
     if (FAILED(hr)) {
         err = std::string("depth target ") + HResultText(hr);
+        ReleaseTargets();
         return false;
     }
-    hr = device_->CreateDepthStencilView(depth_, nullptr, &dsv_);
+    hr = LogD3dView(device_->CreateDepthStencilView(depth_, nullptr, &dsv_), "CreateDepthStencilView", "eye depth",
+                    DXGI_FORMAT_UNKNOWN, depth_);
     if (FAILED(hr)) {
-        err = "depth view failed";
+        err = std::string("depth view ") + HResultText(hr);
+        ReleaseTargets();
         return false;
     }
     if (samples > 1) {
         td.Format = colorFormat;
         td.BindFlags = D3D11_BIND_RENDER_TARGET;
-        hr = device_->CreateTexture2D(&td, nullptr, &msaaColor_);
+        hr = LogD3d(device_->CreateTexture2D(&td, nullptr, &msaaColor_), "CreateTexture2D", "MSAA color", td);
         if (FAILED(hr)) {
             err = std::string("MSAA color ") + HResultText(hr);
             ReleaseTargets();
             return false;
         }
-        hr = device_->CreateRenderTargetView(msaaColor_, nullptr, &msaaRtv_);
+        hr = LogD3dView(device_->CreateRenderTargetView(msaaColor_, nullptr, &msaaRtv_), "CreateRenderTargetView",
+                        "MSAA color", DXGI_FORMAT_UNKNOWN, msaaColor_);
         if (FAILED(hr)) {
-            err = "MSAA view failed";
+            err = std::string("MSAA view ") + HResultText(hr);
             ReleaseTargets();
             return false;
         }
@@ -889,11 +994,11 @@ void Renderer::UpdateHudTexture(const HudInfo& hud) {
                    L"scene %hs    A/B %s   now %s\n"
                    L"A %.0f%%    B %.0f%%\n"
                    L"%s\n"
-                   L"[ ] preset    , . step    M msaa    Space flip    H help",
+                   L"[ ] preset    , . step    M msaa    Space flip    H help%hs%hs",
                    hud.eyeW, hud.eyeH, hud.actualPct, hud.axisScale, hud.recW, hud.recH, hud.maxW, hud.maxH,
                    hud.clamped ? L"    CLAMPED" : L"", msaa, hud.gpuMs, hud.cpuMs, hud.budgetMs, hud.refreshHz,
                    hud.missed, SceneName(hud.scene), hud.ab ? L"on" : L"off", hud.ab ? (hud.abSlot ? L"B" : L"A") : L"-",
-                   hud.abA, hud.abB, sky);
+                   hud.abA, hud.abB, sky, hud.notice[0] ? "\n" : "", hud.notice);
     } else {
         swprintf_s(block,
                    L"Controls\n"
@@ -1034,8 +1139,10 @@ void Renderer::RenderMirror(ID3D11RenderTargetView* destRtv, int width, int heig
         td.Format = DXGI_FORMAT_D32_FLOAT;
         td.SampleDesc.Count = 1;
         td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        if (FAILED(device_->CreateTexture2D(&td, nullptr, &mirrorDepth_))) return;
-        if (FAILED(device_->CreateDepthStencilView(mirrorDepth_, nullptr, &mirrorDsv_))) return;
+        if (FAILED(LogD3d(device_->CreateTexture2D(&td, nullptr, &mirrorDepth_), "CreateTexture2D", "mirror depth", td))) return;
+        if (FAILED(LogD3dView(device_->CreateDepthStencilView(mirrorDepth_, nullptr, &mirrorDsv_), "CreateDepthStencilView",
+                              "mirror depth", DXGI_FORMAT_UNKNOWN, mirrorDepth_)))
+            return;
         mirrorW_ = width;
         mirrorH_ = height;
     }
@@ -1067,14 +1174,15 @@ bool Renderer::UploadSky(const float* rgba, int width, int height, std::string& 
     td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
     td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
     ComPtr<ID3D11Texture2D> tex;
-    HRESULT hr = device_->CreateTexture2D(&td, nullptr, &tex);
+    HRESULT hr = LogD3d(device_->CreateTexture2D(&td, nullptr, &tex), "CreateTexture2D", "sky", td);
     if (FAILED(hr)) {
         err = std::string("sky texture ") + HResultText(hr);
         return false;
     }
     context_->UpdateSubresource(tex.Get(), 0, nullptr, half.data(), (UINT)width * 8, 0);
     ID3D11ShaderResourceView* view = nullptr;
-    hr = device_->CreateShaderResourceView(tex.Get(), nullptr, &view);
+    hr = LogD3dView(device_->CreateShaderResourceView(tex.Get(), nullptr, &view), "CreateShaderResourceView", "sky",
+                    DXGI_FORMAT_UNKNOWN, tex.Get());
     if (FAILED(hr)) {
         err = "sky view failed";
         return false;
