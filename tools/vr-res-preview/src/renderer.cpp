@@ -1140,7 +1140,8 @@ void Renderer::Shutdown() {
     rsCull_ = rsNone_ = nullptr;
     cb_ = ib_ = vb_ = nullptr;
     layout_ = nullptr;
-    ps_ = vs_ = nullptr;
+    ps_ = nullptr;
+    vs_ = nullptr;
     device_ = nullptr;
     context_ = nullptr;
 }
