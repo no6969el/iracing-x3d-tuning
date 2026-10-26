@@ -20,6 +20,8 @@ On a 3840x3840-per-eye micro-OLED headset, iRacing at SteamVR 100% renders about
 3. In SteamVR's per-application video settings, leave **vr-res-preview.exe at 100%**. Raising that slider and the in-app percent multiplies them.
 4. From the kit, double-click `Start-Tuning-Menu.bat` and choose **VR RESOLUTION PREVIEW**. Or run `Launch-VrResPreview.bat` in this folder, or run `vr-res-preview.exe`.
 
+The program asks the runtime for OpenXR 1.0. SteamVR does not accept an OpenXR 1.1 instance. If startup fails, the dialog includes the OpenXR result name and code, and `vr-res-preview-startup.log` next to the exe records the active runtime, its name and version, and each call.
+
 The Windows build is the `vr-res-preview-win64` artifact on the [VR resolution preview](https://github.com/no6969el/iracing-x3d-tuning/actions/workflows/vr-res-preview.yml) workflow. Unzip it so `vr-res-preview.exe` is in `tools\vr-res-preview\dist\`. The dashboard looks there.
 
 The first launch downloads a CC0 8K HDRI (Poly Haven, "Kloofendal 48d Partly Cloudy", about 75 MB) into `cache` next to the exe. Until that finishes, the sky is procedural and the test patterns are already up. `--sky 16k` fetches the 16K file (about 260 MB). `--sky 4k` is smaller. `--sky none` skips the download. `--sky path\to\file.hdr` loads a local equirectangular HDR or image.

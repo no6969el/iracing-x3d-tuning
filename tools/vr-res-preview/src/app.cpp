@@ -9,6 +9,7 @@
 #endif
 
 #include <windows.h>
+#include <winreg.h>
 #include <shellapi.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -113,6 +114,133 @@ void Alert(const std::wstring& text) {
     WideToUtf8(text.c_str(), utf);
     Print(utf);
     MessageBoxW(nullptr, text.c_str(), L"VR Resolution Preview", MB_OK | MB_ICONERROR);
+}
+
+const char* XrResultName(XrResult result) {
+    switch (result) {
+        case XR_SUCCESS: return "XR_SUCCESS";
+        case XR_TIMEOUT_EXPIRED: return "XR_TIMEOUT_EXPIRED";
+        case XR_SESSION_LOSS_PENDING: return "XR_SESSION_LOSS_PENDING";
+        case XR_EVENT_UNAVAILABLE: return "XR_EVENT_UNAVAILABLE";
+        case XR_ERROR_VALIDATION_FAILURE: return "XR_ERROR_VALIDATION_FAILURE";
+        case XR_ERROR_RUNTIME_FAILURE: return "XR_ERROR_RUNTIME_FAILURE";
+        case XR_ERROR_OUT_OF_MEMORY: return "XR_ERROR_OUT_OF_MEMORY";
+        case XR_ERROR_API_VERSION_UNSUPPORTED: return "XR_ERROR_API_VERSION_UNSUPPORTED";
+        case XR_ERROR_INITIALIZATION_FAILED: return "XR_ERROR_INITIALIZATION_FAILED";
+        case XR_ERROR_FUNCTION_UNSUPPORTED: return "XR_ERROR_FUNCTION_UNSUPPORTED";
+        case XR_ERROR_FEATURE_UNSUPPORTED: return "XR_ERROR_FEATURE_UNSUPPORTED";
+        case XR_ERROR_EXTENSION_NOT_PRESENT: return "XR_ERROR_EXTENSION_NOT_PRESENT";
+        case XR_ERROR_LIMIT_REACHED: return "XR_ERROR_LIMIT_REACHED";
+        case XR_ERROR_SIZE_INSUFFICIENT: return "XR_ERROR_SIZE_INSUFFICIENT";
+        case XR_ERROR_HANDLE_INVALID: return "XR_ERROR_HANDLE_INVALID";
+        case XR_ERROR_INSTANCE_LOST: return "XR_ERROR_INSTANCE_LOST";
+        case XR_ERROR_SESSION_RUNNING: return "XR_ERROR_SESSION_RUNNING";
+        case XR_ERROR_SESSION_NOT_RUNNING: return "XR_ERROR_SESSION_NOT_RUNNING";
+        case XR_ERROR_SESSION_LOST: return "XR_ERROR_SESSION_LOST";
+        case XR_ERROR_SYSTEM_INVALID: return "XR_ERROR_SYSTEM_INVALID";
+        case XR_ERROR_PATH_INVALID: return "XR_ERROR_PATH_INVALID";
+        case XR_ERROR_PATH_COUNT_EXCEEDED: return "XR_ERROR_PATH_COUNT_EXCEEDED";
+        case XR_ERROR_PATH_FORMAT_INVALID: return "XR_ERROR_PATH_FORMAT_INVALID";
+        case XR_ERROR_PATH_UNSUPPORTED: return "XR_ERROR_PATH_UNSUPPORTED";
+        case XR_ERROR_LAYER_INVALID: return "XR_ERROR_LAYER_INVALID";
+        case XR_ERROR_LAYER_LIMIT_EXCEEDED: return "XR_ERROR_LAYER_LIMIT_EXCEEDED";
+        case XR_ERROR_SWAPCHAIN_RECT_INVALID: return "XR_ERROR_SWAPCHAIN_RECT_INVALID";
+        case XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED: return "XR_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED";
+        case XR_ERROR_ACTION_TYPE_MISMATCH: return "XR_ERROR_ACTION_TYPE_MISMATCH";
+        case XR_ERROR_SESSION_NOT_READY: return "XR_ERROR_SESSION_NOT_READY";
+        case XR_ERROR_SESSION_NOT_STOPPING: return "XR_ERROR_SESSION_NOT_STOPPING";
+        case XR_ERROR_TIME_INVALID: return "XR_ERROR_TIME_INVALID";
+        case XR_ERROR_REFERENCE_SPACE_UNSUPPORTED: return "XR_ERROR_REFERENCE_SPACE_UNSUPPORTED";
+        case XR_ERROR_FILE_ACCESS_ERROR: return "XR_ERROR_FILE_ACCESS_ERROR";
+        case XR_ERROR_FILE_CONTENTS_INVALID: return "XR_ERROR_FILE_CONTENTS_INVALID";
+        case XR_ERROR_FORM_FACTOR_UNSUPPORTED: return "XR_ERROR_FORM_FACTOR_UNSUPPORTED";
+        case XR_ERROR_FORM_FACTOR_UNAVAILABLE: return "XR_ERROR_FORM_FACTOR_UNAVAILABLE";
+        case XR_ERROR_API_LAYER_NOT_PRESENT: return "XR_ERROR_API_LAYER_NOT_PRESENT";
+        case XR_ERROR_CALL_ORDER_INVALID: return "XR_ERROR_CALL_ORDER_INVALID";
+        case XR_ERROR_GRAPHICS_DEVICE_INVALID: return "XR_ERROR_GRAPHICS_DEVICE_INVALID";
+        case XR_ERROR_POSE_INVALID: return "XR_ERROR_POSE_INVALID";
+        case XR_ERROR_INDEX_OUT_OF_RANGE: return "XR_ERROR_INDEX_OUT_OF_RANGE";
+        case XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED: return "XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED";
+        case XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED: return "XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED";
+        case XR_ERROR_NAME_DUPLICATED: return "XR_ERROR_NAME_DUPLICATED";
+        case XR_ERROR_NAME_INVALID: return "XR_ERROR_NAME_INVALID";
+        case XR_ERROR_ACTIONSET_NOT_ATTACHED: return "XR_ERROR_ACTIONSET_NOT_ATTACHED";
+        case XR_ERROR_ACTIONSETS_ALREADY_ATTACHED: return "XR_ERROR_ACTIONSETS_ALREADY_ATTACHED";
+        case XR_ERROR_LOCALIZED_NAME_DUPLICATED: return "XR_ERROR_LOCALIZED_NAME_DUPLICATED";
+        case XR_ERROR_LOCALIZED_NAME_INVALID: return "XR_ERROR_LOCALIZED_NAME_INVALID";
+        case XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING: return "XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING";
+        case XR_ERROR_RUNTIME_UNAVAILABLE: return "XR_ERROR_RUNTIME_UNAVAILABLE";
+        default: return "XR_UNKNOWN_RESULT";
+    }
+}
+
+struct StartupLog {
+    FILE* file = nullptr;
+
+    void Open() {
+        file = _wfopen((ExeDir() + L"\\vr-res-preview-startup.log").c_str(), L"wb");
+        Line("vr-res-preview startup");
+    }
+
+    void Line(const std::string& text) {
+        Print(text);
+        if (!file) return;
+        std::fputs(text.c_str(), file);
+        std::fputc('\n', file);
+        std::fflush(file);
+    }
+
+    void Result(const char* call, XrResult result) {
+        char line[256];
+        std::snprintf(line, sizeof(line), "%s -> %s (%d)", call, XrResultName(result), (int)result);
+        Line(line);
+    }
+
+    void Close() {
+        if (!file) return;
+        std::fclose(file);
+        file = nullptr;
+    }
+};
+
+StartupLog g_log;
+
+void AlertOpenXr(const wchar_t* text, XrResult result) {
+    char code[96];
+    std::snprintf(code, sizeof(code), "%s (%d)", XrResultName(result), (int)result);
+    std::string utf;
+    WideToUtf8(text, utf);
+    g_log.Line(std::string("dialog: ") + utf + " [" + code + "]");
+    std::wstring message = text;
+    message += L"\n\n";
+    message += Utf8ToWide(code);
+    message += L"\n\nDetails are in vr-res-preview-startup.log next to this program.";
+    Alert(message);
+}
+
+void LogActiveRuntime() {
+    auto read = [](REGSAM view, const char* label) {
+        HKEY key = nullptr;
+        LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Khronos\\OpenXR\\1", 0, KEY_READ | view, &key);
+        if (rc != ERROR_SUCCESS) {
+            g_log.Line(std::string(label) + " OpenXR key not opened (" + std::to_string((long)rc) + ")");
+            return;
+        }
+        wchar_t buf[1024] = {};
+        DWORD bytes = sizeof(buf);
+        DWORD type = 0;
+        rc = RegQueryValueExW(key, L"ActiveRuntime", nullptr, &type, reinterpret_cast<BYTE*>(buf), &bytes);
+        RegCloseKey(key);
+        if (rc != ERROR_SUCCESS || type != REG_SZ) {
+            g_log.Line(std::string(label) + " ActiveRuntime not read (" + std::to_string((long)rc) + ")");
+            return;
+        }
+        std::string path;
+        WideToUtf8(buf, path);
+        g_log.Line(std::string(label) + " ActiveRuntime=" + path);
+    };
+    read(KEY_WOW64_64KEY, "HKLM64");
+    read(KEY_WOW64_32KEY, "HKLM32");
 }
 
 bool ParseArgs(Options& opt) {
@@ -309,6 +437,9 @@ struct App {
     XrEnvironmentBlendMode blend = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     bool sessionRunning = false;
     bool quit = false;
+    bool starting = true;
+    std::wstring status = L"Starting OpenXR…";
+    XrResult lastOpenXr = XR_SUCCESS;
     DXGI_FORMAT colorFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 
     XrActionSet actionSet = XR_NULL_HANDLE;
@@ -448,7 +579,13 @@ struct App {
         eyeH = (int)h;
         if (forceSwapchain || sizeChanged) {
             if (!RecreateSwapchains()) {
-                Alert(L"Could not recreate the OpenXR swapchain at this resolution. The previous size is still in use.");
+                if (XR_FAILED(lastOpenXr)) {
+                    AlertOpenXr(
+                        L"Could not recreate the OpenXR swapchain at this resolution. The previous size is still in use.",
+                        lastOpenXr);
+                } else {
+                    Alert(L"Could not recreate the OpenXR swapchain at this resolution. The previous size is still in use.");
+                }
             }
         } else if (!ResizeMsaa()) {
             Alert(L"This MSAA level could not be created at the current resolution.");
@@ -484,6 +621,7 @@ struct App {
 
     bool RecreateSwapchains() {
         DestroySwapchains();
+        lastOpenXr = XR_SUCCESS;
         if (!ResizeMsaa()) return false;
         for (int i = 0; i < viewCount; ++i) {
             XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -496,12 +634,9 @@ struct App {
             ci.arraySize = 1;
             ci.mipCount = 1;
             XrResult result = xrCreateSwapchain(session, &ci, &eyes[i].swapchain);
-            if (XR_FAILED(result)) {
-                char buf[XR_MAX_RESULT_STRING_SIZE] = {};
-                xrResultToString(instance, result, buf);
-                Print(std::string("xrCreateSwapchain failed: ") + buf);
-                return false;
-            }
+            lastOpenXr = result;
+            g_log.Result("xrCreateSwapchain", result);
+            if (XR_FAILED(result)) return false;
             uint32_t n = 0;
             xrEnumerateSwapchainImages(eyes[i].swapchain, 0, &n, nullptr);
             eyes[i].images.resize(n);
@@ -511,6 +646,8 @@ struct App {
             }
             result = xrEnumerateSwapchainImages(eyes[i].swapchain, n, &n,
                                                reinterpret_cast<XrSwapchainImageBaseHeader*>(eyes[i].images.data()));
+            lastOpenXr = result;
+            g_log.Result("xrEnumerateSwapchainImages", result);
             if (XR_FAILED(result)) return false;
             eyes[i].w = eyeW;
             eyes[i].h = eyeH;
@@ -700,14 +837,23 @@ struct App {
 
     void RefreshViewConfig() {
         uint32_t n = 0;
-        xrEnumerateViewConfigurationViews(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &n, nullptr);
+        XrResult result = xrEnumerateViewConfigurationViews(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+                                                           0, &n, nullptr);
+        lastOpenXr = result;
+        g_log.Result("xrEnumerateViewConfigurationViews count", result);
+        if (XR_FAILED(result)) {
+            viewCount = 0;
+            return;
+        }
         if (n > 2) n = 2;
         for (uint32_t i = 0; i < n; ++i) {
             viewConfig[i] = {XR_TYPE_VIEW_CONFIGURATION_VIEW};
         }
-        xrEnumerateViewConfigurationViews(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n,
-                                          viewConfig);
-        viewCount = (int)n;
+        result = xrEnumerateViewConfigurationViews(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n,
+                                                   viewConfig);
+        lastOpenXr = result;
+        g_log.Result("xrEnumerateViewConfigurationViews", result);
+        viewCount = XR_SUCCEEDED(result) ? (int)n : 0;
     }
 
     void ConsumeSky() {
@@ -890,14 +1036,24 @@ struct App {
         XrSessionActionSetsAttachInfo attach{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
         attach.countActionSets = 1;
         attach.actionSets = &actionSet;
-        return XR_SUCCEEDED(xrAttachSessionActionSets(session, &attach));
+        XrResult attached = xrAttachSessionActionSets(session, &attach);
+        g_log.Result("xrAttachSessionActionSets", attached);
+        return XR_SUCCEEDED(attached);
     }
 
     bool PickFormat() {
         uint32_t n = 0;
-        xrEnumerateSwapchainFormats(session, 0, &n, nullptr);
+        XrResult result = xrEnumerateSwapchainFormats(session, 0, &n, nullptr);
+        lastOpenXr = result;
+        g_log.Result("xrEnumerateSwapchainFormats count", result);
+        if (XR_FAILED(result)) return false;
         std::vector<int64_t> formats(n);
-        if (n) xrEnumerateSwapchainFormats(session, n, &n, formats.data());
+        if (n) {
+            result = xrEnumerateSwapchainFormats(session, n, &n, formats.data());
+            lastOpenXr = result;
+            g_log.Result("xrEnumerateSwapchainFormats", result);
+            if (XR_FAILED(result)) return false;
+        }
         const int64_t prefer[] = {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
                                   DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
         for (int64_t want : prefer) {
@@ -914,17 +1070,61 @@ struct App {
         return false;
     }
 
+    void ShowStatus(const wchar_t* text) {
+        status = text;
+        if (!hwnd) return;
+        SetWindowTextW(hwnd, text);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        UpdateWindow(hwnd);
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) quit = true;
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
     bool CreateXrDevice() {
+        ShowStatus(L"Reading the active OpenXR runtime…");
+        g_log.Open();
+        char versions[160];
+        std::snprintf(versions, sizeof(versions),
+                      "header XR_CURRENT_API_VERSION %u.%u.%u; requesting XR_API_VERSION_1_0 %u.%u.%u",
+                      XR_VERSION_MAJOR(XR_CURRENT_API_VERSION), XR_VERSION_MINOR(XR_CURRENT_API_VERSION),
+                      XR_VERSION_PATCH(XR_CURRENT_API_VERSION), XR_VERSION_MAJOR(XR_API_VERSION_1_0),
+                      XR_VERSION_MINOR(XR_API_VERSION_1_0), XR_VERSION_PATCH(XR_API_VERSION_1_0));
+        g_log.Line(versions);
+        LogActiveRuntime();
+        if (quit) return false;
+
+        ShowStatus(L"Checking the OpenXR runtime for D3D11…");
         uint32_t extCount = 0;
-        xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
+        XrResult result = xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
+        g_log.Result("xrEnumerateInstanceExtensionProperties count", result);
+        if (XR_FAILED(result)) {
+            AlertOpenXr(L"OpenXR could not list runtime extensions. Start SteamVR and set it as the OpenXR runtime.",
+                        result);
+            return false;
+        }
         std::vector<XrExtensionProperties> exts(extCount);
         for (auto& e : exts) e.type = XR_TYPE_EXTENSION_PROPERTIES;
-        xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, exts.data());
+        if (extCount) {
+            result = xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, exts.data());
+            g_log.Result("xrEnumerateInstanceExtensionProperties", result);
+            if (XR_FAILED(result)) {
+                AlertOpenXr(L"OpenXR could not list runtime extensions. Start SteamVR and set it as the OpenXR runtime.",
+                            result);
+                return false;
+            }
+        }
         bool haveD3d = false;
         for (auto& e : exts)
             if (std::strcmp(e.extensionName, XR_KHR_D3D11_ENABLE_EXTENSION_NAME) == 0) haveD3d = true;
+        g_log.Line(std::string("D3D11 extension ") + (haveD3d ? "present" : "missing") + ", count " +
+                   std::to_string(extCount));
         if (!haveD3d) {
-            Alert(L"The active OpenXR runtime does not expose D3D11. Start SteamVR and set it as the OpenXR runtime.");
+            AlertOpenXr(L"The active OpenXR runtime does not expose D3D11. Start SteamVR and set it as the OpenXR runtime.",
+                        XR_ERROR_EXTENSION_NOT_PRESENT);
             return false;
         }
         const char* enabled[] = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
@@ -934,34 +1134,78 @@ struct App {
         ici.applicationInfo.applicationVersion = 1;
         std::snprintf(ici.applicationInfo.engineName, sizeof(ici.applicationInfo.engineName), "vr-res-preview");
         ici.applicationInfo.engineVersion = 1;
-        ici.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+        // This SDK's XR_CURRENT_API_VERSION is 1.1. SteamVR's runtime implements
+        // OpenXR 1.0 and rejects 1.1 with XR_ERROR_API_VERSION_UNSUPPORTED.
+        // Extension enumeration still succeeds, which is why that check passed.
+        ici.applicationInfo.apiVersion = XR_API_VERSION_1_0;
         ici.enabledExtensionCount = 1;
         ici.enabledExtensionNames = enabled;
-        XrResult result = xrCreateInstance(&ici, &instance);
+        ShowStatus(L"Creating the OpenXR instance…");
+        result = xrCreateInstance(&ici, &instance);
+        g_log.Result("xrCreateInstance", result);
+        if (result == XR_ERROR_API_VERSION_UNSUPPORTED) {
+            ici.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
+            result = xrCreateInstance(&ici, &instance);
+            g_log.Result("xrCreateInstance api 1.0.0", result);
+        }
+        lastOpenXr = result;
         if (XR_FAILED(result)) {
-            Alert(L"OpenXR did not start. Start SteamVR, set it as the active OpenXR runtime, and run this again.");
+            const wchar_t* hint = L"OpenXR did not start. Start SteamVR, set it as the active OpenXR runtime, and run this again.";
+            if (result == XR_ERROR_API_VERSION_UNSUPPORTED)
+                hint = L"The OpenXR runtime rejected the requested API version.";
+            else if (result == XR_ERROR_RUNTIME_UNAVAILABLE)
+                hint = L"No OpenXR runtime is active. Start SteamVR and set it as the OpenXR runtime.";
+            else if (result == XR_ERROR_LIMIT_REACHED)
+                hint = L"The OpenXR runtime refused another instance. Close other OpenXR apps and try again.";
+            else if (result == XR_ERROR_EXTENSION_NOT_PRESENT)
+                hint = L"The OpenXR runtime does not provide the D3D11 extension.";
+            AlertOpenXr(hint, result);
             return false;
         }
+        XrInstanceProperties props{XR_TYPE_INSTANCE_PROPERTIES};
+        result = xrGetInstanceProperties(instance, &props);
+        g_log.Result("xrGetInstanceProperties", result);
+        if (XR_SUCCEEDED(result)) {
+            char runtime[192];
+            std::snprintf(runtime, sizeof(runtime), "runtime %s %u.%u.%u", props.runtimeName,
+                          XR_VERSION_MAJOR(props.runtimeVersion), XR_VERSION_MINOR(props.runtimeVersion),
+                          XR_VERSION_PATCH(props.runtimeVersion));
+            g_log.Line(runtime);
+        }
+        ShowStatus(L"Looking for the headset…");
         XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
         sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
         result = xrGetSystem(instance, &sgi, &systemId);
+        lastOpenXr = result;
+        g_log.Result("xrGetSystem", result);
         if (XR_FAILED(result)) {
-            Alert(L"No headset is visible to OpenXR. Put the headset on, or wake it, with SteamVR already running.");
+            AlertOpenXr(L"No headset is visible to OpenXR. Put the headset on, or wake it, with SteamVR already running.",
+                        result);
             return false;
         }
+        ShowStatus(L"Creating the graphics device…");
         PFN_xrGetD3D11GraphicsRequirementsKHR getReq = nullptr;
-        xrGetInstanceProcAddr(instance, "xrGetD3D11GraphicsRequirementsKHR", (PFN_xrVoidFunction*)&getReq);
-        if (!getReq) {
-            Alert(L"OpenXR did not provide the D3D11 graphics requirement function.");
+        result = xrGetInstanceProcAddr(instance, "xrGetD3D11GraphicsRequirementsKHR", (PFN_xrVoidFunction*)&getReq);
+        g_log.Result("xrGetInstanceProcAddr xrGetD3D11GraphicsRequirementsKHR", result);
+        if (XR_FAILED(result) || !getReq) {
+            AlertOpenXr(L"OpenXR did not provide the D3D11 graphics requirement function.",
+                        XR_FAILED(result) ? result : XR_ERROR_FUNCTION_UNSUPPORTED);
             return false;
         }
         XrGraphicsRequirementsD3D11KHR req{XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR};
-        if (XR_FAILED(getReq(instance, systemId, &req))) {
-            Alert(L"Could not read the OpenXR graphics adapter.");
+        result = getReq(instance, systemId, &req);
+        lastOpenXr = result;
+        g_log.Result("xrGetD3D11GraphicsRequirementsKHR", result);
+        if (XR_FAILED(result)) {
+            AlertOpenXr(L"Could not read the OpenXR graphics adapter.", result);
             return false;
         }
         ComPtr<IDXGIFactory1> factory;
-        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) return false;
+        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+            g_log.Line("CreateDXGIFactory1 failed");
+            Alert(L"DirectX could not create a DXGI factory.");
+            return false;
+        }
         ComPtr<IDXGIAdapter1> adapter;
         for (UINT i = 0;; ++i) {
             ComPtr<IDXGIAdapter1> candidate;
@@ -989,28 +1233,38 @@ struct App {
             Alert(L"The GPU feature level is below what the OpenXR runtime requires.");
             return false;
         }
+        ShowStatus(L"Creating the OpenXR session…");
         XrGraphicsBindingD3D11KHR binding{XR_TYPE_GRAPHICS_BINDING_D3D11_KHR};
         binding.device = device.Get();
         XrSessionCreateInfo sci{XR_TYPE_SESSION_CREATE_INFO};
         sci.next = &binding;
         sci.systemId = systemId;
-        if (XR_FAILED(xrCreateSession(instance, &sci, &session))) {
-            Alert(L"OpenXR session creation failed.");
+        result = xrCreateSession(instance, &sci, &session);
+        lastOpenXr = result;
+        g_log.Result("xrCreateSession", result);
+        if (XR_FAILED(result)) {
+            AlertOpenXr(L"OpenXR session creation failed.", result);
             return false;
         }
         XrReferenceSpaceCreateInfo spaceInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
         spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
         spaceInfo.poseInReferenceSpace.orientation.w = 1.f;
-        if (XR_FAILED(xrCreateReferenceSpace(session, &spaceInfo, &space))) {
+        result = xrCreateReferenceSpace(session, &spaceInfo, &space);
+        g_log.Result("xrCreateReferenceSpace LOCAL", result);
+        if (XR_FAILED(result)) {
             spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
-            if (XR_FAILED(xrCreateReferenceSpace(session, &spaceInfo, &space))) {
-                Alert(L"Could not create an OpenXR reference space.");
+            result = xrCreateReferenceSpace(session, &spaceInfo, &space);
+            g_log.Result("xrCreateReferenceSpace STAGE", result);
+            if (XR_FAILED(result)) {
+                lastOpenXr = result;
+                AlertOpenXr(L"Could not create an OpenXR reference space.", result);
                 return false;
             }
         }
         uint32_t blendCount = 0;
-        xrEnumerateEnvironmentBlendModes(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &blendCount,
-                                         nullptr);
+        result = xrEnumerateEnvironmentBlendModes(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0,
+                                                 &blendCount, nullptr);
+        g_log.Result("xrEnumerateEnvironmentBlendModes", result);
         std::vector<XrEnvironmentBlendMode> blends(blendCount);
         if (blendCount)
             xrEnumerateEnvironmentBlendModes(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, blendCount,
@@ -1019,12 +1273,14 @@ struct App {
         for (auto mode : blends)
             if (mode == XR_ENVIRONMENT_BLEND_MODE_OPAQUE) blend = mode;
         if (!PickFormat()) {
-            Alert(L"The runtime did not offer a color swapchain format.");
+            AlertOpenXr(L"The runtime did not offer a color swapchain format.", lastOpenXr);
             return false;
         }
-        if (!SetupActions()) Print("Controller actions were not attached. Keyboard still works.");
+        if (!SetupActions()) g_log.Line("Controller actions were not attached. Keyboard still works.");
+        ShowStatus(L"Building the test scene…");
         std::string err;
         if (!renderer.Init(device.Get(), context.Get(), err)) {
+            g_log.Line(std::string("renderer: ") + err);
             Alert(Utf8ToWide(err));
             return false;
         }
@@ -1036,7 +1292,14 @@ struct App {
             device->CreateQuery(&qd, &timers[i].t1);
         }
         RefreshViewConfig();
-        return viewCount > 0;
+        if (viewCount <= 0) {
+            g_log.Line("startup finished with no views");
+            AlertOpenXr(L"OpenXR did not report a stereo view configuration.", lastOpenXr);
+            return false;
+        }
+        g_log.Line("startup complete");
+        ShowStatus(L"Waiting for the headset session…");
+        return true;
     }
 
     bool CreateMirror() {
@@ -1301,6 +1564,7 @@ struct App {
         space = XR_NULL_HANDLE;
         session = XR_NULL_HANDLE;
         instance = XR_NULL_HANDLE;
+        g_log.Close();
     }
 };
 
@@ -1313,6 +1577,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (msg == WM_DESTROY) {
         PostQuitMessage(0);
+        return 0;
+    }
+    if (msg == WM_PAINT && g_app && g_app->starting && !g_app->windowSwap) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        HBRUSH brush = CreateSolidBrush(RGB(16, 20, 28));
+        FillRect(hdc, &rc, brush);
+        DeleteObject(brush);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(232, 236, 240));
+        DrawTextW(hdc, g_app->status.c_str(), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        EndPaint(hwnd, &ps);
         return 0;
     }
     if (msg == WM_SIZE && g_app && g_app->context && g_app->windowSwap && wp != SIZE_MINIMIZED) {
@@ -1531,18 +1809,21 @@ int main() {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = L"VrResPreview";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = CreateSolidBrush(RGB(16, 20, 28));
     RegisterClassW(&wc);
     RECT rect{0, 0, app.windowW, app.windowH};
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
     app.hwnd = CreateWindowW(L"VrResPreview", L"VR Resolution Preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                              rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, wc.hInstance, nullptr);
     ShowWindow(app.hwnd, SW_SHOW);
+    app.ShowStatus(L"Starting OpenXR…");
 
     if (!app.CreateXrDevice()) {
         app.Shutdown();
         return 1;
     }
-    app.CreateMirror();
+    if (!app.CreateMirror()) g_log.Line("desktop mirror was not created");
+    app.starting = false;
     app.OpenCsv();
     app.StartSky();
     Print("Keyboard: [ ] preset, comma/period +/-5%, 1-7 presets, M msaa, F5/F6 save A/B, Space flip, V scene, H help, Esc quit.");
