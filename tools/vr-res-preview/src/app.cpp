@@ -50,6 +50,7 @@ const char* kCsvHeader =
 
 struct Options {
     bool smoke = false;
+    bool d3dDebug = false;
     bool help = false;
     float pct = 100.f;
     int msaa = 1;
@@ -174,6 +175,20 @@ const char* XrResultName(XrResult result) {
     }
 }
 
+const char* SessionStateName(XrSessionState state) {
+    switch (state) {
+        case XR_SESSION_STATE_IDLE: return "IDLE";
+        case XR_SESSION_STATE_READY: return "READY";
+        case XR_SESSION_STATE_SYNCHRONIZED: return "SYNCHRONIZED";
+        case XR_SESSION_STATE_VISIBLE: return "VISIBLE";
+        case XR_SESSION_STATE_FOCUSED: return "FOCUSED";
+        case XR_SESSION_STATE_STOPPING: return "STOPPING";
+        case XR_SESSION_STATE_LOSS_PENDING: return "LOSS_PENDING";
+        case XR_SESSION_STATE_EXITING: return "EXITING";
+        default: return "UNKNOWN";
+    }
+}
+
 struct StartupLog {
     FILE* file = nullptr;
 
@@ -255,6 +270,7 @@ bool ParseArgs(Options& opt) {
             return true;
         };
         if (a == L"--smoke") opt.smoke = true;
+        else if (a == L"--d3d-debug") opt.d3dDebug = true;
         else if (a == L"--help" || a == L"-h" || a == L"/?") opt.help = true;
         else if (a == L"--pct" || a == L"--scale") {
             std::wstring v;
@@ -290,7 +306,8 @@ void PrintUsage() {
         "  --pct <50-400>     starting SteamVR-style pixel percent (default 100)\n"
         "  --msaa <1|2|4|8>   starting MSAA (default 1)\n"
         "  --sky <8k|16k|4k|none|file>   skybox (default 8k, downloaded on first run)\n"
-        "  --smoke            offscreen shader/scene check, no headset\n");
+        "  --smoke            offscreen shader/scene check, no headset\n"
+        "  --d3d-debug        D3D11 debug layer; its messages go to the startup log\n");
 }
 
 const wchar_t* SkyUrl(int sky) {
@@ -475,6 +492,16 @@ struct App {
     float axisScale = 1.f;
     int eyeW = 0, eyeH = 0;
     int recW = 0, recH = 0, maxW = 0, maxH = 0;
+    float goodPct = 0.f;  // last scale and MSAA that built, 0 until one has
+    int goodMsaa = 1;
+    bool restoring = false;
+    int logFrames = 0;  // frames left to log after a resize
+    int lastShouldRender = -1;
+    ComPtr<ID3D11InfoQueue> infoQueue;
+    int debugLines = 0;
+    XrResult lastLocate = XR_SUCCESS;
+    std::string notice;
+    ULONGLONG noticeUntil = 0;
 
     TimerSlot timers[3];
     int timerWrite = 0;
@@ -531,10 +558,72 @@ struct App {
 
     bool MsaaSupported(int samples) const {
         if (samples <= 1) return true;
-        UINT q = 0;
         if (!device) return false;
-        device->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM, (UINT)samples, &q);
-        return q > 0;
+        UINT color = 0, depth = 0;
+        device->CheckMultisampleQualityLevels(colorFormat, (UINT)samples, &color);
+        device->CheckMultisampleQualityLevels(DXGI_FORMAT_D32_FLOAT, (UINT)samples, &depth);
+        return color > 0 && depth > 0;
+    }
+
+    // Copies D3D11 debug layer messages into the log. Capped so a per-frame warning cannot flood it.
+    void DrainDebugMessages() {
+        if (!infoQueue) return;
+        const UINT64 n = infoQueue->GetNumStoredMessages();
+        for (UINT64 i = 0; i < n && debugLines < 300; ++i) {
+            SIZE_T size = 0;
+            if (FAILED(infoQueue->GetMessage(i, nullptr, &size)) || size == 0) continue;
+            std::vector<char> buf(size);
+            auto* m = reinterpret_cast<D3D11_MESSAGE*>(buf.data());
+            if (FAILED(infoQueue->GetMessage(i, m, &size))) continue;
+            static const char* kSeverity[] = {"CORRUPTION", "ERROR", "WARNING", "INFO", "MESSAGE"};
+            const char* sev = (UINT)m->Severity < 5 ? kSeverity[m->Severity] : "?";
+            const size_t len = m->DescriptionByteLength ? m->DescriptionByteLength - 1 : 0;
+            g_log.Line(std::string("D3D11 debug ") + sev + ": " + std::string(m->pDescription, len));
+            ++debugLines;
+        }
+        infoQueue->ClearStoredMessages();
+    }
+
+    // Shown on the HUD and in the window title for a few seconds, and logged.
+    void SetNotice(const std::string& text) {
+        notice = text;
+        noticeUntil = GetTickCount64() + 8000;
+        g_log.Line("notice: " + text);
+    }
+
+    // The size or MSAA level just asked for could not be created. Go back to the last one that worked.
+    void SizeFailed(const std::string& why) {
+        DestroySwapchains();
+        char line[512];
+        std::snprintf(line, sizeof(line), "%.0f%% (%dx%d) MSAA %d could not be created: %s", pct, eyeW, eyeH, msaa,
+                      why.c_str());
+        g_log.Line(line);
+        if (!restoring && goodPct > 0.f && (std::fabs(goodPct - pct) > 0.05f || goodMsaa != msaa)) {
+            const float failedPct = pct;
+            const int failedMsaa = msaa;
+            restoring = true;
+            pct = goodPct;
+            msaa = goodMsaa;
+            if (ab) {
+                if (abSlot == 0) abA = pct;
+                else abB = pct;
+            }
+            ApplySize(true);
+            restoring = false;
+            if (eyes[0].swapchain) {
+                std::snprintf(line, sizeof(line), "%.0f%% MSAA %d did not fit (%s). Back to %.0f%% MSAA %d.", failedPct,
+                              failedMsaa, why.c_str(), pct, msaa);
+                SetNotice(line);
+                return;
+            }
+        }
+        std::wstring text = L"Could not create the VR render targets at this resolution, and no earlier size could be "
+                            L"restored.\n\nFailing call:\n";
+        const std::string failure = LastD3dFailure();
+        text += Utf8ToWide(failure.empty() ? why : failure);
+        text += L"\n\nDetails are in vr-res-preview-startup.log next to this program.";
+        g_log.Line("dialog: " + (failure.empty() ? why : failure));
+        Alert(text);
     }
 
     void ApplySize(bool forceSwapchain) {
@@ -578,17 +667,16 @@ struct App {
         eyeW = (int)w;
         eyeH = (int)h;
         if (forceSwapchain || sizeChanged) {
-            if (!RecreateSwapchains()) {
-                if (XR_FAILED(lastOpenXr)) {
-                    AlertOpenXr(
-                        L"Could not recreate the OpenXR swapchain at this resolution. The previous size is still in use.",
-                        lastOpenXr);
-                } else {
-                    Alert(L"Could not recreate the OpenXR swapchain at this resolution. The previous size is still in use.");
-                }
+            if (RecreateSwapchains()) {
+                MarkGood();
+            } else {
+                SizeFailed(XR_FAILED(lastOpenXr) ? std::string("OpenXR swapchain ") + XrResultName(lastOpenXr)
+                                                 : LastD3dFailure(true));
             }
-        } else if (!ResizeMsaa()) {
-            Alert(L"This MSAA level could not be created at the current resolution.");
+        } else {
+            ClearD3dFailure();
+            if (ResizeMsaa()) MarkGood();
+            else SizeFailed(LastD3dFailure(true));
         }
         char line[192];
         std::snprintf(line, sizeof(line), "scale %.0f%%  actual %.1f%%  %dx%d  MSAA %d  scene %s%s", pct, actualPct, eyeW,
@@ -596,13 +684,23 @@ struct App {
         Print(line);
     }
 
+    void MarkGood() {
+        goodPct = pct;
+        goodMsaa = msaa;
+        logFrames = 3;
+    }
+
     bool ResizeMsaa() {
         std::string err;
         if (renderer.Resize(eyeW, eyeH, msaa, colorFormat, err)) return true;
-        Print(err);
         if (msaa != 1) {
+            char line[256];
+            std::snprintf(line, sizeof(line), "MSAA %dx did not fit at %dx%d (%s). MSAA is off.", msaa, eyeW, eyeH,
+                          err.c_str());
             msaa = 1;
-            return renderer.Resize(eyeW, eyeH, 1, colorFormat, err);
+            if (!renderer.Resize(eyeW, eyeH, 1, colorFormat, err)) return false;
+            SetNotice(line);
+            return true;
         }
         return false;
     }
@@ -622,6 +720,7 @@ struct App {
     bool RecreateSwapchains() {
         DestroySwapchains();
         lastOpenXr = XR_SUCCESS;
+        ClearD3dFailure();
         if (!ResizeMsaa()) return false;
         for (int i = 0; i < viewCount; ++i) {
             XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -652,8 +751,23 @@ struct App {
             eyes[i].w = eyeW;
             eyes[i].h = eyeH;
             for (uint32_t k = 0; k < n; ++k) {
+                // Runtimes may hand back typeless textures (SteamVR does for sRGB), so the view names the format.
+                D3D11_TEXTURE2D_DESC td{};
+                eyes[i].images[k].texture->GetDesc(&td);
+                D3D11_RENDER_TARGET_VIEW_DESC rd{};
+                rd.Format = colorFormat;
+                if (td.ArraySize > 1) {
+                    rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+                    rd.Texture2DArray.ArraySize = 1;
+                } else {
+                    rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+                }
                 ID3D11RenderTargetView* rtv = nullptr;
-                if (FAILED(device->CreateRenderTargetView(eyes[i].images[k].texture, nullptr, &rtv))) return false;
+                char what[48];
+                std::snprintf(what, sizeof(what), "eye %d image %u", i, k);
+                if (FAILED(LogD3dView(device->CreateRenderTargetView(eyes[i].images[k].texture, &rd, &rtv),
+                                      "CreateRenderTargetView", what, rd.Format, eyes[i].images[k].texture)))
+                    return false;
                 eyes[i].rtvs.push_back(rtv);
                 eyes[i].textures.push_back(eyes[i].images[k].texture);
             }
@@ -803,6 +917,7 @@ struct App {
         while (instance && xrPollEvent(instance, &event) == XR_SUCCESS) {
             if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
                 auto* e = reinterpret_cast<XrEventDataSessionStateChanged*>(&event);
+                g_log.Line(std::string("session state ") + SessionStateName(e->state));
                 switch (e->state) {
                     case XR_SESSION_STATE_READY: {
                         XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
@@ -1087,6 +1202,7 @@ struct App {
     bool CreateXrDevice() {
         ShowStatus(L"Reading the active OpenXR runtime…");
         g_log.Open();
+        SetD3dLogSink([](const std::string& line) { g_log.Line(line); });
         char versions[160];
         std::snprintf(versions, sizeof(versions),
                       "header XR_CURRENT_API_VERSION %u.%u.%u; requesting XR_API_VERSION_1_0 %u.%u.%u",
@@ -1223,8 +1339,23 @@ struct App {
         }
         const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
         D3D_FEATURE_LEVEL got = D3D_FEATURE_LEVEL_11_0;
-        HRESULT hr = D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                                       levels, 2, D3D11_SDK_VERSION, &device, &got, &context);
+        UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        if (opt.d3dDebug) flags |= D3D11_CREATE_DEVICE_DEBUG;
+        HRESULT hr = D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, flags, levels, 2,
+                                       D3D11_SDK_VERSION, &device, &got, &context);
+        if (FAILED(hr) && opt.d3dDebug) {
+            g_log.Line("D3D11 debug layer not available (install Graphics Tools); continuing without it");
+            flags &= ~D3D11_CREATE_DEVICE_DEBUG;
+            hr = D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, flags, levels, 2, D3D11_SDK_VERSION,
+                                   &device, &got, &context);
+        }
+        if (SUCCEEDED(hr) && (flags & D3D11_CREATE_DEVICE_DEBUG)) device.As(&infoQueue);
+        {
+            char line[96];
+            std::snprintf(line, sizeof(line), "D3D11CreateDevice -> %s (0x%08X) feature level 0x%X", HResultName(hr),
+                          (unsigned)hr, (unsigned)got);
+            g_log.Line(line);
+        }
         if (FAILED(hr)) {
             Alert(L"D3D11 device creation failed on the OpenXR adapter.");
             return false;
@@ -1286,10 +1417,10 @@ struct App {
         }
         for (int i = 0; i < 3; ++i) {
             D3D11_QUERY_DESC qd{D3D11_QUERY_TIMESTAMP_DISJOINT, 0};
-            device->CreateQuery(&qd, &timers[i].disjoint);
+            LogD3d(device->CreateQuery(&qd, &timers[i].disjoint), "CreateQuery", "timestamp disjoint");
             qd.Query = D3D11_QUERY_TIMESTAMP;
-            device->CreateQuery(&qd, &timers[i].t0);
-            device->CreateQuery(&qd, &timers[i].t1);
+            LogD3d(device->CreateQuery(&qd, &timers[i].t0), "CreateQuery", "timestamp start");
+            LogD3d(device->CreateQuery(&qd, &timers[i].t1), "CreateQuery", "timestamp end");
         }
         RefreshViewConfig();
         if (viewCount <= 0) {
@@ -1323,7 +1454,8 @@ struct App {
         factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
         ComPtr<ID3D11Texture2D> back;
         windowSwap->GetBuffer(0, IID_PPV_ARGS(&back));
-        return SUCCEEDED(device->CreateRenderTargetView(back.Get(), nullptr, &windowRtv));
+        return SUCCEEDED(LogD3dView(device->CreateRenderTargetView(back.Get(), nullptr, &windowRtv), "CreateRenderTargetView",
+                                    "mirror window", DXGI_FORMAT_UNKNOWN, back.Get()));
     }
 
     void ReadTimers() {
@@ -1384,6 +1516,10 @@ struct App {
             std::lock_guard<std::mutex> lock(skyMu);
             skyCopy = skyStatus;
         }
+        if ((int)frame.shouldRender != lastShouldRender) {
+            lastShouldRender = (int)frame.shouldRender;
+            g_log.Line(frame.shouldRender ? "runtime: shouldRender true" : "runtime: shouldRender false");
+        }
         if (frame.shouldRender && eyes[0].swapchain) {
             XrView views[2]{};
             views[0].type = views[1].type = XR_TYPE_VIEW;
@@ -1393,7 +1529,12 @@ struct App {
             locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
             locate.displayTime = frame.predictedDisplayTime;
             locate.space = space;
-            if (XR_SUCCEEDED(xrLocateViews(session, &locate, &viewState, count, &count, views)) && count > 0) {
+            const XrResult located = xrLocateViews(session, &locate, &viewState, count, &count, views);
+            if (located != lastLocate) {
+                lastLocate = located;
+                g_log.Result("xrLocateViews", located);
+            }
+            if (XR_SUCCEEDED(located) && count > 0) {
                 TimerSlot& slot = timers[timerWrite];
                 const bool timeThis = slot.disjoint && !slot.pending;
                 if (timeThis) {
@@ -1485,8 +1626,8 @@ struct App {
             second = {};
             lastLogTick = now;
             wchar_t title[256];
-            swprintf_s(title, L"VR Resolution Preview  %d x %d  %.0f%%  MSAA %d  GPU %.2f ms", eyeW, eyeH, actualPct, msaa,
-                       lastGpuMs);
+            swprintf_s(title, L"VR Resolution Preview  %d x %d  %.0f%%  MSAA %d  GPU %.2f ms%s%hs", eyeW, eyeH, actualPct,
+                       msaa, lastGpuMs, now < noticeUntil ? L"  |  " : L"", now < noticeUntil ? notice.c_str() : "");
             if (hwnd) SetWindowTextW(hwnd, title);
         }
         XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
@@ -1499,7 +1640,15 @@ struct App {
         end.environmentBlendMode = blend;
         end.layerCount = rendered ? 1 : 0;
         end.layers = rendered ? headers : nullptr;
-        xrEndFrame(session, &end);
+        const XrResult ended = xrEndFrame(session, &end);
+        DrainDebugMessages();
+        if (logFrames > 0 && (rendered || XR_FAILED(ended))) {
+            --logFrames;
+            char line[192];
+            std::snprintf(line, sizeof(line), "frame %dx%d MSAA %d layers %u: xrEndFrame -> %s (%d)", eyeW, eyeH, msaa,
+                          end.layerCount, XrResultName(ended), (int)ended);
+            g_log.Line(line);
+        }
         if (windowSwap && rendered) windowSwap->Present(0, 0);
     }
 
@@ -1528,6 +1677,7 @@ struct App {
         hud.clamped = showClamped;
         hud.help = help;
         std::snprintf(hud.sky, sizeof(hud.sky), "%s", sky.c_str());
+        if (GetTickCount64() < noticeUntil) std::snprintf(hud.notice, sizeof(hud.notice), "%s", notice.c_str());
         return hud;
     }
 
@@ -1605,7 +1755,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_app->windowSwap->ResizeBuffers(0, (UINT)g_app->windowW, (UINT)g_app->windowH, DXGI_FORMAT_UNKNOWN, 0);
             ComPtr<ID3D11Texture2D> back;
             if (SUCCEEDED(g_app->windowSwap->GetBuffer(0, IID_PPV_ARGS(&back))))
-                g_app->device->CreateRenderTargetView(back.Get(), nullptr, &g_app->windowRtv);
+                LogD3dView(g_app->device->CreateRenderTargetView(back.Get(), nullptr, &g_app->windowRtv),
+                           "CreateRenderTargetView", "mirror window", DXGI_FORMAT_UNKNOWN, back.Get());
         }
     }
     return DefWindowProcW(hwnd, msg, wp, lp);

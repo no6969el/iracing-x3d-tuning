@@ -20,7 +20,13 @@ On a 3840x3840-per-eye micro-OLED headset, iRacing at SteamVR 100% renders about
 3. In SteamVR's per-application video settings, leave **vr-res-preview.exe at 100%**. Raising that slider and the in-app percent multiplies them.
 4. From the kit, double-click `Start-Tuning-Menu.bat` and choose **VR RESOLUTION PREVIEW**. Or run `Launch-VrResPreview.bat` in this folder, or run `vr-res-preview.exe`.
 
-The program asks the runtime for OpenXR 1.0. SteamVR does not accept an OpenXR 1.1 instance. If startup fails, the dialog includes the OpenXR result name and code, and `vr-res-preview-startup.log` next to the exe records the active runtime, its name and version, and each call.
+The program asks the runtime for OpenXR 1.0. SteamVR does not accept an OpenXR 1.1 instance. If startup fails, the dialog includes the OpenXR result name and code, or the D3D11 call that failed. `vr-res-preview-startup.log` next to the exe records the active runtime, its name and version, each OpenXR call, every D3D11 create call with its HRESULT, size, format, and sample count, and the session state changes. `--d3d-debug` also turns on the D3D11 debug layer (Windows "Graphics Tools" optional feature) and copies its messages into that log.
+
+SteamVR hands back typeless textures for an sRGB swapchain, so the app names the sRGB format when it makes each render target view.
+
+If a preset or MSAA level does not fit in GPU memory, the app goes back to the last scale and MSAA that worked and shows why on the HUD and in the window title for a few seconds. The headset keeps rendering. A dialog appears only when nothing can be created.
+
+SteamVR pauses the app (no frames) while the headset is in standby. Wear it, or keep it moving, while testing.
 
 The Windows build is the `vr-res-preview-win64` artifact on the [VR resolution preview](https://github.com/no6969el/iracing-x3d-tuning/actions/workflows/vr-res-preview.yml) workflow. Unzip it so `vr-res-preview.exe` is in `tools\vr-res-preview\dist\`. The dashboard looks there.
 

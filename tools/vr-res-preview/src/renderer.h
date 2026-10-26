@@ -30,6 +30,7 @@ struct HudInfo {
     bool clamped = false;
     bool help = false;
     char sky[192] = "Sky: procedural";
+    char notice[256] = "";
 };
 
 // scene ids shared with the CSV and the HUD
@@ -44,6 +45,20 @@ enum SceneId {
 };
 
 const char* SceneName(int scene);
+
+// D3D11 create-call log. The app points the sink at its startup log.
+void SetD3dLogSink(void (*sink)(const std::string& line));
+// Each logs one create call and returns hr. Failures are kept for the error dialog.
+HRESULT LogD3d(HRESULT hr, const char* call, const char* what);
+HRESULT LogD3d(HRESULT hr, const char* call, const char* what, const D3D11_TEXTURE2D_DESC& td);
+// For views: the format the view asks for (UNKNOWN for a null desc) and the texture it views.
+HRESULT LogD3dView(HRESULT hr, const char* call, const char* what, DXGI_FORMAT viewFormat, ID3D11Resource* resource);
+// The last failed create call as logged, empty when none failed since the clear.
+// Brief is just the call, what it made, and the HRESULT name.
+std::string LastD3dFailure(bool brief = false);
+void ClearD3dFailure();
+const char* DxgiFormatName(DXGI_FORMAT format);
+const char* HResultName(HRESULT hr);
 
 class Renderer {
 public:
