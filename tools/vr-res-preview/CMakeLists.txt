@@ -63,6 +63,7 @@ target_link_libraries(vr-res-preview PRIVATE
   winhttp
   ole32
   uuid
+  advapi32
 )
 
 if(MSVC)
