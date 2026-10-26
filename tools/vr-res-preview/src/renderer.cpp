@@ -1,6 +1,6 @@
 #include "renderer.h"
 
-#include "math.h"
+#include "vrmath.h"
 
 #include <d3dcompiler.h>
 #include <wrl/client.h>

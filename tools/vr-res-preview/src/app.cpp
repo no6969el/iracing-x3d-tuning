@@ -1,5 +1,5 @@
 #include "renderer.h"
-#include "math.h"
+#include "vrmath.h"
 
 #ifndef XR_USE_PLATFORM_WIN32
 #define XR_USE_PLATFORM_WIN32
