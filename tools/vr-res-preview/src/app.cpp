@@ -1430,22 +1430,22 @@ int Smoke() {
     // The eye chart's exact center can land on a black letter. A small window
     // still covers the white card if the scene rendered.
     int bright = 0;
-    uint8_t sample[4] = {};
+    uint8_t bestPx[4] = {};
     for (int y = rh / 2 - 4; y <= rh / 2 + 4; ++y) {
         for (int x = rw / 2 - 4; x <= rw / 2 + 4; ++x) {
             const uint8_t* px = (const uint8_t*)mapped.pData + y * mapped.RowPitch + x * 4;
             const int c = px[0] > px[1] ? (px[0] > px[2] ? px[0] : px[2]) : (px[1] > px[2] ? px[1] : px[2]);
             if (c > bright) {
                 bright = c;
-                sample[0] = px[0];
-                sample[1] = px[1];
-                sample[2] = px[2];
-                sample[3] = px[3];
+                bestPx[0] = px[0];
+                bestPx[1] = px[1];
+                bestPx[2] = px[2];
+                bestPx[3] = px[3];
             }
         }
     }
     char line[96];
-    std::snprintf(line, sizeof(line), "smoke center pixel %u %u %u %u", sample[0], sample[1], sample[2], sample[3]);
+    std::snprintf(line, sizeof(line), "smoke center pixel %u %u %u %u", bestPx[0], bestPx[1], bestPx[2], bestPx[3]);
     Print(line);
     context->Unmap(stage.Get(), 0);
     if (bright < 100) {
