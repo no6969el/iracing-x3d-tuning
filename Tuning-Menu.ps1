@@ -120,6 +120,7 @@ $XAML = @"
                 <TextBlock Style="{StaticResource Hint}" Text="Applies the proven baseline fixes, guided end to end."/>
                 <Button x:Name="BtnTroubleshoot" Content="2) TROUBLESHOOT A STUTTER" ToolTip="Record a race and pinpoint what caused a hitch."/>
                 <Button x:Name="BtnEachRace" Content="3) EACH-RACE ROUTINE" ToolTip="Quiet the PC before you race; restore after."/>
+                <Button x:Name="BtnGamePerf" Content="GAMEPERF  -  LOG ANY GAME OR VR + AI ANALYSIS" Background="#13261F" BorderBrush="#3DDC97" ToolTip="Frame-time logger for any game (monitor or VR) that writes a report and an AI-ready brief with your config files."/>
                 <Button x:Name="BtnAdvanced" Content="ADVANCED TOOLS / UNDO" ToolTip="Run or undo individual fixes. Most people don't need this."/>
                 <Button x:Name="BtnHelp" Content="HELP  /  WHAT DO I NEED FIRST" Background="#15303A" BorderBrush="#3EA6FF" ToolTip="What each step does, and the free app you need."/>
                 <Grid Margin="0,15,0,0">
@@ -429,6 +430,12 @@ $Window.FindName("BtnOptimize").Add_Click({ Show-Page 'PageOptimize' })
 $Window.FindName("BtnTroubleshoot").Add_Click({ Show-Page 'PageTroubleshoot' })
 $Window.FindName("BtnEachRace").Add_Click({ Show-Page 'PageEachRace' })
 $Window.FindName("BtnAdvanced").Add_Click({ Show-Page 'PageAdvanced' })
+$Window.FindName("BtnGamePerf").Add_Click({
+    $gp = Join-Path $Root 'GamePerf\GamePerf.ps1'
+    if (-not (Test-Path $gp)) { [System.Windows.MessageBox]::Show("Cannot find GamePerf\GamePerf.ps1 next to this menu.","File missing"); return }
+    try { Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$gp`"" -WindowStyle Hidden }
+    catch { [System.Windows.MessageBox]::Show("GamePerf could not be started.","Error") }
+})
 $Window.FindName("BtnHelp").Add_Click({ Show-Page 'PageHelp' })
 $Window.FindName("BtnChip").Add_Click({ Show-Page 'PageChip' })
 $Window.FindName("BtnBackFromChip").Add_Click({ Show-Page 'PageMain' })

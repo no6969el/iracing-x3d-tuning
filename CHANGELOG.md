@@ -6,6 +6,44 @@ The project ships as a script kit plus a web guide at
 
 ---
 
+## Unreleased — GamePerf: FullTrace for any game, plus an AI analyst
+
+### Added — `GamePerf/`
+
+FullTrace answers "what was my PC doing?" for iRacing. GamePerf asks the same question of any game, on a monitor or in VR, and goes one step further. It turns the answer into a brief an AI can act on: your goals, the data, and the game's own config files.
+
+- **App.** `Start-GamePerf.bat`, or the dashboard's new **GAMEPERF** button, opens a WPF app with four pages: Record, Results, AI analyst and Settings.
+- **One-button recording.** Press Start logging, play, press Stop. Auto-detect follows whichever game you switch to.
+- **Per-frame timing (Intel PresentMon).** Average FPS, 1% and 0.1% lows, frames over the target's budget, and stutters. Every frame is classed as GPU-bound, CPU-side or capped. Every stutter is classed as a GPU spike, a game-thread spike or a stall, and is lined up with the 1 Hz system log around it.
+- **The 1 Hz log is FullTrace's**, generalised to any game. It keeps the same locale-safe CSV rules and the same `hardfaults_s` warning, and adds the game's busiest-thread load, effective CPU clock, disk throughput, commit charge, timer resolution and the driver's clock-event reasons.
+- **Marker key.** Scroll Lock by default: press it when you feel a hitch and the analysis looks there first.
+- **A/B by default.** Each session snapshots the game's config files. The next session of the same game diffs them and compares the numbers.
+- **Config discovery.** A catalog covers iRacing, ACC, AC/CSP, AMS2, rF2, LMU, MSFS 2020/2024, DCS, X-Plane 12, F1, WRC, BeamNG and more, across all Steam libraries. A name-based search catches anything else, including Unreal Engine `GameUserSettings.ini` files. In VR it adds the runtime's settings and every implicit OpenXR API layer, so an enabled quad-views or foveated layer is flagged.
+- **AI, optional.** You can paste `ai-prompt.md` anywhere, or connect xAI Grok, OpenAI, Anthropic Claude, Google Gemini, OpenRouter, Ollama / LM Studio, or any OpenAI-compatible server. Follow-up questions are supported, and every conversation is saved next to the session.
+- **Privacy.** Keys are DPAPI-encrypted. Briefs are scrubbed of your user name, PC name and credential-looking values. **Preview what is sent** shows the exact text first.
+
+### Light by design
+
+- **Compiled sampling.** Per-second work runs in compiled helpers. Each sample is three counter-category reads, not one `NextValue()` per counter per core, and one long-running `nvidia-smi`, not a process launch every second.
+- **Self-measured.** Every row records the logger's own sample time (`loop_ms`), and `session.json` records its average CPU.
+- **Off the V-Cache die.** On dual-CCD X3D chips the logger, `nvidia-smi` and PresentMon pin themselves to the frequency die, using `scripts\X3D-Profiles.ps1`.
+- **Quiet app.** It minimises while you play and renders in software, so it never touches the game's GPU. It runs no animation unless it is waiting on an AI.
+- **PresentMon is verified.** It is downloaded on request, and kept only if it carries a valid Intel signature.
+
+### Tests
+
+`tests/test-gameperf.ps1` builds sessions with planted problems: a GPU spike, a game-thread spike, a disk-stall, a marker, a GPU-heavy stretch, an enabled quad-views layer and a changed setting. It checks that the analyzer finds each one, in both the PresentMon 1.x and 2.x CSV layouts and under a comma-decimal locale. It also checks:
+
+- every AI provider's wire format;
+- redaction;
+- config discovery;
+- that the logger's columns and the analyzer's reads cannot drift apart;
+- that every script stays ASCII and PowerShell 5.1-compatible.
+
+`tests/test-gameperf-xaml.ps1` checks the window's markup.
+
+---
+
 ## v3.3.2 — cleanup, CrowdDetail docs, stutter scan fix
 
 ### Cleanup — shared modules and docs wording

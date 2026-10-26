@@ -34,6 +34,17 @@ GPU voltage, fan RPM, memory temperature, framerate and the limiter flags come f
 
 > **Changed in v3.2.0:** a skipped second in the trace is no longer treated as proof of a system stall on its own. Measurement showed the logger could occasionally overrun its own one-second budget on a healthy machine. The loop is now cheaper, and a gap should be corroborated against the `tot_dpc`, `tot_int` and `hardfaults_s` columns before you call it a freeze.
 
+### Any game, monitor or VR: GamePerf (new)
+
+[`GamePerf/`](GamePerf/README.md) takes FullTrace's method to **any game**. Double-click `Start-GamePerf.bat`, press **Start logging**, play, press **Stop**. You get:
+
+- **Per-frame timing (Intel PresentMon):** 1% / 0.1% lows, stutters, and whether each frame was **GPU-bound or held up on the CPU side**.
+- **A 1 Hz system log** on FullTrace's columns, plus the game's busiest-thread load.
+- **A report** that lines up every stutter with what the PC was doing at that moment.
+- **`ai-prompt.md`**: your goals, the data and the game's config files, found automatically for iRacing, ACC, AMS2, LMU, rF2, MSFS, DCS and more. Paste it into Grok / ChatGPT / Claude / Gemini, or connect a provider and get the analysis inside the app.
+
+It also lets you press Scroll Lock to mark a hitch you felt. It compares each session with the previous one, including what changed in the config files. In VR it flags any quad-views or foveated OpenXR layer that is still enabled. The logger is light, and on dual-CCD X3D chips it keeps itself off the V-Cache die. The dashboard's **GAMEPERF** button opens it too.
+
 ### `hardfaults_s` is not the sim — read this before you tune storage
 
 That column counts hard page faults for the **whole machine**. It is easy to see tens of thousands per second during a race and conclude iRacing is starved for disk I/O. It almost never is.
