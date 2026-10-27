@@ -1,5 +1,5 @@
 <#
-    Post-Race-Restore.ps1                                 v3.3.2
+    Post-Race-Restore.ps1                                 v3.4.0
     ================================================================
     Puts everything Pre-Race-Quiet touched back exactly as it was.
 

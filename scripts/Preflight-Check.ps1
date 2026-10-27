@@ -229,6 +229,18 @@ if (Get-Command Find-Xperf -ErrorAction SilentlyContinue) {
     Show-INFO "HardFault-Common.ps1 not found - skipping hard-fault checks. Re-unzip the kit if you expected them."
 }
 
+# 9. SteamVR frame timing. Informational only - a rig that is not in
+# the headset yet is still READY. This check does not call OpenVR and
+# does not start SteamVR.
+Write-Host ""
+Write-Host "9. SteamVR frame timing (FullTrace FPS)"
+$vrUp = @(Get-Process -Name 'vrserver','vrcompositor' -ErrorAction SilentlyContinue)
+if ($vrUp) {
+    Show-OK "SteamVR is running - FullTrace will record compositor FPS and frame time. Afterburner/RTSS is not required for those."
+} else {
+    Show-INFO "SteamVR is not running. FullTrace still logs; vr_* stays blank until you start SteamVR yourself. This check does not start it."
+}
+
 # profile notes
 if ($P.Warnings -and $P.Warnings.Count) {
     Write-Host ""

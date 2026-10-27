@@ -67,6 +67,11 @@ GamePerf (..\GamePerf\)  FullTrace's method for ANY game, monitor or VR, with
                          GamePerf\GamePerf.exe, or the menu's GAMEPERF button.
 FullTrace.ps1            MAIN logger. Run, race, read the CSV on your Desktop.
                          Time-gaps in it = system-wide stalls.            (no admin)
+                         FPS and frame time come from SteamVR when it is
+                         already running (OpenVR and OpenXR both). The
+                         script will not start SteamVR. Afterburner is
+                         optional, for voltage / fan / limiter flags.
+                         -NoSteamVr leaves the vr_* columns blank.
                          Run it ELEVATED (or use the menu's "Hard faults"
                          button) and, if the Windows Performance Toolkit is
                          installed, it also runs a kernel HARD_FAULTS trace
@@ -92,6 +97,9 @@ Scan-Stutter-Events.ps1  Auto-reads your latest FullTrace CSV from the Desktop,
                          treats a fault burst as a stutter in its own right -
                          those can stall a frame without leaving a gap in the
                          log, so they used to be invisible here.
+                         A 3.4.0 trace also flags dropped frames, frames
+                         over the headset budget, reprojection spikes and
+                         mispresented frames.
 
 --- FIXES (change settings) ---
 Repair-PerfCounters.ps1        Rebuild broken perf counters. Reboot after.   (ADMIN)
@@ -118,6 +126,9 @@ Kit-Common.ps1           Shared kit version + quiet service/task lists +
                          hard-fault name/pattern constants (data only).   (n/a)
 HardFault-Common.ps1     Hard-fault helpers (Find-Xperf, analysis, QuickEdit).
                          Loaded by FullTrace / Preflight / Trace.         (n/a)
+SteamVR-Timing.ps1       SteamVR compositor timing for FullTrace.
+                         Loaded by FullTrace, Scan-Stutter-Events and
+                         the tests. Not run directly.                     (n/a)
 RaceQuiet-Common.ps1     Shared elevate / log / privilege / SYSTEM-hop
                          helpers for Pre-Race-Quiet and Post-Race-Restore.(n/a)
 Create-Launchers.ps1     Make a .lnk next to every .ps1 (admin ones auto-elevate). (no admin)

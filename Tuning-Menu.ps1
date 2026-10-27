@@ -147,7 +147,7 @@ $XAML = @"
                 <TextBlock Text="TROUBLESHOOT A STUTTER" FontSize="16" Foreground="White" FontWeight="Bold" Margin="0,0,0,10"/>
                 <Expander Header="1) Record a race (FullTrace)" Foreground="White">
                     <StackPanel Margin="26,2,4,8">
-                        <TextBlock Style="{StaticResource ExpText}" Text="Records everything your PC does while you drive. Start it, race, then press Ctrl+C to stop - it saves a CSV to your Desktop."/>
+                        <TextBlock Style="{StaticResource ExpText}" Text="Records everything your PC does while you drive. Start it, race, then press Ctrl+C to stop - it saves a CSV to your Desktop. FPS and frame time come from SteamVR when SteamVR is already running; the logger will not start it. Afterburner is optional."/>
                         <TextBlock Style="{StaticResource ExpText}" Text="Hard faults adds a kernel trace (PROC_THREAD+LOADER+HARD_FAULTS+FILENAME) alongside the same sampling, so the CSV also says WHICH process and WHICH file faulted each second. Needs admin and the Windows Performance Toolkit. The hardfaults_s column on its own is system-wide - it is usually Windows, not the sim."/>
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="BtnFullTrace" Content="Run" Style="{StaticResource RunBtn}"/>
