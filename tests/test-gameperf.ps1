@@ -114,18 +114,34 @@ $mk = { param($i, $iv, $flags = 0x04) [pscustomobject]@{ Index = $i; Time = $q0s
 $wp = Join-Path $Tmp 'vr-writer.csv'
 $vw = [GamePerf.Native.VrFrameWriter]::new($wp, $q0s)
 $a1 = @(1000..1009 | ForEach-Object { & $mk $_ 11.11 }); [array]::Reverse($a1)
-$n1 = $vw.Add((New-GpVrTimingBuffer $a1), 192, $a1.Count, 10.2, $q0s + 10.2, 4242)
+$n1 = $vw.Add((New-GpVrTimingBuffer $a1), 192, $a1.Count, 10.2, $q0s + 10.2, 4242, 0)
 $a2 = @(1005..1019 | ForEach-Object { & $mk $_ 11.11 })
-$n2 = $vw.Add((New-GpVrTimingBuffer $a2), 192, $a2.Count, 10.3, $q0s + 10.3, 4242)
-$a3 = @((& $mk 1025 11.11), (& $mk 1026 0), (& $mk 1027 9999))
-$n3 = $vw.Add((New-GpVrTimingBuffer $a3), 192, $a3.Count, 10.4, $q0s + 10.4, 4242)
-$n4 = $vw.Add((New-GpVrTimingBuffer $a3), 192, $a3.Count, 15.0, $q0s + 15.0, 4242)
+$n2 = $vw.Add((New-GpVrTimingBuffer $a2), 192, $a2.Count, 10.3, $q0s + 10.3, 4242, 0)
+$a3 = @((& $mk 1025 11.11), (& $mk 1026 0), (& $mk 1027 99999), (& $mk 1028 412.5))
+$n3 = $vw.Add((New-GpVrTimingBuffer $a3), 192, $a3.Count, 10.4, $q0s + 10.4, 4242, 0)
+$n4 = $vw.Add((New-GpVrTimingBuffer $a3), 192, $a3.Count, 15.0, $q0s + 15.0, 4242, 0)
+# The newest frames are still being presented: held back, then written final.
+$a5 = @(1029..1031 | ForEach-Object { & $mk $_ 11.11 })
+$n5 = $vw.Add((New-GpVrTimingBuffer $a5), 192, $a5.Count, 10.4, $q0s + 10.4, 4242, 2)
+$a5[2].Presents = 2; $a5[2].Flags = 0x06
+$n6 = $vw.Add((New-GpVrTimingBuffer $a5), 192, $a5.Count, 10.45, $q0s + 10.45, 4242, 0)
 $vw.Dispose()
 $vt = [GamePerf.Native.CsvTable]::Load($wp)
-Check ($n1 -eq 10 -and $n2 -eq 10 -and $n3 -eq 1 -and $n4 -eq 0) "overlapping reads write each frame once, newest-first buffers included ($n1/$n2/$n3/$n4)"
+$vIv = @($vt.Num('interval_ms')); $vPr = @($vt.Num('presents'))
+Check ($n1 -eq 10 -and $n2 -eq 10 -and $n3 -eq 2 -and $n4 -eq 0) "overlapping reads write each frame once, newest-first buffers included ($n1/$n2/$n3/$n4)"
 Check ($vw.Missing -eq 5) "frames that rotated out between reads are counted as missing ($($vw.Missing))"
-Check ($vw.Rejected -eq 1) 'an implausible record (9999 ms) is rejected, not logged'
-Check ($vt.Count -eq 21 -and -not (@($vt.Num('interval_ms')) -contains 0)) 'an idle compositor interval (0) is not a frame'
+Check ($vw.Rejected -eq 1) 'a garbage record (99999 ms) is rejected, not logged'
+Check ($vIv -contains 412.5) 'a real 412 ms hitch is kept - it is what the file is for'
+Check (-not ($vIv -contains 0)) 'an idle compositor interval (0) is not a frame'
+Check ($n5 -eq 1 -and $n6 -eq 2 -and $vPr[$vPr.Length - 1] -eq 2) "the newest frames wait until the compositor is done with them ($n5 then $n6, presents $($vPr[$vPr.Length - 1]))"
+$vl = Join-Path $Tmp 'vr-pids.csv'
+$vw2 = [GamePerf.Native.VrFrameWriter]::new($vl, $q0s)
+$b1 = @(3000..3099 | ForEach-Object { & $mk $_ 11.11 }); [void]$vw2.Add((New-GpVrTimingBuffer $b1), 192, $b1.Count, 11, $q0s + 11, 999, 0)
+$b2 = @(3100..3249 | ForEach-Object { & $mk $_ 11.11 }); [void]$vw2.Add((New-GpVrTimingBuffer $b2[0..127]), 192, 128, 12, $q0s + 12, 4242, 0); [void]$vw2.Add((New-GpVrTimingBuffer $b2[22..149]), 192, 128, 13, $q0s + 13, 4242, 0)
+$b3 = @(3250..3299 | ForEach-Object { & $mk $_ 11.11 }); [void]$vw2.Add((New-GpVrTimingBuffer $b3), 192, $b3.Count, 14, $q0s + 14, 5151, 0)
+$vw2.Dispose()
+$ld = [GamePerf.Native.VrFrameLog]::Load($vl, [int[]]@(4242, 5151))
+Check ($ld.Count -eq 200 -and $ld.OtherSceneFrames -eq 100 -and $ld.MatchedGame) "a relaunched game (new pid) keeps both runs; SteamVR Home is left out ($($ld.Count) kept, $($ld.OtherSceneFrames) other)"
 Check ($vw.TimeBase -eq 'qpc' -and [math]::Abs($vt.Num('t_s')[0] - 10.0) -lt 0.001) "compositor time lands on the session clock ($($vw.TimeBase), t=$($vt.Num('t_s')[0]))"
 Check ([math]::Abs($vt.Num('app_gpu_ms')[0] - 8.0) -lt 0.01 -and [math]::Abs($vt.Num('app_cpu_ms')[0] - 6.0) -lt 0.01) 'game GPU = pre + post Submit, game CPU = poses ready -> last Submit'
 Check (([GamePerf.Native.FrameAnalyzer]::Reference(22.2, 11.1, $true)) -eq 11.1 -and ([GamePerf.Native.FrameAnalyzer]::Reference(22.2, 11.1, $false)) -eq 22.2) 'a vsynced late frame is judged against the refresh budget'
@@ -153,6 +169,19 @@ $pv = Get-Content -LiteralPath (Join-Path $vrs 'ai-prompt.md') -Raw
 $rv = Get-Content -LiteralPath (Join-Path $vrs 'report.md') -Raw
 Check ($rv -match '## SteamVR compositor' -and $pv -match 'SteamVR compositor') 'report and AI brief explain the SteamVR numbers'
 Check ($pv -match 'vr_reproj_s') 'the AI timeline carries reprojection per second'
+
+# Only SteamVR's 1 Hz numbers: they count only while the game was the scene app.
+$v1h = Join-Path (Join-Path $Tmp 'vr') '20261026-232000-vr1hz'
+Copy-Item -LiteralPath $vrs -Destination $v1h -Recurse
+Remove-Item -LiteralPath (Join-Path $v1h 'vr-frames.csv'), (Join-Path $v1h 'summary.json')
+& $Analyze -SessionDir $v1h -Quiet -NoPrevious
+$s1h = Read-GpJson (Join-Path $v1h 'summary.json')
+Check ($s1h.verdict -match 'SteamVR, 1 Hz' -and $s1h.frames.source.kind -eq 'steamvr-1hz') "without the frame file, SteamVR's 1 Hz average still gives a verdict ($($s1h.verdict))"
+$sysP = Join-Path $v1h 'system.csv'
+[IO.File]::WriteAllText($sysP, ([IO.File]::ReadAllText($sysP) -replace ',steamvr,', ',,'))
+& $Analyze -SessionDir $v1h -Quiet -NoPrevious
+$s1h = Read-GpJson (Join-Path $v1h 'summary.json')
+Check ($s1h.verdict -notmatch 'SteamVR') "SteamVR's rate while the game was not its scene app is not the game's FPS ($($s1h.verdict))"
 
 $nvr = New-GpFixtureSession -Root (Join-Path $Tmp 'vr') -Name '20261026-231000-novr' -VrState 'not-running'
 & $Analyze -SessionDir $nvr -Quiet -NoPrevious
@@ -338,7 +367,8 @@ for ($tick = 0; $tick -lt 6; $tick++) {
 $last = $rows[$rows.Count - 1]
 Check ($script:VrStatus -eq 'connected' -and ($GlueLog -join ' ') -match 'SteamVR frame timing connected') "the kit's reader connects as a Background client and the recorder logs it ($($script:VrStatus))"
 Check ([int]$script:VrState.StructSize -eq 192) 'the 192-byte frame record is detected'
-Check ($null -ne $SvrWriter -and $SvrWriter.Written -eq (128 + 5 * 27) -and $SvrWriter.Missing -eq 0) "every frame reaches vr-frames.csv exactly once ($(if ($SvrWriter) { $SvrWriter.Written }))"
+Read-GpVrFrames -HoldBack 0
+Check ($null -ne $SvrWriter -and $SvrWriter.Written -eq (128 + 6 * 27) -and $SvrWriter.Missing -eq 0) "every frame reaches vr-frames.csv exactly once, the last two on the final read ($(if ($SvrWriter) { $SvrWriter.Written }))"
 Check ($SvrWriter.TimeBase -eq 'qpc') 'compositor time is recognised as the QPC clock'
 $lf = ConvertTo-GpDouble $last.vr_fps
 Check ($lf -gt 30 -and $lf -lt 150 -and $last.vr_hz -eq 90 -and $last.vr_hmd -eq 'Crystal' -and $last.vr_target_w -eq 4312 -and $last.vr_res_scale -eq 1) "the kit's 1 Hz row is filled (vr_fps $lf, $($last.vr_hz) Hz, $($last.vr_hmd), $($last.vr_target_w) px, scale $($last.vr_res_scale))"

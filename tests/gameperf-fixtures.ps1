@@ -93,7 +93,7 @@ function New-GpFixtureSession {
         )
         if ($SteamVr -and $s -ge 3) {
             $rp = 0; if ($s -ge 80 -and $s -lt 90) { $rp = 30 }
-            $f += @('steamvr', $(if ($rp) { '67.5' } else { '90' }), '90', $(if ($rp) { '14.81' } else { '11.11' }), $(if ($rp) { '22.22' } else { '11.11' }), '8', $(if ($rp) { '12.5' } else { '8' }),
+            $f += @($(if ($s -ge 5) { 'steamvr' } else { '' }), $(if ($rp) { '67.5' } else { '90' }), '90', $(if ($rp) { '14.81' } else { '11.11' }), $(if ($rp) { '22.22' } else { '11.11' }), '8', $(if ($rp) { '12.5' } else { '8' }),
                     '1.2', '0.4', '9.5', '2', '0.2', "$rp", "$rp", '0', "$rp", '0', $(if ($s -eq 60) { '1' } else { '0' }), '0', '0', $(if ($rp) { '67' } else { '90' }),
                     '90', '4312', '5100', '1', '15.33', '1', '2', '', $(if ($s -ge 5) { '"iRacingSim64DX11"' } else { '"steamtours"' }), $(if ($s -ge 5) { '4242' } else { '999' }), '"compositor"', '"Crystal"')
         } else { $f += @('') * 33 }
@@ -222,7 +222,8 @@ function Write-GpFixtureVrFrames {
         for ($k = $end - 1; $k -ge $from; $k--) { $chunk.Add($list[$k]) }
         $scene = $chunk[0].Scene
         $now = $list[$end - 1].Time - ($Q0 / $QF) + 0.004
-        [void]$w.Add((New-GpVrTimingBuffer $chunk.ToArray()), 192, $chunk.Count, $now, $list[$end - 1].Time + 0.004, $scene)
+        $hold = $(if ($end -ge $list.Count) { 0 } else { 2 })   # the last read of a session takes all
+        [void]$w.Add((New-GpVrTimingBuffer $chunk.ToArray()), 192, $chunk.Count, $now, $list[$end - 1].Time + 0.004, $scene, $hold)
     }
     $stats = [pscustomobject]@{ Written = $w.Written; Missing = $w.Missing; Rejected = $w.Rejected; TimeBase = $w.TimeBase; Total = $list.Count }
     $w.Dispose()

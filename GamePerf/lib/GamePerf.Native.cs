@@ -1010,7 +1010,7 @@ namespace GamePerf.Native
         // number of headset refreshes, so a frame that misses by 1 ms shows
         // up as a doubled interval - FrameAnalyzer judges those against the
         // budget, not against the doubled interval.
-        public bool Vsynced;
+        public bool Vsynced, MatchedGame;
         public int[] Presents, Mispresented, CompDropped, Flags;
         public double[] TotalGpu, CompGpu, CompIdle;
         public int OtherSceneFrames;
@@ -1139,7 +1139,10 @@ namespace GamePerf.Native
     public sealed class VrFrameWriter : IDisposable
     {
         public const string Header = "frame,t_s,interval_ms,app_gpu_ms,app_cpu_ms,total_gpu_ms,comp_gpu_ms,comp_cpu_ms,comp_idle_ms,submit_ms,presents,mispresented,dropped,reproj_flags,vsyncs_to_view,scene_pid";
-        const double Plausible = 250.0;
+        // Rejects garbage, not hitches: a 400 ms shader-compile frame is exactly
+        // what this file is for. (The kit's 250 ms plausibility rule is for
+        // proving the struct layout, which SteamVR-Timing.ps1 already does.)
+        const double Plausible = 60000.0;
         readonly FileStream _fs;
         readonly double _qpcStartSeconds;
         long _last = -1;
@@ -1172,9 +1175,12 @@ namespace GamePerf.Native
         /// Append the frames in buf (count frames of `size` bytes) that are
         /// newer than the last one written. sessionNow and qpcNowSeconds are
         /// "now" on the logger's clock; scenePid is the compositor's scene app.
-        /// Returns the number of frames written.
+        /// The newest `holdBack` frames are left for the next read: the
+        /// compositor is still presenting them, so their present count,
+        /// reprojection flags and GPU times are not final yet. The last read
+        /// of a session passes 0. Returns the number of frames written.
         /// </summary>
-        public int Add(byte[] buf, int size, int count, double sessionNow, double qpcNowSeconds, int scenePid)
+        public int Add(byte[] buf, int size, int count, double sessionNow, double qpcNowSeconds, int scenePid, int holdBack)
         {
             if (buf == null || size < 96 || count <= 0) return 0;
             count = Math.Min(count, buf.Length / size);
@@ -1202,10 +1208,12 @@ namespace GamePerf.Native
 
             int wrote = 0;
             StringBuilder sb = new StringBuilder(160 * order.Count);
+            long upTo = newest - Math.Max(0, holdBack);
             foreach (int i in order)
             {
                 long index = idx[i];
                 if (_last >= 0 && index <= _last) continue;
+                if (index > upTo) break;
                 if (_last >= 0 && index > _last + 1) Missing += index - _last - 1;
                 _last = index;
                 int o = i * size;
@@ -1259,11 +1267,12 @@ namespace GamePerf.Native
         public const int FlagCpu = 0x01, FlagGpu = 0x02, FlagMotion = 0x08, FlagThrottle = 0xF00;
 
         /// <summary>
-        /// Load vr-frames.csv. Only the game's frames are kept: the scene app
-        /// that matches gamePid, else the scene app with the most frames
+        /// Load vr-frames.csv. Only the game's frames are kept: the scene apps
+        /// that match gamePids (every pid the game ran as - iRacing relaunches
+        /// the sim per session), else the scene app with the most frames
         /// (SteamVR Home and the dashboard also render through the compositor).
         /// </summary>
-        public static FrameData Load(string path, int gamePid)
+        public static FrameData Load(string path, int[] gamePids)
         {
             FrameData d = new FrameData();
             d.File = path;
@@ -1279,12 +1288,26 @@ namespace GamePerf.Native
                 int p = double.IsNaN(pid[i]) ? 0 : (int)pid[i];
                 int n; perPid.TryGetValue(p, out n); perPid[p] = n + 1;
             }
-            int keep = -1, best = -1;
-            if (gamePid > 0 && perPid.ContainsKey(gamePid) && perPid[gamePid] >= 20) keep = gamePid;
-            else foreach (KeyValuePair<int, int> kv in perPid) if (kv.Value > best) { best = kv.Value; keep = kv.Key; }
-            d.ProcessId = keep;
+            HashSet<int> keep = new HashSet<int>();
+            int gameFrames = 0;
+            if (gamePids != null)
+                foreach (int g in gamePids)
+                    if (g > 0 && perPid.ContainsKey(g)) { keep.Add(g); gameFrames += perPid[g]; }
+            if (gameFrames < 20)
+            {
+                keep.Clear();
+                int dom = -1, best = -1;
+                foreach (KeyValuePair<int, int> kv in perPid) if (kv.Value > best) { best = kv.Value; dom = kv.Key; }
+                if (dom >= 0) keep.Add(dom);
+            }
+            List<int> kept = new List<int>(keep);
+            kept.Sort();
+            d.ProcessId = kept.Count > 0 ? kept[0] : -1;
+            d.MatchedGame = gameFrames >= 20;
             d.SwapChains = perPid.Count;
-            d.Application = keep > 0 ? "scene app pid " + keep.ToString(CultureInfo.InvariantCulture) : "";
+            List<string> names = new List<string>();
+            foreach (int k in kept) names.Add(k.ToString(CultureInfo.InvariantCulture));
+            d.Application = kept.Count > 0 ? "scene app pid " + string.Join(", ", names.ToArray()) : "";
 
             double[] gpu = t.Num("app_gpu_ms"), cpu = t.Num("app_cpu_ms"), total = t.Num("total_gpu_ms"), compG = t.Num("comp_gpu_ms"), idle = t.Num("comp_idle_ms");
             double[] pres = t.Num("presents"), mis = t.Num("mispresented"), drop = t.Num("dropped"), flags = t.Num("reproj_flags");
@@ -1295,7 +1318,7 @@ namespace GamePerf.Native
             {
                 if (double.IsNaN(ft[i]) || ft[i] <= 0) continue;
                 int p = double.IsNaN(pid[i]) ? 0 : (int)pid[i];
-                if (p != keep) { d.OtherSceneFrames++; continue; }
+                if (!keep.Contains(p)) { d.OtherSceneFrames++; continue; }
                 if (double.IsNaN(ts[i])) continue;
                 // Time must never run backwards (the analysis binary-searches it):
                 // a clock re-anchor mid-session is clamped, not reordered.

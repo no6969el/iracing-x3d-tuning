@@ -106,6 +106,15 @@ $NumCols = @('t_s', 'fg_game', 'marker', 'cpu_total', 'ccd0_cpu', 'ccd1_cpu', 'b
              'vr_fps', 'vr_frametime_ms', 'vr_frametime_max_ms', 'vr_app_gpu_ms', 'vr_reprojected', 'vr_dropped', 'vr_hz')
 $SysCol = @{}
 foreach ($c in $NumCols) { $SysCol[$c] = $Sys.Num($c) }
+# SteamVR's 1 Hz frame numbers count only while the game was its scene app:
+# the compositor also runs for SteamVR Home, the dashboard, or nothing.
+if ($Sys.Has('fps_source')) {
+    $fsrc = $Sys.Str('fps_source')
+    foreach ($c in 'vr_fps', 'vr_frametime_ms', 'vr_frametime_max_ms', 'vr_app_gpu_ms', 'vr_reprojected', 'vr_dropped') {
+        $a = $SysCol[$c]
+        for ($i = 0; $i -lt $a.Length; $i++) { if ($fsrc[$i] -ne 'steamvr') { $a[$i] = [double]::NaN } }
+    }
+}
 $TS = $SysCol['t_s']
 $Phase = $Sys.Str('phase')
 $Throttle = $Sys.Str('gpu_throttle')
@@ -183,22 +192,21 @@ $Duration = ConvertTo-GpDouble $Meta.duration_s
 if ([double]::IsNaN($Duration) -and $TS.Length) { $Duration = $TS[$TS.Length - 1] }
 $FrameSource = [ordered]@{ kind = ''; files = @(); time_base = ''; present_mode = ''; sync_interval = $null; application = ''; swap_chains = 0; ft_column = ''; gpu_column = ''; cpu_column = '' }
 $Svr = $Meta.steamvr
-$GamePidSeen = 0
-$pidTally = @{}
-foreach ($p in $Sys.Str('game_pid')) { if ($p) { $pidTally[$p] = 1 + [int]$pidTally[$p] } }
-if ($pidTally.Count) { $GamePidSeen = [int](($pidTally.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key) }
+# Every pid the game ran as: iRacing relaunches the sim for each session.
+$GamePids = @()
+foreach ($p in $Sys.Str('game_pid')) { $pv = 0; if ([int]::TryParse($p, [ref]$pv) -and $pv -gt 0 -and $GamePids -notcontains $pv) { $GamePids += $pv } }
 
 # ---- SteamVR compositor frames ----------------------------------------
 $VrFd = $null; $VrStart = 0; $VS = $null
 $vrFile = Join-Path $SessionDir 'vr-frames.csv'
 if (Test-Path -LiteralPath $vrFile) {
-    try { $VrFd = [GamePerf.Native.VrFrameLog]::Load($vrFile, $GamePidSeen) } catch { [void]$Notes.Add("Could not read vr-frames.csv: $($_.Exception.Message)") }
+    try { $VrFd = [GamePerf.Native.VrFrameLog]::Load($vrFile, [int[]]$GamePids) } catch { [void]$Notes.Add("Could not read vr-frames.csv: $($_.Exception.Message)") }
 }
 $UseVr = $false
 if ($VrFd -and $VrFd.Count -ge 20) {
-    $pidMatch = $GamePidSeen -gt 0 -and $VrFd.ProcessId -eq $GamePidSeen
+    $pidMatch = $VrFd.MatchedGame
     if ($IsVr -or $pidMatch) { $UseVr = $true }
-    if ($UseVr -and $GamePidSeen -gt 0 -and -not $pidMatch) { [void]$Notes.Add("SteamVR's scene app (pid $($VrFd.ProcessId)) was not the process GamePerf tracked as the game (pid $GamePidSeen). The frames analysed are the scene app's.") }
+    if ($UseVr -and $GamePids.Count -gt 0 -and -not $pidMatch) { [void]$Notes.Add("SteamVR's scene app ($($VrFd.Application)) was not the process GamePerf tracked as the game (pid $($GamePids -join ', ')). The frames analysed are the scene app's.") }
     if ($VrFd.OtherSceneFrames -gt 0) { [void]$Notes.Add("$($VrFd.OtherSceneFrames) compositor frames from other scene apps (SteamVR Home, the dashboard) were left out.") }
 } elseif ($VrFd -and $VrFd.Count -gt 0) { [void]$Notes.Add("vr-frames.csv holds only $($VrFd.Count) frames of the game - not analysed.") }
 if ($UseVr) {
@@ -553,7 +561,7 @@ if ($UseVr -and $VS -and $VS.Frames -gt 0) {
         Add-Finding 'info' 'vr' $scaleText "$(if ($Svr.hmd) { "$($Svr.hmd), " })$(N $Svr.hz 0) Hz. This is the resolution the game is asked to render; native means rendering it in full, without quad views, foveation or upscaling."
     }
     $miss = ConvertTo-GpDouble $Svr.missing
-    if ($miss -gt 0 -and $miss -gt 0.01 * $VS.Frames) { [void]$Notes.Add("$([int]$miss) compositor frames were not captured (the recorder read SteamVR late); the counts above cover the rest.") }
+    if ($miss -gt 0 -and $miss -gt 0.01 * $VS.Frames) { [void]$Notes.Add("$([int]$miss) compositor frames were not captured - SteamVR was reconnecting, or the recorder read it late - so the counts above cover the rest.") }
     $VrOut = [ordered]@{
         frames = $VS.Frames; reprojected = $VS.Reprojected; reprojected_pct = Round-Or $rp 2
         reproj_gpu = $VS.ReprojGpu; reproj_cpu = $VS.ReprojCpu; motion_smoothed = $VS.Motion; repeated = $VS.Repeated

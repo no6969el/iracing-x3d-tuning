@@ -484,9 +484,16 @@ $SvrSeen = ''
 $SvrWaitSince = $null
 $SvrHzApplied = $false
 $SvrLastStatic = $null
+# Scene apps that are SteamVR itself, never the game.
+$SvrOwnApps = @('steamtours', 'vrcompositor', 'vrmonitor', 'vrdashboard', 'vrserver', 'vrwebhelper', 'vrstartup', 'compositor', '')
 
 function Read-GpVrFrames {
-    <# Every compositor frame since the last call -> vr-frames.csv. Cheap: one read, decoded in C#. #>
+    <#
+        Every compositor frame since the last call -> vr-frames.csv. Cheap: one
+        read, decoded in C#. The newest two frames wait for the next read (the
+        compositor is still presenting them); the session's last read takes all.
+    #>
+    param([int]$HoldBack = 2)
     if (-not $SvrOn -or -not $script:VrConnected) { return }
     $size = 0
     if ($script:VrState.StructSize) { $size = [int]$script:VrState.StructSize }
@@ -502,7 +509,7 @@ function Read-GpVrFrames {
     $scene = 0
     try { $scene = [int][SteamVrClient]::ScenePid() } catch { $scene = 0 }
     $qn = [GamePerf.Native.Win]::Qpc()
-    [void]$script:SvrWriter.Add($script:SvrBuf, $size, $n, ($qn - $QpcStart) / $QpcFreq, $qn / $QpcFreq, $scene)
+    [void]$script:SvrWriter.Add($script:SvrBuf, $size, $n, ($qn - $QpcStart) / $QpcFreq, $qn / $QpcFreq, $scene, $HoldBack)
 }
 
 function Update-GpVrState {
@@ -519,7 +526,7 @@ function Update-GpVrState {
             'no-dll' { Add-GpWarning 'SteamVR is running but its openvr_api.dll was not found, so there is no VR frame timing.' }
             'init-failed' {
                 $why = [string]$script:VrLastError; if (-not $why) { $why = 'init failed' }
-                $adm = ''; if (Test-GpAdmin) { $adm = ' The recorder is running as administrator and SteamVR is not - run GamePerf normally (not as admin).' }
+                $adm = ''; if ($IsVr -and (Test-GpAdmin)) { $adm = ' The recorder is running as administrator and SteamVR is not - run GamePerf normally (not as admin).' }
                 Write-GpLog "SteamVR frame timing could not connect ($why). Retrying." 'Yellow'
                 if ($adm) { Add-GpWarning "SteamVR frame timing could not connect ($why).$adm" }
             }
@@ -880,11 +887,17 @@ while ($true) {
         if ($fw -and $fw.Frames -gt 0) {
             $row += @((Inv $fw.Frames), (Inv (1000.0 / $fw.FtAvg)), (Inv $fw.FtAvg), (Inv $fw.FtMax), (Inv $fw.GpuBusyAvg), (Inv $fw.CpuBusyAvg), (Inv $fw.OverBudget))
         } else { $row += @((Inv $(if ($fw) { 0 } else { '' })), '', '', '', '', '', '') }
-        # Which source this second's FPS is from. SteamVR in VR (or whenever the
-        # game is SteamVR's scene app), else PresentMon, else Afterburner.
-        $sceneIsGame = $vrRow -and $GamePid -and ("$($vrRow.vr_scene_pid)" -eq "$GamePid")
+        # Which source this second's FPS is from. SteamVR while the game is its
+        # scene app (in VR, any scene app that is not SteamVR's own - Home, the
+        # dashboard - in case the tracked pid is a launcher), else PresentMon,
+        # else Afterburner.
+        $sceneIsGame = $false
+        if ($vrRow -and (ConvertTo-GpDouble $vrRow.vr_scene_pid) -gt 0) {
+            if ($GamePid) { $sceneIsGame = ("$($vrRow.vr_scene_pid)" -eq "$GamePid") }
+            if (-not $sceneIsGame -and $IsVr) { $sceneIsGame = $SvrOwnApps -notcontains ([string]$vrRow.vr_scene_app).ToLowerInvariant() }
+        }
         $fpsSrc = ''
-        if (-not [double]::IsNaN($vrFps) -and ($IsVr -or $sceneIsGame)) { $fpsSrc = 'steamvr' }
+        if (-not [double]::IsNaN($vrFps) -and $sceneIsGame) { $fpsSrc = 'steamvr' }
         elseif ($fw -and $fw.Frames -gt 0) { $fpsSrc = 'presentmon' }
         elseif (-not [double]::IsNaN($abFps)) { $fpsSrc = 'afterburner' }
         $vrCells = foreach ($name in $VrCols) {
@@ -1000,7 +1013,7 @@ finally {
     # The last frames, then drop the Background client. Closing it does not stop SteamVR or the game.
     $SvrMeta = [ordered]@{ reader = ''; note = $SvrNote }
     if ($SvrOn) {
-        try { Read-GpVrFrames } catch { }
+        try { Read-GpVrFrames -HoldBack 0 } catch { }
         $static = $SvrLastStatic
         if (-not $static) { $static = $script:VrStatic }
         $comp = ''

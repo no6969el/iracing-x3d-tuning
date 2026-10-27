@@ -1246,7 +1246,7 @@ $LiveTimer.Add_Tick({
             $dr = ConvertTo-GpDouble $st.dropped
             if ([string]$st.frame_source -eq 'steamvr') { $Live['Missed'].Sub.Text = "reprojected this second$(if ($dr -gt 0) { ", $(Format-GpNum $dr 0) dropped" })" }
             else { $Live['Missed'].Sub.Text = 'over budget this second' }
-        }
+        } else { $Live['Missed'].Value.Text = '-'; $Live['Missed'].Value.Foreground = $C.Text; $Live['Missed'].Sub.Text = '' }
         $budget = ConvertTo-GpDouble $st.budget_ms
         $ftm = ConvertTo-GpDouble $st.ft_max
         if (-not [double]::IsNaN($ftm)) {
