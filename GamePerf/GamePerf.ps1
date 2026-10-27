@@ -2,8 +2,10 @@
     GamePerf  -  frame-time logger + AI analyst for any game, monitor or VR
     ================================================================
     Start logging, play, stop. You get:
-      * per-frame timing (PresentMon) and a 1 Hz system timeline built
-        on the kit's FullTrace method, in Documents\GamePerf\Sessions
+      * per-frame timing - from the SteamVR compositor in VR (the kit's
+        own reader, no admin, no Afterburner), from PresentMon on a
+        monitor - and a 1 Hz system timeline built on the kit's FullTrace
+        method, in Documents\GamePerf\Sessions
       * a report: verdict, frame pacing, what limited the frames, the
         worst stutters and what the PC was doing at each one
       * ai-prompt.md - everything an AI analyst needs, including the
@@ -484,6 +486,8 @@ $Xaml = @'
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <StackPanel>
                 <TextBlock Text="CAPTURE" Style="{StaticResource Caption}" Margin="0,0,0,10"/>
+                <CheckBox x:Name="ChkSteamVr" Content="VR frame timing from SteamVR"/>
+                <TextBlock x:Name="TxtSteamVrHint" Style="{StaticResource Hint}" Margin="28,-6,0,10" TextWrapping="Wrap"/>
                 <CheckBox x:Name="ChkFrames" Content="Per-frame timing (PresentMon)"/>
                 <CheckBox x:Name="ChkAdmin" Content="Ask for admin when per-frame timing needs it"/>
                 <TextBlock x:Name="TxtAdminHint" Style="{StaticResource Hint}" Margin="28,-6,0,10"/>
@@ -825,7 +829,7 @@ function New-GpTile($Parent, [string]$Label) {
 }
 
 $Live = [ordered]@{}
-foreach ($k in 'FPS', 'Worst frame', 'GPU load', 'Game thread', 'VRAM', 'GPU temp', 'Markers', 'Logger') { $Live[$k] = New-GpTile $ui.LiveTiles $k }
+foreach ($k in 'FPS', 'Worst frame', 'Missed', 'GPU load', 'Game thread', 'VRAM', 'GPU temp', 'Markers') { $Live[$k] = New-GpTile $ui.LiveTiles $k }
 $Kpi = [ordered]@{}
 foreach ($k in 'Average FPS', '1% low', '0.1% low', 'Stutters', 'Over budget', 'GPU-bound', 'CPU-side', 'GPU headroom') { $Kpi[$k] = New-GpTile $ui.KpiGrid $k }
 
@@ -974,7 +978,7 @@ function Update-GpGameList {
     }
     $ui.CmbGame.SelectedItem = $sel
 }
-$ui.BtnRefreshGames.Add_Click({ Update-GpGameList })
+$ui.BtnRefreshGames.Add_Click({ Update-GpGameList; Update-GpSteamVrHint })
 
 function Update-GpTargetHint {
     $t = ConvertTo-GpDouble $ui.TxtTarget.Text
@@ -985,6 +989,18 @@ function Update-GpTargetHint {
 function Set-GpModeUi([bool]$Vr) {
     if ($Vr) { $ui.TxtTarget.Text = [string]$Settings.TargetFpsVr } else { $ui.TxtTarget.Text = [string]$Settings.TargetFpsMonitor }
     Update-GpTargetHint
+    Update-GpSteamVrHint
+}
+
+function Update-GpSteamVrHint {
+    $running = @(Get-Process -Name 'vrserver', 'vrcompositor' -ErrorAction SilentlyContinue).Count -gt 0
+    if (-not $ui.RbVr.IsChecked) {
+        $ui.TxtSteamVrHint.Text = $(if ($running) { 'SteamVR is running - choose VR headset to judge frames against the headset.' } else { 'Used when a game runs through SteamVR.' })
+    } elseif ($running) {
+        $ui.TxtSteamVrHint.Text = 'SteamVR is running. Every compositor frame is recorded - no Afterburner, no admin. The target follows the headset refresh.'
+    } else {
+        $ui.TxtSteamVrHint.Text = 'Start SteamVR before or during the session - GamePerf never starts it. OpenVR and OpenXR games both work.'
+    }
 }
 $ui.RbVr.Add_Checked({ Set-GpModeUi $true })
 $ui.RbMonitor.Add_Checked({ Set-GpModeUi $false })
@@ -1005,6 +1021,7 @@ function Read-GpRecordUi {
     if ([double]::IsNaN($t) -or $t -lt 0) { $t = 0 }
     if ($Settings.Mode -eq 'VR') { if ($t -gt 0) { $Settings.TargetFpsVr = $t } } else { $Settings.TargetFpsMonitor = $t }
     $Settings.CaptureFrames = [bool]$ui.ChkFrames.IsChecked
+    $Settings.SteamVrTiming = [bool]$ui.ChkSteamVr.IsChecked
     $Settings.RunElevated = [bool]$ui.ChkAdmin.IsChecked
     $Settings.StopWithGame = [bool]$ui.ChkStopWithGame.IsChecked
     $Settings.MinimizeWhileLogging = [bool]$ui.ChkMinimize.IsChecked
@@ -1027,6 +1044,36 @@ function Set-GpStartButton([string]$Mode) {
 }
 function Set-GpStatusChip([string]$Text, $Brush) { $ui.TxtStatus.Text = $Text; $ui.StatusDot.Fill = $Brush }
 
+function Get-GpFrameSourceText($st) {
+    <# One line for the live panel: where the frame timing is coming from, or exactly why there is none. #>
+    $vr = $st.steamvr
+    switch ([string]$st.frame_source) {
+        'steamvr' {
+            $bits = @()
+            if ($vr -and $vr.hmd) { $bits += [string]$vr.hmd }
+            if ($vr -and $vr.hz) { $bits += "$(Format-GpNum $vr.hz 0) Hz" }
+            return "frame timing: SteamVR compositor$(if ($bits.Count) { ' (' + ($bits -join ', ') + ')' })"
+        }
+        'presentmon' { return 'frame timing: PresentMon' }
+        'afterburner' { return 'frame timing: Afterburner 1 Hz average only' }
+    }
+    if ($vr -and [string]$vr.state -eq 'connected') { return 'SteamVR connected - waiting for the game''s frames' }
+    if ($Settings.Mode -eq 'VR' -and $vr) {
+        switch ([string]$vr.state) {
+            'not-running' { return 'no frame timing: SteamVR is not running (GamePerf never starts it)' }
+            'init-failed' { return "no frame timing: SteamVR refused the connection ($($vr.error))" }
+            'read-failed' { return 'no frame timing: SteamVR stopped answering' }
+            'no-dll' { return 'no frame timing: openvr_api.dll not found' }
+            'off' { return "no frame timing: SteamVR $($vr.detail)" }
+        }
+    }
+    switch ([string]$st.presentmon) {
+        'failed' { return 'per-frame timing FAILED (PresentMon was refused)' }
+        'running' { return 'PresentMon running - waiting for frames' }
+    }
+    return 'no frame timing'
+}
+
 function Start-GpLogging {
     if ($State.Logging) { return }
     $target = Read-GpRecordUi
@@ -1042,13 +1089,16 @@ function Start-GpLogging {
     $useFrames = $Settings.CaptureFrames -and [bool]$pm
     $req = [ordered]@{
         Game = $Settings.Game; Mode = $Settings.Mode; TargetFps = $target; Label = $label
-        NoFrames = -not $useFrames; PresentMon = [string]$pm; MarkerKey = $Settings.MarkerKey; Beep = [bool]$Settings.MarkerBeep
+        NoFrames = -not $useFrames; PresentMon = [string]$pm; NoSteamVr = -not $Settings.SteamVrTiming; MarkerKey = $Settings.MarkerKey; Beep = [bool]$Settings.MarkerBeep
         StopWithGame = $Settings.StopWithGame; ParentPid = $PID; ConfigFiles = @($pinned)
     }
     Write-GpJson -Path (Join-Path $dir 'request.json') -Object $req
-    # The recorder never has a window. It needs admin only for per-frame timing,
-    # and not even then once the account is in Performance Log Users.
-    $elevate = $useFrames -and $Settings.RunElevated -and -not (Test-GpAdmin) -and -not (Test-GpPerfLogUser)
+    # The recorder never has a window. It needs admin only for PresentMon, and
+    # not even then once the account is in Performance Log Users. Never in VR:
+    # frame timing there comes from SteamVR, which runs as you - an elevated
+    # recorder is not a client it expects - and there is no prompt to answer
+    # with a headset on.
+    $elevate = $useFrames -and $Settings.RunElevated -and $Settings.Mode -ne 'VR' -and -not (Test-GpAdmin) -and -not (Test-GpPerfLogUser)
     try {
         [void](Start-GpHidden -Mode '--logger' -Argument $dir -Elevated:$elevate)
     } catch {
@@ -1168,13 +1218,12 @@ $LiveTimer.Add_Tick({
         switch ([string]$st.state) {
             'waiting' {
                 $ui.TxtLiveState.Text = "Waiting for $($st.waiting_for)"
-                $ui.TxtLiveSub.Text = 'Switch to the game - logging locks on as soon as it is running. System data is already being recorded.'
+                $ui.TxtLiveSub.Text = "Switch to the game - logging locks on as soon as it is running. System data is already being recorded. $(Get-GpFrameSourceText $st)."
                 $ui.LiveDot.Fill = $C.Warn; Set-GpStatusChip 'Waiting for game' $C.Warn
             }
             'logging' {
                 $ui.TxtLiveState.Text = "Logging $($st.game)"
-                $pmText = switch ([string]$st.presentmon) { 'running' { 'per-frame timing on' } 'failed' { 'per-frame timing FAILED' } default { 'per-frame timing off' } }
-                $ui.TxtLiveSub.Text = "$($st.game_exe) - $pmText - press $($Settings.MarkerKey) when you feel a hitch"
+                $ui.TxtLiveSub.Text = "$($st.game_exe) - $(Get-GpFrameSourceText $st) - press $($Settings.MarkerKey) when you feel a hitch"
                 $ui.LiveDot.Fill = $C.Danger; Set-GpStatusChip 'Logging' $C.Danger
             }
             'stopping' { $ui.TxtLiveState.Text = 'Stopping...' }
@@ -1183,10 +1232,20 @@ $LiveTimer.Add_Tick({
         $el = ConvertTo-GpDouble $st.elapsed_s
         if (-not [double]::IsNaN($el)) { $ui.TxtLiveElapsed.Text = Format-GpDuration $el }
         $fps = ConvertTo-GpDouble $st.fps
+        $srcName = @{ steamvr = 'SteamVR'; presentmon = 'PresentMon'; afterburner = 'Afterburner' }[[string]$st.frame_source]
         if (-not [double]::IsNaN($fps)) {
             $FpsHist.Add($fps)
             if ($FpsHist.Count -gt 120) { $FpsHist.RemoveAt(0) }
             $Live['FPS'].Value.Text = Format-GpNum $fps 0
+            $Live['FPS'].Sub.Text = $(if ($srcName) { "from $srcName" } else { '' })
+        } else { $Live['FPS'].Value.Text = '-'; $Live['FPS'].Sub.Text = 'no frame timing yet' }
+        $ms = ConvertTo-GpDouble $st.missed
+        if (-not [double]::IsNaN($ms)) {
+            $Live['Missed'].Value.Text = Format-GpNum $ms 0
+            $Live['Missed'].Value.Foreground = $(if ($ms -gt 0) { $C.Warn } else { $C.Text })
+            $dr = ConvertTo-GpDouble $st.dropped
+            if ([string]$st.frame_source -eq 'steamvr') { $Live['Missed'].Sub.Text = "reprojected this second$(if ($dr -gt 0) { ", $(Format-GpNum $dr 0) dropped" })" }
+            else { $Live['Missed'].Sub.Text = 'over budget this second' }
         }
         $budget = ConvertTo-GpDouble $st.budget_ms
         $ftm = ConvertTo-GpDouble $st.ft_max
@@ -1213,9 +1272,8 @@ $LiveTimer.Add_Tick({
             if (-not [double]::IsNaN($gp)) { $Live['GPU temp'].Sub.Text = "$(Format-GpNum $gp 0) W" }
         }
         $Live['Markers'].Value.Text = [string]$st.markers
-        $Live['Markers'].Sub.Text = "key: $($Settings.MarkerKey)"
         $lm = ConvertTo-GpDouble $st.loop_ms
-        if (-not [double]::IsNaN($lm)) { $Live['Logger'].Value.Text = (Format-GpNum $lm 0) + ' ms'; $Live['Logger'].Sub.Text = 'per 1 s sample' }
+        $Live['Markers'].Sub.Text = "key: $($Settings.MarkerKey)$(if (-not [double]::IsNaN($lm)) { " - recorder $(Format-GpNum $lm 0) ms/s" })"
         $w = @($st.warnings) | Where-Object { $_ }
         $ui.TxtLiveWarn.Text = (@($w) -join "`n")
         $logText = Read-GpTextFile -Path (Join-Path $State.Dir 'logger.log')
@@ -1310,7 +1368,9 @@ function Show-GpSession([string]$Dir) {
     $budget = ConvertTo-GpDouble $sum.budget_ms
     if ($f.captured) {
         $tf = ConvertTo-GpDouble $sum.target_fps
-        Set-GpKpi 'Average FPS' (Format-GpNum $f.fps_avg 1) $(if ($tf -gt 0) { "target $(Format-GpNum $tf 0)" } else { '' })
+        $srcKind = [string]$f.source.kind
+        $srcText = @{ steamvr = 'SteamVR'; presentmon = 'PresentMon' }[$srcKind]
+        Set-GpKpi 'Average FPS' (Format-GpNum $f.fps_avg 1) ((@($(if ($srcText) { $srcText }), $(if ($tf -gt 0) { "target $(Format-GpNum $tf 0)" })) | Where-Object { $_ }) -join ' - ')
         $lowBrush = $null
         if ($tf -gt 0 -and (ConvertTo-GpDouble $f.low1_fps) -lt $tf * 0.9) { $lowBrush = $C.Warn }
         Set-GpKpi '1% low' (Format-GpNum $f.low1_fps 1) ("p99 {0} ms" -f (Format-GpNum $f.ft_p99 1)) $lowBrush
@@ -1319,15 +1379,21 @@ function Show-GpSession([string]$Dir) {
         Set-GpKpi 'Stutters' ([string]$f.stutters) ("{0} / min, {1} major" -f (Format-GpNum $spm 1), $f.major_stutters) $(if ($spm -ge 6) { $C.Danger } elseif ($spm -ge 1) { $C.Warn } else { $C.Accent })
         $mp = ConvertTo-GpDouble $f.missed_pct
         if ([double]::IsNaN($mp)) { Set-GpKpi 'Over budget' '-' 'no target set' }
-        else { Set-GpKpi 'Over budget' ((Format-GpNum $mp 1) + '%') ("{0} frames" -f $f.missed) $(if ($mp -ge 5) { $C.Danger } elseif ($mp -ge 1) { $C.Warn } else { $C.Accent }) }
+        else {
+            $mpSub = "{0} frames" -f $f.missed
+            if ($sum.vr -and $sum.vr.frames) { $mpSub = "SteamVR reprojected {0}%, dropped {1}" -f (Format-GpNum $sum.vr.reprojected_pct 1), $sum.vr.comp_dropped }
+            Set-GpKpi 'Over budget' ((Format-GpNum $mp 1) + '%') $mpSub $(if ($mp -ge 5) { $C.Danger } elseif ($mp -ge 1) { $C.Warn } else { $C.Accent })
+        }
         Set-GpKpi 'GPU-bound' ((Format-GpNum $f.gpu_bound_pct 0) + '%') ("GPU busy p90 {0} ms" -f (Format-GpNum $f.gpu_busy_p90 1))
         Set-GpKpi 'CPU-side' ((Format-GpNum $f.cpu_bound_pct 0) + '%') ("CPU busy p90 {0} ms" -f (Format-GpNum $f.cpu_busy_p90 1))
         $hr = ConvertTo-GpDouble $f.gpu_headroom_pct
         Set-GpKpi 'GPU headroom' $(if ([double]::IsNaN($hr)) { '-' } else { (Format-GpNum $hr 0) + '%' }) 'vs frame budget' $(if ($hr -lt 5) { $C.Warn } elseif ($hr -ge 25) { $C.Accent } else { $null })
     } else {
         foreach ($k in @($Kpi.Keys)) { Set-GpKpi $k '-' }
+        $vf = $sum.system.vr_fps
         $ab = $sum.system.ab_fps
-        if ($ab) { Set-GpKpi 'Average FPS' (Format-GpNum $ab.avg 1) 'Afterburner, 1 Hz' }
+        if ($vf -and $sum.frames.source.kind -eq 'steamvr-1hz') { Set-GpKpi 'Average FPS' (Format-GpNum $vf.avg 1) 'SteamVR, 1 Hz' }
+        elseif ($ab) { Set-GpKpi 'Average FPS' (Format-GpNum $ab.avg 1) 'Afterburner, 1 Hz' }
     }
     Draw-GpChart
 
@@ -1470,7 +1536,9 @@ function Draw-GpChart {
         [void]$cv.Children.Add($sl)
     }
     $note = "Each point is a $([int]$ch.width)-second window: green = average frame time, grey = the worst frame in it. Lower is better."
-    if ($ch.source -ne 'presentmon') { $note = 'From Afterburner''s 1 Hz average - single slow frames are not visible. Enable per-frame timing for a real frame-time chart.' }
+    if ($ch.source -eq 'steamvr') { $note += ' Frame times are the SteamVR compositor''s, for every frame the game handed it.' }
+    elseif ($ch.source -eq 'vr_frametime_ms') { $note = 'From SteamVR''s 1 Hz average (vr_frametime_ms) - single slow frames are not visible.' }
+    elseif ($ch.source -ne 'presentmon') { $note = 'From Afterburner''s 1 Hz average - single slow frames are not visible. In VR, start SteamVR before logging; on a monitor, enable PresentMon.' }
     $hidden = @($mx | Where-Object { (ConvertTo-GpDouble $_) -gt $ymax }).Count
     if ($hidden) { $note += " $hidden point(s) above $([int]$ymax) ms are clipped." }
     $ui.TxtChartNote.Text = $note
@@ -1929,6 +1997,7 @@ function Set-GpSettingsUi {
     $ui.ChkBeep.IsChecked = [bool]$Settings.MarkerBeep
     $ui.TxtDataRoot.Text = Get-GpDataRoot $Settings
     $ui.ChkFrames.IsChecked = [bool]$Settings.CaptureFrames
+    $ui.ChkSteamVr.IsChecked = [bool]$Settings.SteamVrTiming
     $ui.ChkAdmin.IsChecked = [bool]$Settings.RunElevated
     $ui.ChkStopWithGame.IsChecked = [bool]$Settings.StopWithGame
     $ui.ChkMinimize.IsChecked = [bool]$Settings.MinimizeWhileLogging
@@ -2032,7 +2101,7 @@ $ui.BtnPerfLog.Add_Click({
 })
 
 $ui.TxtVersion.Text = "v$GamePerfVersion  -  iRacing X3D Tuning kit"
-$ui.TxtAbout.Text = "GamePerf $GamePerfVersion. Part of the iRacing X3D Tuning kit (MIT). Uses Intel PresentMon for per-frame timing and the kit's CPU detection (scripts\X3D-Profiles.ps1). Settings: $(Get-GpSettingsPath)"
+$ui.TxtAbout.Text = "GamePerf $GamePerfVersion. Part of the iRacing X3D Tuning kit (MIT). VR frame timing comes from the SteamVR compositor through the kit's reader (scripts\SteamVR-Timing.ps1); flat-screen per-frame timing from Intel PresentMon; CPU detection from scripts\X3D-Profiles.ps1. Settings: $(Get-GpSettingsPath)"
 
 $Window.Add_SourceInitialized({
     try {

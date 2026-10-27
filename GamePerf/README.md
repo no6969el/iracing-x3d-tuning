@@ -5,7 +5,8 @@ Log any game, on a monitor or in VR. Play it, then find out exactly what is cost
 ```
   Start logging ──► play ──► Stop ──► report + AI brief ──► (optional) AI analysis in the app
         │                                   │
-        │   per-frame timing (PresentMon)   ├─ report.md      what happened, in plain numbers
+        │   per-frame timing (SteamVR in    ├─ report.md      what happened, in plain numbers
+        │   VR, PresentMon on a monitor)    │
         │   1 Hz system log (FullTrace's    ├─ ai-prompt.md   everything an AI needs, configs included
         │   method, any game)               └─ summary.json   for the app's charts
         │   your game's config files
@@ -14,14 +15,16 @@ Log any game, on a monitor or in VR. Play it, then find out exactly what is cost
 
 GamePerf is built on the kit's **FullTrace** logger. It uses the same measurement rules, the same locale-safe CSV and the same honesty about what `hardfaults_s` does and does not mean. It is generalised to any game and to VR, adds per-frame timing, and is cheaper to run.
 
+**In VR, frame timing comes from SteamVR**, through the kit's own reader, `scripts\SteamVR-Timing.ps1` (the one FullTrace uses). It is a read-only Background OpenVR client: it never starts SteamVR, never takes the scene, and needs no Afterburner, no RTSS, no PresentMon and no admin. OpenVR and OpenXR games both work, because both submit through the SteamVR compositor. On a monitor, frame timing comes from Intel PresentMon.
+
 ---
 
 ## Quick start
 
 1. Double-click **`GamePerf.exe`** in this folder. The first launch offers to put a GamePerf icon on your desktop and in the Start menu.
-2. **Settings → Download PresentMon** once. This is Intel's free frame-timing tool. GamePerf keeps the download only if it carries Intel's signature.
-3. Optional, recommended: **Settings → Allow it for my account**. It asks for admin once, then you sign out and back in. After that, per-frame timing never asks for admin again.
-4. On **Record**, pick the game, or leave it on *Auto-detect*. Choose **Monitor** or **VR headset**, and set the target FPS: your headset refresh rate in VR (90, 120…), or 0 to use the monitor's.
+2. **VR:** nothing to install. Start SteamVR (or the headset software that starts it) before you log, or any time during the session. GamePerf never starts SteamVR itself.
+3. **Monitor games:** **Settings → Download PresentMon** once. This is Intel's free frame-timing tool. GamePerf keeps the download only if it carries Intel's signature. Optional, recommended: **Settings → Allow it for my account**. It asks for admin once, then you sign out and back in. After that, PresentMon never asks for admin again.
+4. On **Record**, pick the game, or leave it on *Auto-detect*. Choose **Monitor** or **VR headset**. In VR the frame budget follows the headset's refresh rate, read from SteamVR. On a monitor, set the target FPS, or 0 to use the monitor's refresh rate.
 5. Press **START LOGGING** and play. The window gets out of the way. Press **Scroll Lock** whenever you feel a stutter.
 6. Press **STOP**, or just quit the game if *Stop when the game closes* is on. When the analysis is ready, GamePerf's taskbar button flashes; open it to see the Results.
 
@@ -42,8 +45,9 @@ Each session is a folder in `Documents\GamePerf\Sessions\<date>-<label>\`:
 | `report.md` | The readable report: verdict, frame pacing, what limited the frames, findings, the worst stutters with what the PC was doing at each one, your markers, and a comparison with your previous session |
 | `ai-prompt.md` | The same report packaged for an AI analyst. It includes your goals, a guide to the data, a 10-second timeline and the full text of the game's config files |
 | `summary.json` | Every number, plus chart data (the app reads this) |
+| `vr-frames.csv` | VR: every SteamVR compositor frame: interval, the game's GPU and CPU time, total and compositor GPU, compositor idle, presents, mispresented, dropped, reprojection flags, scene app |
 | `frames-N.csv` | Raw PresentMon frames: one file per launch of the game |
-| `system.csv` | 1 Hz timeline, 66 columns (below) |
+| `system.csv` | 1 Hz timeline, 99 columns (below), including the kit's `vr_*` SteamVR columns |
 | `events.csv` | Markers, game start/exit, focus changes, power-plan and timer changes, background CPU users every 30 s |
 | `session.json` | Machine snapshot: CPU / X3D layout, GPU, driver, PCIe link, RAM, display, Windows build, HAGS, Game Mode, Game DVR, VBS/HVCI, power plan, timer resolution, VR runtime and OpenXR layers |
 | `configs\` | A copy of the game's config files as they were when you played, so the next session can show what changed |
@@ -51,7 +55,10 @@ Each session is a folder in `Documents\GamePerf\Sessions\<date>-<label>\`:
 
 ### How frames are judged
 
-PresentMon records every frame: how long it took, and how long the **GPU** and the **CPU** were busy producing it.
+Every frame has a time, and how long the **GPU** and the **CPU** were busy producing it.
+
+- **VR (SteamVR):** frame time is the compositor's interval between the game's frames. GPU = the game's GPU time per frame. CPU = the game's time from new poses to its last Submit. A frame that misses the refresh is held to the next one, so in VR "busy" is judged against the refresh budget, not the doubled interval. SteamVR's own verdict on each frame is kept too: reprojected (and whether it was CPU- or GPU-late), motion-smoothed, dropped by the compositor, throttled.
+- **Monitor (PresentMon):** frame time is the time between presents, with PresentMon's GPU-busy and CPU-busy.
 
 - **GPU-bound**: the GPU was busy for at least 90% of the frame. GPU-heavy settings are the lever.
 - **CPU-side**: the GPU waited for the game thread, the driver or sync. CPU-heavy settings (opponents, draw distance, mirrors, crowds, physics) are the lever. GPU settings will not help.
@@ -73,6 +80,8 @@ Free RAM, commit %, hard faults/s. Disk read/write MB/s, busy %, queue.
 GPU load, memory-controller load, VRAM, power, clocks, temperature, fan, P-state and the driver's clock-event (throttle) reasons. From MSI Afterburner, if it is running: voltage, the power/temp/voltage/no-load limiter flags, PCIe bus load, memory temperature and FPS.
 
 Per-second frame stats from PresentMon. Timer resolution. Power plan. And the logger's own time per sample.
+
+`fps_source` says where each second's FPS came from (`steamvr`, `presentmon` or `afterburner`). Then the kit's SteamVR columns, with the same names, order and units as FullTrace's (see the kit's README): `vr_fps`, `vr_frametime_ms`, `vr_app_gpu_ms`, `vr_reprojected`, `vr_dropped`, `vr_hz`, `vr_target_w`/`vr_target_h`, `vr_res_scale`, `vr_scene_app`, `vr_hmd` and the rest. Blank while SteamVR is not running.
 
 ---
 
@@ -124,9 +133,9 @@ These are set in **Settings → Your goals** and sent with every analysis. The d
 - **Test the same way every time:** same track, car, weather and number of opponents, or the same replay. Otherwise a comparison measures the scene, not the setting.
 - **Change one or two things per session** and type them in *What did you change?*. The next report diffs your config files and compares the numbers with the previous session of the same game.
 - **Use the marker.** A stutter you *felt* is worth more than ten the log found. Map Scroll Lock to a button-box button for VR.
-- **VR:** set the target to the headset's refresh rate. Every frame over budget is a reprojected frame.
-- **Run as administrator** (the default). PresentMon needs it unless your account is in *Performance Log Users*. Without it the 1 Hz log still works, but there is no per-frame data.
-- **MSI Afterburner** is optional. When it is running it adds GPU voltage, limiter flags and PCIe load. On AMD/Intel GPUs it is also where GPU load and temperature come from.
+- **VR:** have SteamVR running. The budget is the headset's refresh rate; every frame over it is a reprojected frame. If you set a different target, the report says so and judges against the headset.
+- **Monitor:** PresentMon needs admin unless your account is in *Performance Log Users*. Without it the 1 Hz log still works, but there is no per-frame data. In VR the recorder is never elevated: SteamVR runs as you.
+- **MSI Afterburner** is optional and never the frame-time source in VR. When it is running it adds GPU voltage, limiter flags and PCIe load. On AMD/Intel GPUs it is also where GPU load and temperature come from.
 
 ---
 
@@ -138,12 +147,13 @@ The recorder must never be the thing that causes a stutter, or that pulls you ou
 - **No sound** unless you turn on the marker click in Settings.
 - **No focus stealing.** When a session ends, the app flashes its taskbar button and waits. It does not jump in front of the game or the desktop.
 - **The app holds it all.** The Record page shows the recorder's live readings and its latest messages. Stop, or closing the app, ends it cleanly. A recorder that loses its app stops by itself.
-- **No admin prompt mid-flow** once *Allow it for my account* is done. Per-frame timing uses Windows event tracing. The built-in *Performance Log Users* group allows exactly that, without being an administrator.
+- **No admin prompt in VR, ever**, and none on a monitor once *Allow it for my account* is done. PresentMon uses Windows event tracing, and the built-in *Performance Log Users* group allows exactly that, without being an administrator.
 
 ## Light on resources
 
 - The logger is a separate, hidden process. Its per-second work runs in compiled code. Each sample is three performance-counter reads, one long-running `nvidia-smi` (not one launch a second), a shared-memory read and a tail of PresentMon's file.
-- It records its own cost. `loop_ms` is in every row, and `session.json` has the logger's average CPU, which is typically well under 1% of one core.
+- In VR, SteamVR's frames are read twice a second, decoded in compiled code. The kit's 1 Hz `vr_*` row is the kit's own PowerShell, and costs roughly 10 to 30 ms of one background core per second.
+- It records its own cost. `loop_ms` is in every row, and `session.json` has the logger's average CPU, which is typically around 1% of one core or less.
 - On dual-CCD X3D chips with V-Cache on CCD0, the logger, `nvidia-smi` and PresentMon pin themselves to the frequency die. They never compete with the game for V-Cache cores. The kit's `scripts\X3D-Profiles.ps1` decides which die is which.
 - The app minimises while you play and reads one small status file a second. It renders in software, so it never touches the GPU the game is using.
 
@@ -159,7 +169,7 @@ powershell -ExecutionPolicy Bypass -File GamePerf\lib\GamePerf-Logger.ps1 -Game 
 powershell -ExecutionPolicy Bypass -File GamePerf\lib\GamePerf-Analyze.ps1 -SessionDir "$env:USERPROFILE\Documents\GamePerf\Sessions\<session>"
 ```
 
-Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause|F8|F9|F10|Insert|NumPad0`, `-StopWithGame`, `-Beep`, `-NoAnalyze`, `-MaxMinutes`.
+Logger switches: `-NoFrames` (no PresentMon), `-NoSteamVr` (no SteamVR client), `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause|F8|F9|F10|Insert|NumPad0`, `-StopWithGame`, `-Beep`, `-NoAnalyze`, `-MaxMinutes`.
 
 `GamePerf.exe --logger <session folder>` and `GamePerf.exe --analyze <session folder>` do the same windowlessly. The app uses these, reading the options from the session's `request.json`.
 
@@ -178,7 +188,8 @@ Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause
 
 | Symptom | Fix |
 |---|---|
-| "PresentMon stopped immediately" / no frames | Use **Settings → Allow it for my account**, or keep *Ask for admin when per-frame timing needs it* on and accept the prompt. |
+| No frame timing in VR | SteamVR was not running, or the game ran on another runtime (a native Oculus/Pimax OpenXR runtime). The live panel and the report say which. Start SteamVR yourself; GamePerf will not. If GamePerf itself was started *as administrator*, start it normally. |
+| "PresentMon stopped immediately" / no frames on a monitor | Use **Settings → Allow it for my account**, or keep *Ask for admin when per-frame timing needs it* on and accept the prompt. |
 | `GamePerf.exe` does nothing | See `%LOCALAPPDATA%\GamePerf\launcher.log`. Antivirus may have quarantined the new exe. Build your own copy with `launcher\Build-Launcher.ps1`, or use `Start-GamePerf.bat`. |
 | CPU columns blank | Performance counters are damaged. Run the kit's `scripts\Repair-PerfCounters.ps1` (admin), then reboot. |
 | No GPU data on AMD/Intel | Start MSI Afterburner. Without it, GamePerf falls back to Windows' GPU counters (load and VRAM only). |
@@ -201,7 +212,8 @@ Logger switches: `-NoFrames`, `-PresentMon <path>`, `-MarkerKey ScrollLock|Pause
 | `lib\GamePerf-AI.ps1` | AI providers |
 | `lib\GamePerf-Games.ps1` | Game catalog, config-file discovery, OpenXR context |
 | `lib\GamePerf-Common.ps1` | Settings, CSV safety, PresentMon download, redaction |
-| `lib\GamePerf.Native.cs` | Compiled hot-path helpers (counters, process/thread CPU, Afterburner, PresentMon parsing, statistics) |
+| `lib\GamePerf.Native.cs` | Compiled hot-path helpers (counters, process/thread CPU, Afterburner, PresentMon parsing, SteamVR frame records, statistics) |
+| `..\scripts\SteamVR-Timing.ps1` | The kit's SteamVR compositor reader. GamePerf loads it; it is not copied |
 | `tools\` | PresentMon goes here when downloaded |
 
-Needs **Windows PowerShell 5.1** (built into Windows 10 and 11). The kit's `scripts\X3D-Profiles.ps1` is used when present, for the CCD split and X3D-specific checks. Without it, everything else still works.
+Needs **Windows PowerShell 5.1** (built into Windows 10 and 11). It uses two of the kit's scripts: `scripts\SteamVR-Timing.ps1` for VR frame timing, and `scripts\X3D-Profiles.ps1` for the CCD split and X3D-specific checks. Keep GamePerf inside the kit folder. Without them, everything else still works.

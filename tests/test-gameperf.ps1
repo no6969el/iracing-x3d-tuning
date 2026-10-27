@@ -106,6 +106,60 @@ Check ($s1.frames.stutters -eq 3) "v1 stutters found ($($s1.frames.stutters))"
 Check ($s1.frames.source.time_base -eq 'relative') 'v1 frames are placed on the session clock via the PresentMon start event'
 Check ($null -eq $s1.frames.gpu_busy_avg) 'no GPU-busy column means no bottleneck claims'
 
+"--- SteamVR: the frame writer ---"
+# Raw Compositor_FrameTiming records, as GetFrameTimings returns them.
+$q0s = 100.0
+$mk = { param($i, $iv, $flags = 0x04) [pscustomobject]@{ Index = $i; Time = $q0s + 10 + ($i - 1000) / 90.0; Interval = $iv; Pre = 7.5; Post = 0.5; Total = 9.2; CompGpu = 1.2; CompCpu = 0.4
+                                                         Idle = 2; Submit = 0.2; PosesReady = 1; FrameReady = 7; Presents = 1; Mis = 0; Dropped = 0; Flags = $flags } }
+$wp = Join-Path $Tmp 'vr-writer.csv'
+$vw = [GamePerf.Native.VrFrameWriter]::new($wp, $q0s)
+$a1 = @(1000..1009 | ForEach-Object { & $mk $_ 11.11 }); [array]::Reverse($a1)
+$n1 = $vw.Add((New-GpVrTimingBuffer $a1), 192, $a1.Count, 10.2, $q0s + 10.2, 4242)
+$a2 = @(1005..1019 | ForEach-Object { & $mk $_ 11.11 })
+$n2 = $vw.Add((New-GpVrTimingBuffer $a2), 192, $a2.Count, 10.3, $q0s + 10.3, 4242)
+$a3 = @((& $mk 1025 11.11), (& $mk 1026 0), (& $mk 1027 9999))
+$n3 = $vw.Add((New-GpVrTimingBuffer $a3), 192, $a3.Count, 10.4, $q0s + 10.4, 4242)
+$n4 = $vw.Add((New-GpVrTimingBuffer $a3), 192, $a3.Count, 15.0, $q0s + 15.0, 4242)
+$vw.Dispose()
+$vt = [GamePerf.Native.CsvTable]::Load($wp)
+Check ($n1 -eq 10 -and $n2 -eq 10 -and $n3 -eq 1 -and $n4 -eq 0) "overlapping reads write each frame once, newest-first buffers included ($n1/$n2/$n3/$n4)"
+Check ($vw.Missing -eq 5) "frames that rotated out between reads are counted as missing ($($vw.Missing))"
+Check ($vw.Rejected -eq 1) 'an implausible record (9999 ms) is rejected, not logged'
+Check ($vt.Count -eq 21 -and -not (@($vt.Num('interval_ms')) -contains 0)) 'an idle compositor interval (0) is not a frame'
+Check ($vw.TimeBase -eq 'qpc' -and [math]::Abs($vt.Num('t_s')[0] - 10.0) -lt 0.001) "compositor time lands on the session clock ($($vw.TimeBase), t=$($vt.Num('t_s')[0]))"
+Check ([math]::Abs($vt.Num('app_gpu_ms')[0] - 8.0) -lt 0.01 -and [math]::Abs($vt.Num('app_cpu_ms')[0] - 6.0) -lt 0.01) 'game GPU = pre + post Submit, game CPU = poses ready -> last Submit'
+Check (([GamePerf.Native.FrameAnalyzer]::Reference(22.2, 11.1, $true)) -eq 11.1 -and ([GamePerf.Native.FrameAnalyzer]::Reference(22.2, 11.1, $false)) -eq 22.2) 'a vsynced late frame is judged against the refresh budget'
+
+"--- SteamVR: a VR session analysed from compositor frames ---"
+$vrs = New-GpFixtureSession -Root (Join-Path $Tmp 'vr') -Name '20261026-230000-vr' -SteamVr
+& $Analyze -SessionDir $vrs -Quiet -NoPrevious
+$sv = Read-GpJson (Join-Path $vrs 'summary.json')
+$fv = $sv.frames
+Check ($fv.captured -and $fv.source.kind -eq 'steamvr') "frames come from the SteamVR compositor ($($fv.source.kind))"
+Check ((ConvertTo-GpDouble $fv.fps_avg) -gt 80 -and (ConvertTo-GpDouble $fv.fps_avg) -le 90.5) "average fps is plausible ($($fv.fps_avg))"
+Check ((@($sv.notes) -join ' ') -match 'other scene apps') 'SteamVR Home frames before the game are left out'
+$v = $sv.vr
+Check ($null -ne $v -and $v.reprojected -eq ($v.reproj_gpu + $v.reproj_cpu + $v.motion_smoothed)) "reprojections are SteamVR's own flags ($($v.reprojected) = $($v.reproj_gpu) GPU + $($v.reproj_cpu) CPU + $($v.motion_smoothed) motion)"
+Check ($v.reproj_gpu -gt 150 -and $v.reproj_cpu -eq 1 -and $v.motion_smoothed -eq 5 -and $v.dropped_frames -eq 1) 'GPU-late stretch, the CPU-late frame, motion smoothing and the compositor drop are all seen'
+Check ((ConvertTo-GpDouble $v.reprojected_pct) -lt 5) "the 'async reprojection enabled' flag on every frame is not counted ($($v.reprojected_pct)%)"
+Check ($fv.missed_gpu_bound -gt 0.9 * $fv.missed -and $fv.missed_cpu_side -ge 1) "late VR frames are judged against the refresh: GPU-late ones are GPU-bound ($($fv.missed_gpu_bound) of $($fv.missed))"
+$tv = @($sv.findings | ForEach-Object { $_.title }) -join ' | '
+Check ($tv -match 'SteamVR reprojected' -and $tv -match 'Motion smoothing' -and $tv -match 'compositor itself dropped') 'reprojection, motion smoothing and compositor drops are findings'
+Check ($tv -match 'Missed frames are GPU-bound') 'the missed-frame bottleneck is the GPU'
+Check ($tv -match 'render target 4312x5100') 'the SteamVR render target is reported'
+Check ($sv.verdict -match 'SteamVR reprojected') "verdict carries SteamVR's reprojection ($($sv.verdict))"
+Check ($sv.chart.source -eq 'steamvr' -and @($sv.chart.t).Count -gt 50) 'the chart is drawn from compositor frames'
+$pv = Get-Content -LiteralPath (Join-Path $vrs 'ai-prompt.md') -Raw
+$rv = Get-Content -LiteralPath (Join-Path $vrs 'report.md') -Raw
+Check ($rv -match '## SteamVR compositor' -and $pv -match 'SteamVR compositor') 'report and AI brief explain the SteamVR numbers'
+Check ($pv -match 'vr_reproj_s') 'the AI timeline carries reprojection per second'
+
+$nvr = New-GpFixtureSession -Root (Join-Path $Tmp 'vr') -Name '20261026-231000-novr' -VrState 'not-running'
+& $Analyze -SessionDir $nvr -Quiet -NoPrevious
+$sn = Read-GpJson (Join-Path $nvr 'summary.json')
+$nf = @($sn.findings | Where-Object { $_.title -eq 'No frame data in this session' }) | Select-Object -First 1
+Check ($nf -and $nf.detail -match 'SteamVR was not running' -and $nf.detail -match 'never starts SteamVR') 'a VR session without SteamVR says exactly why there is no frame timing'
+
 "--- locale: comma-decimal Windows cannot corrupt the output ---"
 $saved = [Threading.Thread]::CurrentThread.CurrentCulture
 try {
@@ -206,6 +260,96 @@ Check ($anCols.Count -gt 30 -and $missing.Count -eq 0) ("every column the analyz
 $fixCols = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'gameperf-fixtures.ps1') -Raw)
 $m3 = [regex]::Match($fixCols, "\`$cols = '([^']+)'")
 Check (($m3.Groups[1].Value -split ',') -join ',' -eq ($logCols -join ',')) 'the test fixture writes the logger''s exact header'
+
+"--- SteamVR: the kit's reader is the one GamePerf uses ---"
+$kitVr = Join-Path (Join-Path $Root 'scripts') 'SteamVR-Timing.ps1'
+Check (Test-Path -LiteralPath $kitVr) 'scripts\SteamVR-Timing.ps1 is in the kit'
+Check ($loggerText -match "Join-Path \`$GpKitScripts 'SteamVR-Timing.ps1'") 'the recorder dot-sources the kit''s SteamVR reader (no copy of it)'
+. $kitVr
+$kitAll = Get-SteamVrColumnNames   # unary-comma return: assign it, never pipe the call
+$kitCols = @($kitAll | Where-Object { $_ -ne 'gpu_timing_source' })
+$gpVrCols = @($logCols | Where-Object { $_ -like 'vr_*' -and $_ -ne 'vr_cpu' })
+Check (($gpVrCols -join ',') -eq ($kitCols -join ',')) "system.csv carries the kit's vr_* columns in the kit's order ($($gpVrCols.Count))"
+
+"--- SteamVR: the recorder's glue, against a fake compositor ---"
+# The real openvr_api.dll is Windows-only and needs a headset. This stands
+# in for the kit's SteamVrClient (same static API, so the kit's
+# Initialize-SteamVrClient leaves it alone) and serves a 90 Hz ring buffer.
+Add-Type -TypeDefinition @'
+using System;
+public class SteamVrClient {
+    public static string LastError = "";
+    public static string CompositorVersion = "IVRCompositor_029";
+    public static long Index = 5000;
+    public static bool Fail;
+    static void Frame(byte[] b, int o, long index, double time) {
+        BitConverter.GetBytes((uint)192).CopyTo(b, o);
+        BitConverter.GetBytes((uint)index).CopyTo(b, o + 4);
+        BitConverter.GetBytes((uint)1).CopyTo(b, o + 8);
+        BitConverter.GetBytes((uint)4).CopyTo(b, o + 20);
+        BitConverter.GetBytes(time).CopyTo(b, o + 24);
+        float[] v = { 7.5f, 0.5f, 9.2f, 1.2f, 0.4f, 2f, 11.111f, 0f, 0f, 0.2f, 0f, 1f, 7f };
+        for (int i = 0; i < v.Length; i++) BitConverter.GetBytes(v[i]).CopyTo(b, o + 32 + 4 * i);
+    }
+    static double Now() { return System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency; }
+    public static bool Connect(string dll) { return true; }
+    public static void Disconnect() { }
+    public static bool TryFrameTiming(byte[] b, int size) { if (size != 192) return false; Frame(b, 0, Index, Now()); return true; }
+    public static int ReadFrameTimings(byte[] b, int size, int max) {
+        if (Fail) return -1;
+        double now = Now();
+        int n = Math.Min(max, 128);
+        for (int i = 0; i < n; i++) Frame(b, i * size, Index - i, now - i / 90.0);
+        return n;
+    }
+    public static byte[] ReadCumulative() { return new byte[128]; }
+    public static int ScenePid() { return 4242; }
+    public static int RendererPid() { return 4242; }
+    public static string RenderSize() { return "4312x5100"; }
+    public static string HmdFloat(int prop) { return prop == 2002 ? "90" : prop == 2001 ? "0.002" : ""; }
+    public static string HmdString(int prop) { return "Crystal"; }
+    public static string AppKey(int pid) { return "steam.app.266410"; }
+    public static string ReadSettingNumber(string section, string key) { return key == "resolutionScale" ? "100" : ""; }
+}
+'@
+function Get-SteamVrRunningProcessNames { @('vrserver') }
+function Find-SteamVrApiDll { 'openvr_api.dll' }
+$GlueLog = New-Object System.Collections.ArrayList
+function Write-GpLog([string]$Message, [string]$Color = '') { [void]$GlueLog.Add($Message) }
+function Add-GpWarning([string]$Text) { [void]$GlueLog.Add("WARNING: $Text") }
+function Add-GpEvent([string]$Kind, [string]$Detail) { [void]$GlueLog.Add("event $Kind") }
+$lAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Lib 'GamePerf-Logger.ps1'), [ref]$null, [ref]$null)
+foreach ($fnName in 'Read-GpVrFrames', 'Update-GpVrState') {
+    $fn = $lAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fnName }, $true)
+    Invoke-Expression $fn.Extent.Text
+}
+$SvrOn = $true; $SvrWriter = $null; $SvrBuf = $null; $SvrSeen = ''; $SvrWaitSince = $null; $SvrLastStatic = $null
+$IsVr = $true; $GameTracker = $true
+$VrCsv = Join-Path $Tmp 'glue-vr-frames.csv'
+$QpcFreq = [GamePerf.Native.Win]::QpcFrequency(); $QpcStart = [GamePerf.Native.Win]::Qpc()
+$rows = @()
+for ($tick = 0; $tick -lt 6; $tick++) {
+    $rows += ,(Get-SteamVrSample)
+    Read-GpVrFrames
+    Update-GpVrState
+    Start-Sleep -Milliseconds 300
+    [SteamVrClient]::Index += 27
+}
+$last = $rows[$rows.Count - 1]
+Check ($script:VrStatus -eq 'connected' -and ($GlueLog -join ' ') -match 'SteamVR frame timing connected') "the kit's reader connects as a Background client and the recorder logs it ($($script:VrStatus))"
+Check ([int]$script:VrState.StructSize -eq 192) 'the 192-byte frame record is detected'
+Check ($null -ne $SvrWriter -and $SvrWriter.Written -eq (128 + 5 * 27) -and $SvrWriter.Missing -eq 0) "every frame reaches vr-frames.csv exactly once ($(if ($SvrWriter) { $SvrWriter.Written }))"
+Check ($SvrWriter.TimeBase -eq 'qpc') 'compositor time is recognised as the QPC clock'
+$lf = ConvertTo-GpDouble $last.vr_fps
+Check ($lf -gt 30 -and $lf -lt 150 -and $last.vr_hz -eq 90 -and $last.vr_hmd -eq 'Crystal' -and $last.vr_target_w -eq 4312 -and $last.vr_res_scale -eq 1) "the kit's 1 Hz row is filled (vr_fps $lf, $($last.vr_hz) Hz, $($last.vr_hmd), $($last.vr_target_w) px, scale $($last.vr_res_scale))"
+Check ($null -ne $SvrLastStatic -and [double]$SvrLastStatic.Hz -eq 90) 'the headset details are kept for the report'
+[SteamVrClient]::Fail = $true
+[void](Get-SteamVrSample); Read-GpVrFrames; Update-GpVrState
+Check ($script:VrStatus -eq 'read-failed' -and ($GlueLog -join ' ') -match 'SteamVR stopped answering' -and [double]$SvrLastStatic.Hz -eq 90) 'SteamVR going away is logged, and what was known about the headset survives'
+$SvrWriter.Dispose()
+
+$appText = Get-Content -LiteralPath (Join-Path $App 'GamePerf.ps1') -Raw
+Check ($appText -match "\`$elevate = .*\`$Settings.Mode -ne 'VR'") 'the recorder is never elevated in VR (SteamVR runs as the user)'
 
 "--- GamePerf.exe: the icon you double-click ---"
 $launcherDir = Join-Path $App 'launcher'

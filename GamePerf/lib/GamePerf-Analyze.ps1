@@ -13,10 +13,20 @@
                      comparison. Paste it into Grok / ChatGPT / Claude /
                      Gemini, or let the app send it.
 
+    WHERE THE FRAMES COME FROM
+    --------------------------
+    VR: the SteamVR compositor (vr-frames.csv, recorded through the kit's
+    scripts\SteamVR-Timing.ps1): the interval between the game's frames,
+    its GPU time, its CPU time (poses ready -> last Submit), and what the
+    compositor did - reprojected, repeated or dropped the frame.
+    Monitor: PresentMon (frames-N.csv). With neither, the 1 Hz averages
+    (SteamVR's vr_fps, else Afterburner) give a verdict without stutter.
+
     HOW A FRAME IS JUDGED
     ---------------------
-    PresentMon reports, per frame, the time between frames and how long
-    the GPU was busy (and on 2.x, how long the CPU was busy) producing it.
+    Per frame: the time between frames and how long the GPU (and the CPU)
+    was busy producing it. In VR a late frame is held to the next refresh,
+    so "busy" is measured against the refresh budget there.
       * GPU busy for >= 90% of the frame         -> GPU-bound
       * CPU busy for >= 85% of the frame         -> CPU-bound
       * neither, and the frame met its budget   -> capped (headroom)
@@ -63,6 +73,7 @@ function Pct([double]$part, [double]$whole, [int]$d = 1) {
 }
 function IsNum($v) { $d = ConvertTo-GpDouble $v; return -not [double]::IsNaN($d) }
 function Clean([string]$s) { if (-not $s) { return '' }; return ($s -replace '\|', '/' -replace '[\r\n]+', ' ') }
+function Round-Or([double]$v, [int]$d = 2) { if ([double]::IsNaN($v) -or [double]::IsInfinity($v)) { return $null }; return [math]::Round($v, $d) }
 
 $Meta = Read-GpJson (Join-Path $SessionDir 'session.json')
 if (-not $Meta) { throw "No session.json in $SessionDir - is this a GamePerf session folder?" }
@@ -91,7 +102,8 @@ $NumCols = @('t_s', 'fg_game', 'marker', 'cpu_total', 'ccd0_cpu', 'ccd1_cpu', 'b
              'tot_int', 'tot_dpc', 'game_cpu', 'game_cores', 'game_top_thread', 'game_threads', 'game_ws_mb', 'game_private_mb', 'vr_cpu', 'free_ram_mb', 'commit_pct',
              'hardfaults_s', 'disk_read_mb_s', 'disk_write_mb_s', 'disk_busy_pct', 'disk_queue', 'gpu_util', 'gpu_mem_util', 'vram_used_mb', 'vram_total_mb',
              'gpu_power_w', 'gpu_gclk', 'gpu_mclk', 'gpu_temp', 'fan_pct', 'gpu_volt_mv', 'volt_limit', 'power_limit', 'temp_limit', 'noload_limit',
-             'pcie_bus_pct', 'fb_usage_pct', 'mem_temp_c', 'ab_fps', 'ab_frametime_ms', 'pm_fps', 'pm_ft_avg_ms', 'pm_ft_max_ms', 'timer_res_ms', 'loop_ms')
+             'pcie_bus_pct', 'fb_usage_pct', 'mem_temp_c', 'ab_fps', 'ab_frametime_ms', 'pm_fps', 'pm_ft_avg_ms', 'pm_ft_max_ms', 'timer_res_ms', 'loop_ms',
+             'vr_fps', 'vr_frametime_ms', 'vr_frametime_max_ms', 'vr_app_gpu_ms', 'vr_reprojected', 'vr_dropped', 'vr_hz')
 $SysCol = @{}
 foreach ($c in $NumCols) { $SysCol[$c] = $Sys.Num($c) }
 $TS = $SysCol['t_s']
@@ -169,7 +181,39 @@ $TList = New-Object 'System.Collections.Generic.List[double[]]'
 $StartList = New-Object 'System.Collections.Generic.List[int]'
 $Duration = ConvertTo-GpDouble $Meta.duration_s
 if ([double]::IsNaN($Duration) -and $TS.Length) { $Duration = $TS[$TS.Length - 1] }
-$FrameSource = [ordered]@{ files = @(); time_base = ''; present_mode = ''; sync_interval = $null; application = ''; swap_chains = 0; ft_column = ''; gpu_column = ''; cpu_column = '' }
+$FrameSource = [ordered]@{ kind = ''; files = @(); time_base = ''; present_mode = ''; sync_interval = $null; application = ''; swap_chains = 0; ft_column = ''; gpu_column = ''; cpu_column = '' }
+$Svr = $Meta.steamvr
+$GamePidSeen = 0
+$pidTally = @{}
+foreach ($p in $Sys.Str('game_pid')) { if ($p) { $pidTally[$p] = 1 + [int]$pidTally[$p] } }
+if ($pidTally.Count) { $GamePidSeen = [int](($pidTally.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key) }
+
+# ---- SteamVR compositor frames ----------------------------------------
+$VrFd = $null; $VrStart = 0; $VS = $null
+$vrFile = Join-Path $SessionDir 'vr-frames.csv'
+if (Test-Path -LiteralPath $vrFile) {
+    try { $VrFd = [GamePerf.Native.VrFrameLog]::Load($vrFile, $GamePidSeen) } catch { [void]$Notes.Add("Could not read vr-frames.csv: $($_.Exception.Message)") }
+}
+$UseVr = $false
+if ($VrFd -and $VrFd.Count -ge 20) {
+    $pidMatch = $GamePidSeen -gt 0 -and $VrFd.ProcessId -eq $GamePidSeen
+    if ($IsVr -or $pidMatch) { $UseVr = $true }
+    if ($UseVr -and $GamePidSeen -gt 0 -and -not $pidMatch) { [void]$Notes.Add("SteamVR's scene app (pid $($VrFd.ProcessId)) was not the process GamePerf tracked as the game (pid $GamePidSeen). The frames analysed are the scene app's.") }
+    if ($VrFd.OtherSceneFrames -gt 0) { [void]$Notes.Add("$($VrFd.OtherSceneFrames) compositor frames from other scene apps (SteamVR Home, the dashboard) were left out.") }
+} elseif ($VrFd -and $VrFd.Count -gt 0) { [void]$Notes.Add("vr-frames.csv holds only $($VrFd.Count) frames of the game - not analysed.") }
+if ($UseVr) {
+    if ($Budget -le 0 -and $Svr -and (ConvertTo-GpDouble $Svr.hz) -gt 1) { $Budget = 1000.0 / (ConvertTo-GpDouble $Svr.hz); $TargetFps = ConvertTo-GpDouble $Svr.hz }
+    $VrStart = [GamePerf.Native.Stats]::SettleIndex($VrFd.Ft, 8)
+    $FdList.Add($VrFd); $TList.Add($VrFd.TimeS); $StartList.Add($VrStart)
+    $VS = [GamePerf.Native.VrFrameLog]::Summarize($VrFd, $VrStart)
+    $FrameSource.kind = 'steamvr'
+    $FrameSource.files = @('vr-frames.csv')
+    $FrameSource.time_base = $(if ($Svr -and $Svr.time_base) { [string]$Svr.time_base } else { 'compositor' })
+    $FrameSource.application = $VrFd.Application; $FrameSource.swap_chains = $VrFd.SwapChains
+    $FrameSource.ft_column = 'interval_ms (between the game''s WaitGetPoses calls)'; $FrameSource.gpu_column = 'app_gpu_ms (pre + post Submit)'; $FrameSource.cpu_column = 'app_cpu_ms (poses ready -> last Submit)'
+    if ($FrameFiles.Count) { [void]$Notes.Add("PresentMon also recorded the game's desktop presents ($((@($FrameFiles | ForEach-Object { Split-Path -Leaf $_ })) -join ', ')). In VR the analysis uses the SteamVR compositor's frames instead.") }
+    $FrameFiles = @()
+}
 foreach ($f in $FrameFiles) {
     $fd = $null
     try { $fd = [GamePerf.Native.FrameLog]::Load($f) } catch { [void]$Notes.Add("Could not read $(Split-Path -Leaf $f): $($_.Exception.Message)"); continue }
@@ -188,6 +232,7 @@ foreach ($f in $FrameFiles) {
     }
     if (-not $t) { $t = [GamePerf.Native.Stats]::CumulativeSeconds($fd.Ft, $off); $timeBase = 'synthesised' }
     $FdList.Add($fd); $TList.Add($t); $StartList.Add([GamePerf.Native.Stats]::SettleIndex($fd.Ft, 8))
+    $FrameSource.kind = 'presentmon'
     $FrameSource.files += $leaf
     $FrameSource.time_base = $timeBase
     if (-not $FrameSource.application) {
@@ -199,17 +244,36 @@ foreach ($f in $FrameFiles) {
 }
 $FA = [GamePerf.Native.FrameAnalyzer]::Analyze($FdList.ToArray(), $TList.ToArray(), $StartList.ToArray(), $Budget)
 $HasFrames = $FA.Frames -gt 0
+
+# Why a VR session has no SteamVR frames - the first thing to fix, so say it plainly.
+$VrWhy = ''
+if ($IsVr -and -not $UseVr) {
+    $state = ''; if ($Svr) { $state = [string]$Svr.state }
+    if ($Svr -and -not $Svr.reader) { $VrWhy = "SteamVR frame timing was $(if ($Svr.note) { $Svr.note } else { 'not available' })." }
+    elseif ($state -eq 'init-failed') { $VrWhy = "SteamVR was running but refused GamePerf's read-only connection ($([string]$Svr.last_error))." }
+    elseif ($state -eq 'no-dll') { $VrWhy = 'SteamVR was running but its openvr_api.dll was not found.' }
+    elseif ($Svr -and (ConvertTo-GpDouble $Svr.frames) -gt 0) { $VrWhy = 'SteamVR was connected, but the game never became its scene app (it may have run on another VR runtime, such as a native Oculus or Pimax runtime, or flat).' }
+    elseif ($Svr) { $VrWhy = 'SteamVR was not running while the game ran. GamePerf reads VR frame timing from the SteamVR compositor and never starts SteamVR itself - start it before (or during) the session.' }
+    else { $VrWhy = 'This session was recorded before GamePerf read SteamVR frame timing.' }
+    [void]$Notes.Add("No SteamVR frame timing: $VrWhy")
+}
 if (-not $HasFrames) {
     if ($FrameFiles.Count) { [void]$Notes.Add('Per-frame capture produced no usable frames.') }
-    else { [void]$Notes.Add('No per-frame capture in this session (PresentMon off, missing or refused). Frame numbers below come from Afterburner, if it was running.') }
+    elseif (-not $IsVr) { [void]$Notes.Add('No per-frame capture in this session (PresentMon off, missing or refused). Frame numbers below come from the 1 Hz averages, if any.') }
 }
 
-# Without PresentMon, fall back to Afterburner's 1 Hz framerate so there is still a verdict.
-$AbOnly = $null
+# No per-frame data: SteamVR's 1 Hz averages, else Afterburner's, so there is still a verdict.
+$AbOnly = $null; $SecSrc = ''
 if (-not $HasFrames) {
-    $fpsCol = Get-Col 'ab_fps'
-    if ($fpsCol.n -gt 0) { $AbOnly = $fpsCol }
+    $fpsCol = Get-Col 'vr_fps'
+    if ($fpsCol.n -gt 0) { $AbOnly = $fpsCol; $SecSrc = 'SteamVR'; $FrameSource.kind = 'steamvr-1hz' }
+    else {
+        $fpsCol = Get-Col 'ab_fps'
+        if ($fpsCol.n -gt 0) { $AbOnly = $fpsCol; $SecSrc = 'Afterburner'; $FrameSource.kind = 'afterburner-1hz' }
+    }
 }
+$SecCol = $(if ($SecSrc -eq 'SteamVR') { 'vr_fps' } else { 'ab_fps' })
+$SecFtCol = $(if ($SecSrc -eq 'SteamVR') { 'vr_frametime_ms' } else { 'ab_frametime_ms' })
 
 # ================================================================
 #  STUTTER INCIDENTS + CONTEXT
@@ -426,7 +490,9 @@ if ($HasFrames) {
             ("$($FA.Missed) of $($FA.Frames) frames took longer than 1.25x $(N $Budget 1) ms.$vrNote$missWhy 1% low is $(N $FA.Low1Fps 1) fps, 0.1% low $(N $FA.Low01Fps 1) fps, average $(N $FA.FpsAvg 1) fps.")
         if ($FA.Missed -ge 20 -and $MissedPct -ge 1) {
             if ($FA.MissedGpuBound -ge 0.6 * $FA.Missed) {
-                Add-Finding 'high' 'bottleneck' 'Missed frames are GPU-bound' "When frames miss the budget the GPU is busy for the whole frame (GPU busy p90 $(N $FA.GpuBusyP90 1) ms vs $(N $Budget 1) ms). The GPU-heaviest settings in the scenes where it happens are the lever - see the timeline for when."
+                $gpuEv = "GPU busy p90 $(N $FA.GpuBusyP90 1) ms vs $(N $Budget 1) ms"
+                if ($UseVr -and $VS) { $gpuEv = "the game's GPU time reaches $(N $VS.AppGpuP99 1) ms at p99, past the $(N $Budget 1) ms refresh; SteamVR flagged $($VS.ReprojGpu) frames GPU-late" }
+                Add-Finding 'high' 'bottleneck' 'Missed frames are GPU-bound' "When frames miss the budget the GPU is busy for the whole frame ($gpuEv). The GPU-heaviest settings in the scenes where it happens are the lever - see the timeline for when."
             } elseif ($FA.MissedCpuSide -ge 0.6 * $FA.Missed) {
                 Add-Finding 'high' 'bottleneck' 'Missed frames are held up on the CPU side' "When frames miss the budget the GPU is waiting. CPU-heavy settings (opponents, draw distance, mirrors, crowds, physics/AI) or a background interruption are the lever; lowering GPU settings will not fix it."
             }
@@ -452,7 +518,53 @@ if ($HasFrames) {
         }
     }
 } elseif ($AbOnly) {
-    Add-Finding 'info' 'pacing' "Average $(N $AbOnly.avg 1) fps (Afterburner, 1 Hz)" 'Afterburner only reports a per-second average, which hides single slow frames. Enable per-frame capture (PresentMon) to measure stutter.'
+    $how = $(if ($SecSrc -eq 'SteamVR') { 'Only SteamVR''s per-second averages were recorded (vr-frames.csv is missing or empty), which hide single slow frames.' } else { 'Afterburner only reports a per-second average, which hides single slow frames. In VR, start SteamVR before logging; on a monitor, enable PresentMon.' })
+    Add-Finding 'info' 'pacing' "Average $(N $AbOnly.avg 1) fps ($SecSrc, 1 Hz)" $how
+}
+
+# -- what SteamVR did with the frames
+$VrOut = $null
+if ($UseVr -and $VS -and $VS.Frames -gt 0) {
+    $rp = $VS.Reprojected * 100.0 / $VS.Frames
+    $sev = $(if ($rp -ge 5) { 'high' } elseif ($rp -ge 1) { 'medium' } else { 'info' })
+    $why = @()
+    if ($VS.ReprojGpu) { $why += "$($VS.ReprojGpu) flagged GPU-late" }
+    if ($VS.ReprojCpu) { $why += "$($VS.ReprojCpu) flagged CPU-late" }
+    if ($VS.Repeated) { $why += "$($VS.Repeated) shown more than once" }
+    $whyText = $(if ($why.Count) { ' SteamVR''s own reasons: ' + ($why -join ', ') + '.' } else { '' })
+    Add-Finding $sev 'vr' ("SteamVR reprojected {0}% of frames" -f (N $rp 1)) ("$($VS.Reprojected) of $($VS.Frames) frames were not ready for their refresh, so the compositor re-projected the previous one.$whyText Every reprojected frame is visible judder or smear; the goal is zero.")
+    if ($VS.Motion -gt 0) {
+        Add-Finding 'medium' 'vr' "Motion smoothing synthesised $($VS.Motion) frames" 'SteamVR filled missed frames with motion-smoothed (synthetic) frames. It hides the miss at the cost of warping artefacts; the misses themselves are what to fix. It can be turned off per game in SteamVR''s video settings.'
+    }
+    if ($VS.DroppedFrames -gt 0) {
+        $dsev = $(if ($VS.DroppedFrames -ge 10 -or $VS.DroppedFrames * 1000 -ge $VS.Frames) { 'high' } else { 'medium' })
+        Add-Finding $dsev 'vr' "The compositor itself dropped frames $($VS.DroppedFrames) time(s)" "SteamVR missed its own deadline $($VS.CompDropped) time(s): the headset showed an old frame with no reprojection - the harshest judder. Usually the GPU had no room left for the compositor (app + compositor GPU p90 $(N $VS.TotalGpuP90 1) ms vs $(N $Budget 1) ms), or something preempted it (overlays, capture, a GPU-heavy background app)."
+    }
+    if ($VS.Throttled -gt 0) {
+        Add-Finding 'medium' 'vr' "SteamVR throttled the game on $($VS.Throttled) frames" 'SteamVR''s per-game "Throttling" setting held the game below the refresh rate. For a full-rate check set it to "Auto" (or off) in SteamVR''s per-game video settings.'
+    }
+    if ($Budget -gt 0 -and -not [double]::IsNaN($VS.TotalGpuP90) -and $VS.TotalGpuP90 -ge 0.95 * $Budget -and -not [double]::IsNaN($FA.GpuBusyP90) -and $FA.GpuBusyP90 -lt 0.95 * $Budget) {
+        Add-Finding 'medium' 'vr' 'The compositor''s GPU work tips frames over budget' "The game's GPU time (p90 $(N $FA.GpuBusyP90 1) ms) fits the $(N $Budget 1) ms budget, but with SteamVR's distortion and layers it reaches $(N $VS.TotalGpuP90 1) ms (compositor alone $(N $VS.CompGpuP90 1) ms p90). Overlays, a high SteamVR resolution and SteamVR's own effects count against the same budget."
+    }
+    $scaleText = ''
+    if ($Svr -and $Svr.target_w) {
+        $scaleText = "SteamVR render target $($Svr.target_w)x$($Svr.target_h) per eye"
+        if ($Svr.res_scale) { $scaleText += " (resolution scale $(N ((ConvertTo-GpDouble $Svr.res_scale) * 100) 0)%)" }
+        Add-Finding 'info' 'vr' $scaleText "$(if ($Svr.hmd) { "$($Svr.hmd), " })$(N $Svr.hz 0) Hz. This is the resolution the game is asked to render; native means rendering it in full, without quad views, foveation or upscaling."
+    }
+    $miss = ConvertTo-GpDouble $Svr.missing
+    if ($miss -gt 0 -and $miss -gt 0.01 * $VS.Frames) { [void]$Notes.Add("$([int]$miss) compositor frames were not captured (the recorder read SteamVR late); the counts above cover the rest.") }
+    $VrOut = [ordered]@{
+        frames = $VS.Frames; reprojected = $VS.Reprojected; reprojected_pct = Round-Or $rp 2
+        reproj_gpu = $VS.ReprojGpu; reproj_cpu = $VS.ReprojCpu; motion_smoothed = $VS.Motion; repeated = $VS.Repeated
+        dropped_frames = $VS.DroppedFrames; comp_dropped = $VS.CompDropped; mispresented = $VS.Mispresented; throttled = $VS.Throttled
+        app_gpu_p50 = Round-Or $VS.AppGpuP50; app_gpu_p90 = Round-Or $VS.AppGpuP90; app_gpu_p99 = Round-Or $VS.AppGpuP99
+        app_cpu_p50 = Round-Or $VS.AppCpuP50; app_cpu_p90 = Round-Or $VS.AppCpuP90
+        total_gpu_p90 = Round-Or $VS.TotalGpuP90; comp_gpu_avg = Round-Or $VS.CompGpuAvg; comp_gpu_p90 = Round-Or $VS.CompGpuP90; comp_idle_avg = Round-Or $VS.CompIdleAvg
+        hmd = $(if ($Svr) { [string]$Svr.hmd } else { '' }); hz = $(if ($Svr) { $Svr.hz } else { $null })
+        target_w = $(if ($Svr) { $Svr.target_w } else { $null }); target_h = $(if ($Svr) { $Svr.target_h } else { $null }); res_scale = $(if ($Svr) { $Svr.res_scale } else { $null })
+        compositor = $(if ($Svr) { [string]$Svr.compositor } else { '' }); missing = $miss
+    }
 }
 
 # -- what limits the frames
@@ -581,7 +693,10 @@ if ($Gaps.Count) {
     Add-Finding 'info' 'logger' "The logger missed $($Gaps.Count) second(s)" 'A gap is only a system stall if the rows around it agree (DPC, hard faults, GPU load). Otherwise the logger itself was delayed.'
 }
 if (-not $HasFrames -and -not $AbOnly) {
-    Add-Finding 'high' 'data' 'No frame data in this session' 'Neither PresentMon nor Afterburner provided frame times. Get PresentMon from the app (Settings) and keep "Run logger as administrator" on.'
+    if ($IsVr) { Add-Finding 'high' 'data' 'No frame data in this session' "$VrWhy" }
+    else { Add-Finding 'high' 'data' 'No frame data in this session' 'Neither PresentMon nor Afterburner provided frame times. Get PresentMon from the app (Settings) and keep "Ask for admin when per-frame timing needs it" on, or use Settings > "Allow it for my account".' }
+} elseif ($IsVr -and -not $UseVr -and $VrWhy -and $Svr) {
+    Add-Finding 'medium' 'data' 'No SteamVR frame timing' "$VrWhy"
 }
 
 $SevOrder = @{ high = 0; medium = 1; low = 2; info = 3 }
@@ -594,6 +709,7 @@ if ($HasFrames) {
     if ($TargetFps -gt 0) { $parts += "target $(N $TargetFps 0)" }
     if (-not [double]::IsNaN($MissedPct)) { $parts += "$(N $MissedPct 1)% of frames over budget" }
     $parts += "$($FA.StutterCount) stutters"
+    if ($VrOut) { $parts += "SteamVR reprojected $(N $VrOut.reprojected_pct 1)%$(if ($VrOut.dropped_frames) { ", dropped $($VrOut.dropped_frames)" })" }
     if ($FA.Classified) {
         $lim = 'mixed'
         if (-not [double]::IsNaN($MissedPct) -and $MissedPct -ge 1 -and $FA.Missed -gt 0) {
@@ -605,7 +721,7 @@ if ($HasFrames) {
         $parts += $lim
     }
     $Verdict = ($parts -join ' | ')
-} elseif ($AbOnly) { $Verdict = "Average $(N $AbOnly.avg 1) fps (Afterburner). No per-frame data." }
+} elseif ($AbOnly) { $Verdict = "Average $(N $AbOnly.avg 1) fps ($SecSrc, 1 Hz). No per-frame data." }
 else { $Verdict = 'No frame data captured.' }
 
 # ================================================================
@@ -627,10 +743,11 @@ if ($HasFrames -and $span -gt 0) {
     $Chart.ft_max = @($bft | ForEach-Object { [math]::Round($_[2], 2) })
     $Chart.gpu_busy = @($bft | ForEach-Object { $k = [string]$_[0]; if ($gmap.ContainsKey($k)) { [math]::Round($gmap[$k], 2) } else { $null } })
     $Chart.stutters = @($FA.Stutters | Sort-Object Ft -Descending | Select-Object -First 300 | ForEach-Object { [math]::Round($_.T, 1) })
-    $Chart.source = 'presentmon'
+    $Chart.source = $(if ($UseVr) { 'steamvr' } else { 'presentmon' })
 } else {
     $src = 'ab_frametime_ms'
     if ($Sum['pm_ft_avg_ms'].n -gt 0) { $src = 'pm_ft_avg_ms' }
+    elseif ($Sum['vr_frametime_ms'].n -gt 0) { $src = 'vr_frametime_ms' }
     $Chart.t = @($GameRows | ForEach-Object { [math]::Round($TS[$_], 1) })
     $Chart.ft_avg = @($GameRows | ForEach-Object { $v = $SysCol[$src][$_]; if ([double]::IsNaN($v)) { $null } else { [math]::Round($v, 2) } })
     $Chart.ft_max = $Chart.ft_avg
@@ -640,7 +757,6 @@ if ($HasFrames -and $span -gt 0) {
 # ================================================================
 #  SUMMARY.JSON
 # ================================================================
-function Round-Or([double]$v, [int]$d = 2) { if ([double]::IsNaN($v) -or [double]::IsInfinity($v)) { return $null }; return [math]::Round($v, $d) }
 
 $FramesOut = [ordered]@{
     captured = $HasFrames
@@ -676,6 +792,7 @@ $Summary = [ordered]@{
     started = [string]$Meta.started; duration_s = $Meta.duration_s
     verdict = $Verdict
     frames = $FramesOut
+    vr = $VrOut
     gpu_throttle = [ordered]@{ samples = $ThrRows; power_cap = $ThrCount.power_cap; thermal = $ThrCount.sw_thermal + $ThrCount.hw_thermal; hw_slowdown = $ThrCount.hw_slowdown; power_brake = $ThrCount.power_brake }
     system = $SysOut
     logger = [ordered]@{ cpu_pct = $Meta.logger_cpu_pct; avg_loop_ms = $Meta.logger_avg_loop_ms; gaps = $Gaps.Count }
@@ -716,7 +833,7 @@ if ($HasFrames) {
     if ($Budget -gt 0) { L "| Frames over budget (>1.25x $(N $Budget 1) ms) | $($FA.Missed) ($(N $MissedPct 2)%) |" }
     L "| Stutters | $($FA.StutterCount) ($(N $StutterRate 2)/min, $($FA.MajorStutters) major) |"
     L "| Stutter type | GPU spike $($FA.StutterGpu) / game-thread $($FA.StutterCpu) / stall $($FA.StutterStall) |"
-    if (-not $IsVr) { L "| Frames never displayed | $($FA.Dropped) |" }
+    if (-not $UseVr) { L "| Frames never displayed | $($FA.Dropped) |" }
     L "| Frames analysed | $($FA.Frames) over $(Format-GpDuration $FA.Seconds) ($($FA.ExcludedFrames) loading/paused frames excluded) |"
     L ''
     L '## What limited the frames'
@@ -730,8 +847,31 @@ if ($HasFrames) {
     L "GPU busy per frame: $(N $FA.GpuBusyAvg 2) ms average, $(N $FA.GpuBusyP90 2) ms p90. CPU busy per frame: $(N $FA.CpuBusyAvg 2) ms average, $(N $FA.CpuBusyP90 2) ms p90."
     if (-not [double]::IsNaN($GpuHeadroom)) { L "Estimated headroom against the $(N $Budget 1) ms budget: GPU $(N $GpuHeadroom 0)%, CPU $(N $CpuHeadroom 0)%." }
     L ''
+    if ($VrOut) {
+        L '## SteamVR compositor'
+        L ''
+        L "Frame timing for this session comes from the SteamVR compositor (every frame the game submitted), read with the kit's scripts\SteamVR-Timing.ps1. Frame time = the interval between the game's WaitGetPoses calls; GPU busy = the game's GPU time; CPU busy = poses ready to last Submit."
+        L ''
+        L '| | |'
+        L '|---|---|'
+        $hs = @()
+        if ($VrOut.hmd) { $hs += $VrOut.hmd }
+        if ($VrOut.hz) { $hs += "$(N $VrOut.hz 0) Hz ($(N $Budget 2) ms per frame)" }
+        if ($VrOut.target_w) { $hs += "render target $($VrOut.target_w)x$($VrOut.target_h) per eye" }
+        if ($VrOut.res_scale) { $hs += "resolution scale $(N ((ConvertTo-GpDouble $VrOut.res_scale) * 100) 0)%" }
+        if ($hs.Count) { L "| Headset | $(Clean ($hs -join ', ')) |" }
+        L "| Reprojected | $($VrOut.reprojected) of $($VrOut.frames) frames ($(N $VrOut.reprojected_pct 2)%): GPU-late $($VrOut.reproj_gpu), CPU-late $($VrOut.reproj_cpu), shown twice or more $($VrOut.repeated) |"
+        L "| Motion smoothing (synthetic frames) | $($VrOut.motion_smoothed) |"
+        L "| Compositor dropped | $($VrOut.dropped_frames) frame(s), $($VrOut.comp_dropped) refresh(es) |"
+        L "| Mispresented / throttled | $($VrOut.mispresented) / $($VrOut.throttled) |"
+        L "| Game GPU p50 / p90 / p99 | $(N $VrOut.app_gpu_p50 2) / $(N $VrOut.app_gpu_p90 2) / $(N $VrOut.app_gpu_p99 2) ms |"
+        L "| Game CPU p50 / p90 | $(N $VrOut.app_cpu_p50 2) / $(N $VrOut.app_cpu_p90 2) ms |"
+        L "| Game + compositor GPU p90 | $(N $VrOut.total_gpu_p90 2) ms (compositor alone $(N $VrOut.comp_gpu_avg 2) ms avg, $(N $VrOut.comp_gpu_p90 2) ms p90) |"
+        L "| Compositor idle (time the game could still have used) | $(N $VrOut.comp_idle_avg 2) ms avg |"
+        L ''
+    }
 } elseif ($AbOnly) {
-    L "Afterburner framerate (1 Hz): average $(N $AbOnly.avg 1), minimum $(N $AbOnly.min 1) fps. Per-frame data was not captured, so stutter cannot be measured."
+    L "$SecSrc framerate (1 Hz): average $(N $AbOnly.avg 1), minimum $(N $AbOnly.min 1) fps. Per-frame data was not captured, so stutter cannot be measured."
     L ''
 } else {
     L 'No frame data was captured.'
@@ -814,7 +954,7 @@ if ($IsVr) {
     $rt = @($Meta.vr.runtimes_running) -join ', '
     L "- VR: runtime processes running at start: $(if ($rt) { $rt } else { 'none detected' }); OpenXR runtime: $(Clean $Meta.vr.openxr.ActiveRuntime)"
 }
-if ($FrameSource.present_mode) { L "- Present mode: $($FrameSource.present_mode), sync interval $($FrameSource.sync_interval)" }
+if ($FrameSource.present_mode -and -not $UseVr) { L "- Present mode: $($FrameSource.present_mode), sync interval $($FrameSource.sync_interval)" }
 L "- Logger cost: $(N $Meta.logger_cpu_pct 2)% CPU on average, $(N $Meta.logger_avg_loop_ms 1) ms per sample"
 L ''
 
@@ -867,7 +1007,8 @@ function A([string]$s = '') { [void]$ai.AppendLine($s) }
 
 A '# Game performance analysis request'
 A ''
-A 'You are an expert PC gaming and VR performance engineer. Below is a performance capture made with GamePerf (a PresentMon + Windows performance-counter logger), the game''s configuration files, and my goals. Diagnose what limits my frame rate and causes frame drops or stutter, and tell me exactly what to change.'
+$capWhat = $(if ($UseVr) { 'per-frame SteamVR compositor timing plus Windows performance counters' } elseif ($FrameSource.kind -eq 'presentmon') { 'per-frame PresentMon timing plus Windows performance counters' } else { 'Windows performance counters and 1 Hz frame-rate averages' })
+A "You are an expert PC gaming and VR performance engineer. Below is a performance capture made with GamePerf ($capWhat), the game's configuration files, and my goals. Diagnose what limits my frame rate and causes frame drops or stutter, and tell me exactly what to change."
 A ''
 A '## My goals'
 A ''
@@ -886,14 +1027,20 @@ A 'If a config file you need is missing, name it and where it usually lives. Do 
 A ''
 A '## How to read this data'
 A ''
-A '- **Frame time** = time between presents (PresentMon). 1% low FPS = 1000 / p99 frame time.'
-A '- **GPU busy / CPU busy** = how long the GPU / the game''s CPU work was busy on each frame. GPU busy near the frame time means GPU-bound; GPU busy well below it means the GPU waited for the CPU side (game thread, driver, sync) or for the frame cap.'
+if ($UseVr) {
+    A '- **Frame time** = the SteamVR compositor''s interval between the game''s frames (WaitGetPoses to WaitGetPoses). The headset refresh is the budget: a frame that misses it is held to the next refresh, so a missed frame shows as 2x the budget. 1% low FPS = 1000 / p99 frame time.'
+    A '- **GPU busy** = the game''s own GPU time per frame (SteamVR pre + post Submit). **CPU busy** = the game''s CPU time from new poses to its last Submit. In VR these are judged against the refresh budget, not the doubled interval: GPU busy over the budget means the GPU made the frame late.'
+    A '- **Reprojected** = frames SteamVR had to re-project because the game''s frame was not ready (SteamVR also flags whether it was CPU- or GPU-late). **Motion smoothing** = synthetic frames. **Compositor dropped** = the compositor itself missed the refresh. **Total GPU** = the game plus the compositor''s distortion and layers.'
+} else {
+    A '- **Frame time** = time between presents (PresentMon). 1% low FPS = 1000 / p99 frame time.'
+    A '- **GPU busy / CPU busy** = how long the GPU / the game''s CPU work was busy on each frame. GPU busy near the frame time means GPU-bound; GPU busy well below it means the GPU waited for the CPU side (game thread, driver, sync) or for the frame cap.'
+}
 A '- **Stutter** = a frame at least 2x the median of the ~60 frames around it and at least 6 ms slower. Types: *GPU spike* (GPU busy for the whole frame), *game-thread spike* (CPU busy), *stall* (neither busy: I/O, shader compilation, locks, the OS).'
 A '- **Markers** = moments where I pressed a key because I felt a hitch.'
 A '- **hardfaults_s is SYSTEM-WIDE**, not the game. On a traced iRacing session the sim caused 14 of 4,712 hard faults; Windows services caused the rest. Treat bursts as leads only.'
 A '- **game_top_thread** = the game''s busiest thread as % of one core. Near 100% = main-thread bound regardless of total CPU %.'
 A '- **ccd0_cpu / ccd1_cpu** = average load of the two CPU groups (on dual-CCD Ryzen X3D: V-Cache die / frequency die).'
-if ($IsVr) { A '- **VR caveat**: PresentMon times the game''s own presents. In VR the runtime''s compositor and reprojection are separate; GPU busy still measures the game''s own GPU work per frame.' }
+if ($IsVr -and -not $UseVr -and $FrameSource.kind -eq 'presentmon') { A '- **VR caveat**: no SteamVR compositor timing in this session; PresentMon timed the game''s own desktop presents. The compositor''s reprojection is not visible here; GPU busy still measures the game''s own GPU work per frame.' }
 A ''
 A '## Session report'
 A ''
@@ -911,10 +1058,11 @@ if ($TS.Length -gt 0) {
     for ($i = 0; $i -lt $mkOnes.Length; $i++) { $mkOnes[$i] = 1 }
     A "## Timeline ($bw-second buckets, session seconds)"
     A ''
-    A 'Columns: t, fps, worst frame ms, stutters, GPU busy ms, CPU busy ms, GPU load %, GPU MHz, GPU W, VRAM MB, CPU total %, game busiest thread %, CCD0 %, CCD1 %, DPC %, hard faults/s max, disk read MB/s max, markers'
+    $vrTl = $Sum['vr_reprojected'].n -gt 0
+    A ('Columns: t, fps, worst frame ms, stutters, GPU busy ms, CPU busy ms, GPU load %, GPU MHz, GPU W, VRAM MB, CPU total %, game busiest thread %, CCD0 %, CCD1 %, DPC %, hard faults/s max, disk read MB/s max, markers' + $(if ($vrTl) { ', SteamVR reprojected frames per second (average), SteamVR dropped frames per second (max)' } else { '' }))
     A ''
     A '```csv'
-    A 't,fps,ft_max,stutters,gpu_busy,cpu_busy,gpu_load,gpu_mhz,gpu_w,vram_mb,cpu,game_thread,ccd0,ccd1,dpc,hardfaults_max,disk_read_max,markers'
+    A ('t,fps,ft_max,stutters,gpu_busy,cpu_busy,gpu_load,gpu_mhz,gpu_w,vram_mb,cpu,game_thread,ccd0,ccd1,dpc,hardfaults_max,disk_read_max,markers' + $(if ($vrTl) { ',vr_reproj_s,vr_dropped_max' } else { '' }))
     for ($b = [math]::Floor($t0); $b -le $t1; $b += $bw) {
         $e = $b + $bw - 0.001
         $fps = ''; $ftm = ''; $gb = ''; $cb = ''
@@ -924,7 +1072,7 @@ if ($TS.Length -gt 0) {
             $wg = [GamePerf.Native.Stats]::Window($FA.T, $FA.Gpu, $b, $e); if ($wg[0] -gt 0) { $gb = N $wg[1] 2 }
             $wc = [GamePerf.Native.Stats]::Window($FA.T, $FA.Cpu, $b, $e); if ($wc[0] -gt 0) { $cb = N $wc[1] 2 }
         } else {
-            $wa = [GamePerf.Native.Stats]::Window($TS, $SysCol['ab_fps'], $b, $e); if ($wa[0] -gt 0) { $fps = N $wa[1] 1 }
+            $wa = [GamePerf.Native.Stats]::Window($TS, $SysCol[$SecCol], $b, $e); if ($wa[0] -gt 0) { $fps = N $wa[1] 1 }
         }
         $st = 0
         if ($stT.Length) { $st = [int]([GamePerf.Native.Stats]::Window($stT, $ones, $b, $e)[0]) }
@@ -937,6 +1085,10 @@ if ($TS.Length -gt 0) {
             $cells += $(if ($wv[0] -gt 0) { N $wv[$pair[1]] $pair[2] } else { '' })
         }
         $cells += $mk
+        if ($vrTl) {
+            $wv = [GamePerf.Native.Stats]::Window($TS, $SysCol['vr_reprojected'], $b, $e); $cells += $(if ($wv[0] -gt 0) { N $wv[1] 1 } else { '' })
+            $wv = [GamePerf.Native.Stats]::Window($TS, $SysCol['vr_dropped'], $b, $e); $cells += $(if ($wv[0] -gt 0) { N $wv[2] 0 } else { '' })
+        }
         A ((@($cells) | ForEach-Object { ("$_" -replace '^-$', '') }) -join ',')
     }
     A '```'

@@ -105,7 +105,8 @@ function Get-GpDefaultSettings {
         Mode                 = 'Monitor'   # Monitor | VR
         TargetFpsMonitor     = 0           # 0 = use the monitor refresh rate
         TargetFpsVr          = 90
-        CaptureFrames        = $true
+        CaptureFrames        = $true       # PresentMon (flat screen; VR when allowed without admin)
+        SteamVrTiming        = $true       # VR frame timing from the SteamVR compositor (the kit's reader)
         RunElevated          = $true
         StopWithGame         = $false
         MarkerKey            = 'ScrollLock'

@@ -18,7 +18,10 @@ FullTrace answers "what was my PC doing?" for iRacing. GamePerf asks the same qu
   - Its source, icon and manifest are in `GamePerf\launcher\`. `Build-Launcher.ps1` rebuilds it with the C# compiler that ships with Windows.
   - `Start-GamePerf.bat` remains as a fallback.
 - **One-button recording.** Press Start logging, play, press Stop. Auto-detect follows whichever game you switch to.
-- **Per-frame timing (Intel PresentMon).** Average FPS, 1% and 0.1% lows, frames over the target's budget, and stutters. Every frame is classed as GPU-bound, CPU-side or capped. Every stutter is classed as a GPU spike, a game-thread spike or a stall, and is lined up with the 1 Hz system log around it.
+- **Per-frame timing.** Average FPS, 1% and 0.1% lows, frames over the target's budget, and stutters. Every frame is classed as GPU-bound, CPU-side or capped. Every stutter is classed as a GPU spike, a game-thread spike or a stall, and is lined up with the 1 Hz system log around it.
+  - **VR: from the SteamVR compositor**, read through the kit's own `scripts/SteamVR-Timing.ps1` (v3.4.0, the same reader FullTrace uses), loaded rather than copied. Every compositor frame goes to `vr-frames.csv`: the game's frame interval, GPU and CPU time, total and compositor GPU, and SteamVR's own verdict (reprojected CPU- or GPU-late, motion-smoothed, dropped, throttled). The kit's `vr_*` columns go into `system.csv` under the same names. No Afterburner, RTSS, PresentMon or admin. SteamVR must already be running; GamePerf never starts it.
+  - In VR a late frame is held to the next refresh, so "busy" is judged against the refresh budget, not the doubled interval. The budget follows the headset's refresh rate as SteamVR reports it.
+  - **Monitor: Intel PresentMon.**
 - **The 1 Hz log is FullTrace's**, generalised to any game. It keeps the same locale-safe CSV rules and the same `hardfaults_s` warning, and adds the game's busiest-thread load, effective CPU clock, disk throughput, commit charge, timer resolution and the driver's clock-event reasons.
 - **Marker key.** Scroll Lock by default: press it when you feel a hitch and the analysis looks there first.
 - **A/B by default.** Each session snapshots the game's config files. The next session of the same game diffs them and compares the numbers.
@@ -32,7 +35,7 @@ FullTrace answers "what was my PC doing?" for iRacing. GamePerf asks the same qu
 - **No sound.** The marker click is off by default.
 - **No focus stealing.** A finished session flashes the taskbar button instead of pulling the window in front of the game.
 - **Contained.** The Record page shows the recorder's live readings and latest log lines.
-- **No admin prompt.** **Allow it for my account** adds the account to the built-in *Performance Log Users* group, once, by SID. After that, per-frame timing needs no admin prompt at all.
+- **No admin prompt.** In VR, never: the recorder is not elevated, because SteamVR runs as you. On a monitor, **Allow it for my account** adds the account to the built-in *Performance Log Users* group, once, by SID. After that, PresentMon needs no admin prompt at all.
 
 ### Light by design
 

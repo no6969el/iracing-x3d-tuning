@@ -10,9 +10,16 @@
         runtime CPU, RAM / commit / hard faults, disk throughput, GPU load,
         clocks, power, temperature, VRAM, throttle reasons and Afterburner's
         limiter flags, timer resolution and the power plan.
-      * Per-frame capture (frames-N.csv) from Intel PresentMon: every
-        frame's time, how long the CPU and the GPU were busy on it, and
-        whether it was displayed. This is what turns "it felt stuttery"
+      * VR: every frame from the SteamVR compositor (vr-frames.csv), read
+        by the kit's own scripts\SteamVR-Timing.ps1 - the reader FullTrace
+        uses. Frame interval, the app's GPU and CPU time, compositor time,
+        and whether SteamVR reprojected or dropped it. Works for OpenVR
+        and OpenXR games alike (both submit through the compositor). No
+        Afterburner, no RTSS, no PresentMon, no admin. SteamVR has to be
+        running already: this never starts it and never takes the scene.
+      * Flat screen: per-frame capture (frames-N.csv) from Intel PresentMon:
+        every frame's time, how long the CPU and the GPU were busy on it,
+        and whether it was displayed. This is what turns "it felt stuttery"
         into "frame 41,233 took 38 ms and the GPU was idle for 30 of them".
       * A marker hotkey (Scroll Lock by default): press it the moment you
         feel a hitch and the analysis looks there first.
@@ -50,9 +57,11 @@
     session folder) or closing the app ends the session. The analysis
     runs automatically afterwards.
 
-    Per-frame capture needs administrator rights (or membership of the
+    PresentMon needs administrator rights (or membership of the
     "Performance Log Users" group). Without them the 1 Hz log still runs
-    and the session says why the frame columns are empty.
+    and the session says why the frame columns are empty. SteamVR timing
+    needs neither - and in VR the recorder is never elevated, because
+    SteamVR runs as you and an elevated client is not one it expects.
 #>
 
 [CmdletBinding()]
@@ -66,6 +75,8 @@ param(
     [string]$Label = '',
     [switch]$NoFrames,
     [string]$PresentMon = '',
+    # do not open the (read-only, Background) SteamVR client at all
+    [switch]$NoSteamVr,
     [string]$MarkerKey = 'ScrollLock',
     # off by default: the logger is silent unless you want a confirmation sound
     [switch]$Beep,
@@ -98,6 +109,7 @@ if ($req) {
             'TargetFps'    { $TargetFps = ConvertTo-GpDouble $p.Value }
             'Label'        { $Label = [string]$p.Value }
             'NoFrames'     { $NoFrames = [bool]$p.Value }
+            'NoSteamVr'    { $NoSteamVr = [bool]$p.Value }
             'PresentMon'   { $PresentMon = [string]$p.Value }
             'MarkerKey'    { $MarkerKey = [string]$p.Value }
             'Beep'         { $Beep = [bool]$p.Value }
@@ -116,6 +128,7 @@ $StatusPath = Join-Path $SessionDir 'status.json'
 $StopFlag   = Join-Path $SessionDir 'stop.flag'
 $MetaPath   = Join-Path $SessionDir 'session.json'
 $SmiCsv     = Join-Path $SessionDir 'gpu-smi.csv'
+$VrCsv      = Join-Path $SessionDir 'vr-frames.csv'
 $LogPath    = Join-Path $SessionDir 'logger.log'
 $ConfigDir  = Join-Path $SessionDir 'configs'
 
@@ -394,8 +407,16 @@ function ConvertTo-GpMillivolts([double]$v) {
 $PmExe = $null
 if (-not $NoFrames) {
     if ($PresentMon -and (Test-Path -LiteralPath $PresentMon)) { $PmExe = $PresentMon } else { $PmExe = Find-GpPresentMon $Settings }
-    if (-not $PmExe) { Add-GpWarning 'PresentMon not found - per-frame capture is off. Use "Get PresentMon" in the app.' }
-    elseif (-not (Test-GpAdmin) -and -not (Test-GpPerfLogUser)) { Add-GpWarning 'Not running as administrator - PresentMon will be refused. Settings > "Allow it for my account" fixes this for good.' }
+    if (-not $PmExe) {
+        if (-not $IsVr) { Add-GpWarning 'PresentMon not found - per-frame capture is off. Use "Get PresentMon" in the app.' }
+    } elseif (-not (Test-GpAdmin) -and -not (Test-GpPerfLogUser)) {
+        if ($IsVr) {
+            # SteamVR supplies the frame timing in VR. PresentMon would only add the
+            # desktop mirror's presents, and it would be refused anyway.
+            $PmExe = $null
+            Write-GpLog 'PresentMon skipped: it needs admin rights. VR frame timing comes from SteamVR.'
+        } else { Add-GpWarning 'Not running as administrator - PresentMon will be refused. Settings > "Allow it for my account" fixes this for good.' }
+    }
 }
 $PmSession = "GamePerf_$PID"
 $PmProc = $null; $PmIndex = 0; $PmStart = $null; $PmState = 'off'; $PmFailedForPid = 0
@@ -441,6 +462,91 @@ function Stop-GpFrames {
 }
 
 # ================================================================
+#  STEAMVR COMPOSITOR TIMING  (the kit's reader, as FullTrace uses it)
+# ================================================================
+# scripts\SteamVR-Timing.ps1 opens a Background OpenVR client: it does not
+# start SteamVR, keep it running, take scene focus or submit frames, and
+# until vrserver / vrcompositor are running it does not even load
+# openvr_api.dll. It retries every ~5 s, so SteamVR can be started after
+# the recorder. Its 1 Hz vr_* columns go into system.csv unchanged;
+# GamePerf adds every individual frame (vr-frames.csv) on top.
+$SvrModule = Join-Path $GpKitScripts 'SteamVR-Timing.ps1'
+$SvrOn = $false
+$SvrNote = ''
+if ($NoSteamVr) { $SvrNote = 'off (disabled in Settings)' }
+elseif (Test-Path -LiteralPath $SvrModule) {
+    try { . $SvrModule; $SvrOn = $true } catch { $SvrNote = "the kit's SteamVR reader failed to load: $($_.Exception.Message)" }
+} else { $SvrNote = "the kit's scripts\SteamVR-Timing.ps1 is missing - keep GamePerf inside the kit folder" }
+if (-not $SvrOn -and $IsVr -and -not $NoSteamVr) { Add-GpWarning "No SteamVR frame timing: $SvrNote." }
+$SvrWriter = $null
+$SvrBuf = $null
+$SvrSeen = ''
+$SvrWaitSince = $null
+$SvrHzApplied = $false
+$SvrLastStatic = $null
+
+function Read-GpVrFrames {
+    <# Every compositor frame since the last call -> vr-frames.csv. Cheap: one read, decoded in C#. #>
+    if (-not $SvrOn -or -not $script:VrConnected) { return }
+    $size = 0
+    if ($script:VrState.StructSize) { $size = [int]$script:VrState.StructSize }
+    if ($size -le 0) { return }
+    if (-not $script:SvrWriter) {
+        $script:SvrWriter = [GamePerf.Native.VrFrameWriter]::new($VrCsv, $QpcStart / $QpcFreq)
+        Add-GpEvent 'steamvr_frames_start' (Split-Path -Leaf $VrCsv)
+    }
+    if (-not $script:SvrBuf -or $script:SvrBuf.Length -ne $size * 128) { $script:SvrBuf = New-Object byte[] ($size * 128) }
+    $n = -1
+    try { $n = [int][SteamVrClient]::ReadFrameTimings($script:SvrBuf, $size, 128) } catch { $n = -1 }
+    if ($n -le 0) { return }
+    $scene = 0
+    try { $scene = [int][SteamVrClient]::ScenePid() } catch { $scene = 0 }
+    $qn = [GamePerf.Native.Win]::Qpc()
+    [void]$script:SvrWriter.Add($script:SvrBuf, $size, $n, ($qn - $QpcStart) / $QpcFreq, $qn / $QpcFreq, $scene)
+}
+
+function Update-GpVrState {
+    <# Log connection changes once each, and say plainly why there is no VR timing. #>
+    if (-not $SvrOn) { return }
+    $st = [string]$script:VrStatus
+    if ($st -ne $script:SvrSeen) {
+        switch ($st) {
+            'connected' {
+                $d = ''; if ($script:VrDetail) { $d = " ($($script:VrDetail))" }
+                Write-GpLog "SteamVR frame timing connected$d - a read-only background client." 'Green'
+                Add-GpEvent 'steamvr_connected' ([string]$script:VrDetail)
+            }
+            'no-dll' { Add-GpWarning 'SteamVR is running but its openvr_api.dll was not found, so there is no VR frame timing.' }
+            'init-failed' {
+                $why = [string]$script:VrLastError; if (-not $why) { $why = 'init failed' }
+                $adm = ''; if (Test-GpAdmin) { $adm = ' The recorder is running as administrator and SteamVR is not - run GamePerf normally (not as admin).' }
+                Write-GpLog "SteamVR frame timing could not connect ($why). Retrying." 'Yellow'
+                if ($adm) { Add-GpWarning "SteamVR frame timing could not connect ($why).$adm" }
+            }
+            'read-failed' { Write-GpLog 'SteamVR stopped answering - VR frame timing paused until it does.' 'Yellow'; Add-GpEvent 'steamvr_lost' '' }
+            'not-running' { if ($script:SvrSeen) { Write-GpLog 'SteamVR is not running.' 'Yellow' } }
+        }
+        $script:SvrSeen = $st
+    }
+    # The kit clears what it knows about the headset when SteamVR goes away; keep the last of it for the report.
+    if ($st -eq 'connected' -and [double]$script:VrStatic.Hz -gt 1) { $script:SvrLastStatic = $script:VrStatic.Clone() }
+    # In VR with a game running and still no SteamVR after 15 s: the one thing to fix.
+    if ($IsVr -and $GameTracker -and $st -ne 'connected') {
+        if (-not $script:SvrWaitSince) { $script:SvrWaitSince = Get-Date }
+        elseif (((Get-Date) - $script:SvrWaitSince).TotalSeconds -gt 15) {
+            if ($st -eq 'not-running') {
+                $rt = ''
+                if ($OpenXr -and $OpenXr.ActiveRuntime -and "$($OpenXr.ActiveRuntime)" -notmatch 'steam') {
+                    $rt = " Note: the active OpenXR runtime is $(Split-Path -Leaf "$($OpenXr.ActiveRuntime)"), not SteamVR - OpenXR games then bypass SteamVR, and per-frame timing needs PresentMon (Settings > Allow it for my account)."
+                }
+                Add-GpWarning "SteamVR is not running, so there is no VR frame timing. GamePerf reads it from the SteamVR compositor and never starts SteamVR itself - start SteamVR (or the headset software that starts it).$rt"
+            }
+            elseif ($st -eq 'init-failed') { Add-GpWarning "SteamVR is running but GamePerf could not connect to it ($([string]$script:VrLastError))." }
+        }
+    } else { $script:SvrWaitSince = $null }
+}
+
+# ================================================================
 #  EVENTS + CSV
 # ================================================================
 $EvWriter = New-Object IO.StreamWriter($EvCsv, $false, (New-Object Text.UTF8Encoding $false))
@@ -460,11 +566,20 @@ $Columns = @(
     'gpu_util', 'gpu_mem_util', 'vram_used_mb', 'vram_total_mb', 'gpu_power_w', 'gpu_gclk', 'gpu_mclk', 'gpu_temp', 'fan_pct', 'pstate', 'gpu_throttle',
     'gpu_volt_mv', 'volt_limit', 'power_limit', 'temp_limit', 'noload_limit', 'pcie_bus_pct', 'fb_usage_pct', 'mem_temp_c', 'fan_rpm', 'ab_fps', 'ab_frametime_ms',
     'pm_frames', 'pm_fps', 'pm_ft_avg_ms', 'pm_ft_max_ms', 'pm_gpu_busy_ms', 'pm_cpu_busy_ms', 'pm_over_budget',
-    'timer_res_ms', 'power_plan', 'loop_ms'
+    'timer_res_ms', 'power_plan', 'loop_ms',
+    # where fps came from this second: steamvr | presentmon | afterburner
+    'fps_source',
+    # the kit's SteamVR columns, same names and order as FullTrace's (minus its gpu_timing_source)
+    'vr_fps', 'vr_fps_presented', 'vr_frametime_ms', 'vr_frametime_max_ms', 'vr_app_gpu_ms', 'vr_app_gpu_max_ms', 'vr_comp_gpu_ms', 'vr_comp_cpu_ms',
+    'vr_gpu_ms', 'vr_idle_cpu_ms', 'vr_submit_ms', 'vr_over_budget', 'vr_reprojected', 'vr_reproj_cpu', 'vr_reproj_gpu', 'vr_motion', 'vr_dropped',
+    'vr_mispresented', 'vr_throttled', 'vr_frames', 'vr_hz', 'vr_target_w', 'vr_target_h', 'vr_res_scale', 'vr_predict_ms', 'vr_predict_extra',
+    'vr_vsync_to_photons_ms', 'vr_transfer_ms', 'vr_scene_app', 'vr_scene_pid', 'vr_renderer', 'vr_hmd'
 )
 $SysWriter = New-Object IO.StreamWriter($SysCsv, $false, (New-Object Text.UTF8Encoding $false))
 $SysWriter.AutoFlush = $true
 $SysWriter.WriteLine($Columns -join ',')
+$VrCols = @($Columns | Where-Object { $_ -like 'vr_*' -and $_ -ne 'vr_cpu' })
+$VrTextCols = @{ vr_scene_app = $true; vr_renderer = $true; vr_hmd = $true }
 
 # ================================================================
 #  SNAPSHOT + START
@@ -492,7 +607,7 @@ $Meta = [ordered]@{
     marker_key     = $MarkerKey
     machine        = $Machine
     vr             = [ordered]@{ runtimes_running = @($VrGroup.Found); openxr = $OpenXr }
-    tools          = [ordered]@{ presentmon = $(if ($PmExe) { Split-Path -Leaf $PmExe } else { '' }); nvidia_smi = [bool]$SmiExe; gpu_engine_fallback = [bool]$GpuEng }
+    tools          = [ordered]@{ presentmon = $(if ($PmExe) { Split-Path -Leaf $PmExe } else { '' }); nvidia_smi = [bool]$SmiExe; gpu_engine_fallback = [bool]$GpuEng; steamvr = $SvrOn }
     game_exe = ''; game_name = ''; game_path = ''; game_version = ''
 }
 Write-GpJson -Path $MetaPath -Object $Meta
@@ -659,7 +774,8 @@ while ($true) {
             if ($GameTracker -and $life -lt 10) {
                 $script:PmFailedForPid = $GamePid
                 $PmState = 'failed'
-                Add-GpWarning 'PresentMon stopped immediately - per-frame capture needs the logger to run as administrator.'
+                if ($IsVr) { Write-GpLog 'PresentMon was refused (it needs admin rights). VR frame timing comes from SteamVR.' 'Yellow' }
+                else { Add-GpWarning 'PresentMon stopped immediately - per-frame capture needs the logger to run as administrator.' }
             }
             $PmProc = $null
         }
@@ -690,6 +806,28 @@ while ($true) {
         # ---- frames since last sample -------------------------------------
         $fw = $null
         if ($Live) { $fw = $Live.Poll() }
+
+        # ---- SteamVR compositor: this second's vr_* row, and every frame ---
+        $vrRow = $null
+        if ($SvrOn) {
+            try { $vrRow = Get-SteamVrSample } catch { $vrRow = $null }
+            try { Read-GpVrFrames } catch { }
+            Update-GpVrState
+        }
+        $vrFps = [double]::NaN
+        if ($vrRow) { $vrFps = ConvertTo-GpDouble $vrRow.vr_fps }
+        # In VR the headset's refresh is the frame budget: every refresh should get a new frame.
+        if ($IsVr -and -not $SvrHzApplied -and $SvrOn -and [double]$script:VrStatic.Hz -gt 1) {
+            $SvrHzApplied = $true
+            $hz = [math]::Round([double]$script:VrStatic.Hz, 2)
+            if ($TargetFps -gt 0 -and [math]::Abs($TargetFps - $hz) -gt 1) {
+                $Meta.target_fps_requested = $TargetFps
+                Add-GpWarning ('The target was {0} fps but the headset runs at {1} Hz - frames are judged against the headset ({2} ms per frame).' -f (Inv $TargetFps), (Inv $hz), (Inv ([math]::Round(1000.0 / $hz, 2))))
+            }
+            $TargetFps = $hz; $BudgetMs = 1000.0 / $hz
+            $Meta.target_fps = $TargetFps; $Meta.budget_ms = $BudgetMs; $Meta.budget_source = 'headset refresh (SteamVR)'
+            Write-GpJson -Path $MetaPath -Object $Meta
+        }
 
         # ---- slow-changing state ------------------------------------------
         if ($Iter % 10 -eq 0) {
@@ -742,8 +880,20 @@ while ($true) {
         if ($fw -and $fw.Frames -gt 0) {
             $row += @((Inv $fw.Frames), (Inv (1000.0 / $fw.FtAvg)), (Inv $fw.FtAvg), (Inv $fw.FtMax), (Inv $fw.GpuBusyAvg), (Inv $fw.CpuBusyAvg), (Inv $fw.OverBudget))
         } else { $row += @((Inv $(if ($fw) { 0 } else { '' })), '', '', '', '', '', '') }
+        # Which source this second's FPS is from. SteamVR in VR (or whenever the
+        # game is SteamVR's scene app), else PresentMon, else Afterburner.
+        $sceneIsGame = $vrRow -and $GamePid -and ("$($vrRow.vr_scene_pid)" -eq "$GamePid")
+        $fpsSrc = ''
+        if (-not [double]::IsNaN($vrFps) -and ($IsVr -or $sceneIsGame)) { $fpsSrc = 'steamvr' }
+        elseif ($fw -and $fw.Frames -gt 0) { $fpsSrc = 'presentmon' }
+        elseif (-not [double]::IsNaN($abFps)) { $fpsSrc = 'afterburner' }
+        $vrCells = foreach ($name in $VrCols) {
+            $val = $null
+            if ($vrRow -and $vrRow.ContainsKey($name)) { $val = $vrRow[$name] }
+            if ($VrTextCols.ContainsKey($name)) { Txt $val } else { Inv $val }
+        }
         $loopMs = $t0.Elapsed.TotalMilliseconds
-        $row += @((Inv $timerRes), (Txt $Plan), (Inv $loopMs))
+        $row += @((Inv $timerRes), (Txt $Plan), (Inv $loopMs), $fpsSrc) + @($vrCells)
         $SysWriter.WriteLine($row -join ',')
         $LoopSum += $loopMs
 
@@ -755,10 +905,31 @@ while ($true) {
         $Status.waiting_for = $(if ($WantNames.Count) { ($WantNames -join ', ') } else { 'the focused game' })
         $Status.presentmon = $PmState
         $Status.markers = $Markers
-        $Status.frames_total = $(if ($Live) { $Live.TotalFrames } else { 0 })
-        $Status.fps = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round(1000.0 / $fw.FtAvg, 1) } elseif (-not [double]::IsNaN($abFps)) { [math]::Round($abFps, 1) } else { $null })
-        $Status.ft_max = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round($fw.FtMax, 1) } else { $null })
-        $Status.gpu_busy = $(if ($fw -and -not [double]::IsNaN($fw.GpuBusyAvg)) { [math]::Round($fw.GpuBusyAvg, 1) } else { $null })
+        $Status.frame_source = $fpsSrc
+        if ($fpsSrc -eq 'steamvr') {
+            $Status.frames_total = $(if ($SvrWriter) { $SvrWriter.Written } else { 0 })
+            $Status.fps = [math]::Round($vrFps, 1)
+            $Status.ft_max = ConvertTo-GpDouble $vrRow.vr_frametime_max_ms
+            $Status.gpu_busy = ConvertTo-GpDouble $vrRow.vr_app_gpu_ms
+            $Status.missed = ConvertTo-GpDouble $vrRow.vr_reprojected
+            $Status.dropped = ConvertTo-GpDouble $vrRow.vr_dropped
+        } else {
+            $Status.frames_total = $(if ($Live) { $Live.TotalFrames } else { 0 })
+            $Status.fps = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round(1000.0 / $fw.FtAvg, 1) } elseif (-not [double]::IsNaN($abFps)) { [math]::Round($abFps, 1) } else { $null })
+            $Status.ft_max = $(if ($fw -and $fw.Frames -gt 0) { [math]::Round($fw.FtMax, 1) } else { $null })
+            $Status.gpu_busy = $(if ($fw -and -not [double]::IsNaN($fw.GpuBusyAvg)) { [math]::Round($fw.GpuBusyAvg, 1) } else { $null })
+            $Status.missed = $(if ($fw -and $fw.Frames -gt 0 -and $BudgetMs -gt 0) { $fw.OverBudget } else { $null })
+            $Status.dropped = $null
+        }
+        $Status.steamvr = $null
+        if ($SvrOn) {
+            $Status.steamvr = [ordered]@{
+                state = [string]$script:VrStatus; detail = [string]$script:VrDetail; error = [string]$script:VrLastError
+                hz = $(if ([double]$script:VrStatic.Hz -gt 1) { [math]::Round([double]$script:VrStatic.Hz, 1) } else { $null })
+                hmd = [string]$script:VrStatic.Hmd; scene_app = $(if ($vrRow) { [string]$vrRow.vr_scene_app } else { '' })
+                frames = $(if ($SvrWriter) { $SvrWriter.Written } else { 0 })
+            }
+        } elseif ($SvrNote) { $Status.steamvr = [ordered]@{ state = 'off'; detail = $SvrNote } }
         $Status.budget_ms = $BudgetMs
         $Status.gpu_util = ConvertTo-GpDouble $gpuUtil
         $Status.gpu_temp = ConvertTo-GpDouble $gtemp
@@ -792,7 +963,11 @@ while ($true) {
 
     # ---- wait out the second, watching the marker key and Ctrl+C -------
     $stopNow = $false
+    $midVr = $false
     while ($t0.Elapsed.TotalMilliseconds -lt 1000) {
+        # A second read half way through: the compositor keeps only 128 frames,
+        # which is less than a second at 144 Hz.
+        if ($SvrOn -and -not $midVr -and $t0.Elapsed.TotalMilliseconds -ge 500) { $midVr = $true; try { Read-GpVrFrames } catch { } }
         $down = [GamePerf.Native.Win]::KeyDown($MarkerVk)
         if ($down -and -not $KeyWasDown) {
             $Markers++; $MarkerThisSecond++
@@ -822,6 +997,29 @@ finally {
     $Status.state = 'stopping'; Publish-GpStatus
     Write-GpLog "Stopping ($StopReason)..." 'Cyan'
     Stop-GpFrames
+    # The last frames, then drop the Background client. Closing it does not stop SteamVR or the game.
+    $SvrMeta = [ordered]@{ reader = ''; note = $SvrNote }
+    if ($SvrOn) {
+        try { Read-GpVrFrames } catch { }
+        $static = $SvrLastStatic
+        if (-not $static) { $static = $script:VrStatic }
+        $comp = ''
+        try { if ('SteamVrClient' -as [type]) { $comp = [string][SteamVrClient]::CompositorVersion } } catch { }
+        $SvrMeta = [ordered]@{
+            reader = 'scripts\SteamVR-Timing.ps1 (kit)'; note = $SvrNote
+            state = [string]$script:VrStatus; last_error = [string]$script:VrLastError; compositor = $comp
+            hmd = [string]$static.Hmd; hz = $(if ([double]$static.Hz -gt 1) { [math]::Round([double]$static.Hz, 2) } else { $null })
+            target_w = $static.TargetW; target_h = $static.TargetH; res_scale = $static.ResScale
+            vsync_to_photons_ms = $(if ([double]$static.PhotonsMs -ge 0) { [math]::Round([double]$static.PhotonsMs, 2) } else { $null })
+            frames_file = ''; frames = 0; missing = 0; rejected = 0; time_base = ''
+        }
+        if ($SvrWriter) {
+            $SvrMeta.frames_file = Split-Path -Leaf $VrCsv
+            $SvrMeta.frames = $SvrWriter.Written; $SvrMeta.missing = $SvrWriter.Missing; $SvrMeta.rejected = $SvrWriter.Rejected; $SvrMeta.time_base = $SvrWriter.TimeBase
+        }
+        try { Disconnect-SteamVrTiming } catch { }
+    }
+    if ($SvrWriter) { $SvrWriter.Dispose() }
     try { if ($SmiProc -and -not $SmiProc.HasExited) { $SmiProc.Kill() } } catch { }
     try { $SysWriter.Dispose() } catch { }
 
@@ -843,6 +1041,7 @@ finally {
     $Meta.stop_reason = $StopReason
     $Meta.frame_files = @($FrameFiles.ToArray())
     $Meta.presentmon_state = $PmState
+    $Meta.steamvr = $SvrMeta
     $Meta.markers = $Markers
     $Meta.background_top = $bg
     $Meta.logger_cpu_pct = $(if ([double]::IsNaN($selfCpu)) { $null } else { [math]::Round($selfCpu, 2) })

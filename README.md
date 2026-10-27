@@ -72,7 +72,7 @@ The new columns are appended after `fb_usage_pct`. Hard-fault columns, when you 
 
 [`GamePerf/`](GamePerf/README.md) takes FullTrace's method to **any game**. Double-click **`GamePerf\GamePerf.exe`**; the first launch offers a desktop and Start-menu icon. Press **Start logging**, play, press **Stop**. You get:
 
-- **Per-frame timing (Intel PresentMon):** 1% / 0.1% lows, stutters, and whether each frame was **GPU-bound or held up on the CPU side**.
+- **Per-frame timing:** in VR from the **SteamVR compositor**, through the same `scripts/SteamVR-Timing.ps1` reader FullTrace uses (no Afterburner, no admin), and on a monitor from Intel PresentMon. 1% / 0.1% lows, stutters, SteamVR reprojection and dropped frames, and whether each frame was **GPU-bound or held up on the CPU side**.
 - **A 1 Hz system log** on FullTrace's columns, plus the game's busiest-thread load.
 - **A report** that lines up every stutter with what the PC was doing at that moment.
 - **`ai-prompt.md`**: your goals, the data and the game's config files, found automatically for iRacing, ACC, AMS2, LMU, rF2, MSFS, DCS and more. Paste it into Grok / ChatGPT / Claude / Gemini, or connect a provider and get the analysis inside the app.

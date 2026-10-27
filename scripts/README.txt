@@ -62,8 +62,10 @@ elevated PowerShell (right-click > Run as administrator). Marked below.
 
 --- DIAGNOSTICS (read-only) ---
 GamePerf (..\GamePerf\)  FullTrace's method for ANY game, monitor or VR, with
-                         per-frame timing (PresentMon), stutter attribution,
-                         a report and an AI-ready brief incl. config files.
+                         per-frame timing (SteamVR compositor in VR, via
+                         SteamVR-Timing.ps1; PresentMon on a monitor),
+                         stutter attribution, a report and an AI-ready
+                         brief incl. config files.
                          GamePerf\GamePerf.exe, or the menu's GAMEPERF button.
 FullTrace.ps1            MAIN logger. Run, race, read the CSV on your Desktop.
                          Time-gaps in it = system-wide stalls.            (no admin)
@@ -127,8 +129,9 @@ Kit-Common.ps1           Shared kit version + quiet service/task lists +
 HardFault-Common.ps1     Hard-fault helpers (Find-Xperf, analysis, QuickEdit).
                          Loaded by FullTrace / Preflight / Trace.         (n/a)
 SteamVR-Timing.ps1       SteamVR compositor timing for FullTrace.
-                         Loaded by FullTrace, Scan-Stutter-Events and
-                         the tests. Not run directly.                     (n/a)
+                         Loaded by FullTrace, Scan-Stutter-Events,
+                         GamePerf's recorder and the tests. Not run
+                         directly.                                        (n/a)
 RaceQuiet-Common.ps1     Shared elevate / log / privilege / SYSTEM-hop
                          helpers for Pre-Race-Quiet and Post-Race-Restore.(n/a)
 Create-Launchers.ps1     Make a .lnk next to every .ps1 (admin ones auto-elevate). (no admin)

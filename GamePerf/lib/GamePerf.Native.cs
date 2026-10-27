@@ -1006,6 +1006,14 @@ namespace GamePerf.Native
         public bool[] Dropped;
         public string PresentMode = "";
         public int SyncInterval = -1;
+        // SteamVR compositor frames (VrFrameLog). Every frame time is a whole
+        // number of headset refreshes, so a frame that misses by 1 ms shows
+        // up as a doubled interval - FrameAnalyzer judges those against the
+        // budget, not against the doubled interval.
+        public bool Vsynced;
+        public int[] Presents, Mispresented, CompDropped, Flags;
+        public double[] TotalGpu, CompGpu, CompIdle;
+        public int OtherSceneFrames;
     }
 
     public static class FrameLog
@@ -1108,6 +1116,254 @@ namespace GamePerf.Native
                 string line;
                 while ((line = sr.ReadLine()) != null) if (line.Length > 0) yield return line;
             }
+        }
+    }
+
+    // ================================================================
+    //  SteamVR compositor frames  (vr-frames.csv)
+    // ================================================================
+    //  The kit's scripts\SteamVR-Timing.ps1 owns the OpenVR connection (a
+    //  Background client: it never starts SteamVR, never takes the scene)
+    //  and the 1 Hz vr_* columns. VrFrameWriter keeps every frame on top of
+    //  that: the compositor remembers only its last 128 frames, so the
+    //  logger hands over a GetFrameTimings buffer twice a second and only
+    //  the frames not yet written are kept.
+    //
+    //  Offsets are the Windows x64 Compositor_FrameTiming from openvr.h -
+    //  the ones the kit decodes, plus the pose / submit timestamps:
+    //    4 frame index   8 presents   12 mispresented   16 dropped   20 flags
+    //   24 system time (double)   32 pre-submit GPU   36 post-submit GPU
+    //   40 total render GPU   44 compositor GPU   48 compositor CPU
+    //   52 compositor idle   56 client frame interval   68 Submit time
+    //   76 new poses ready   80 new frame ready (last Submit)   180 vsyncs to view
+    public sealed class VrFrameWriter : IDisposable
+    {
+        public const string Header = "frame,t_s,interval_ms,app_gpu_ms,app_cpu_ms,total_gpu_ms,comp_gpu_ms,comp_cpu_ms,comp_idle_ms,submit_ms,presents,mispresented,dropped,reproj_flags,vsyncs_to_view,scene_pid";
+        const double Plausible = 250.0;
+        readonly FileStream _fs;
+        readonly double _qpcStartSeconds;
+        long _last = -1;
+        double _offset = double.NaN;     // session seconds = compositor system time + _offset
+        public long Written, Missing, Rejected, Resets;
+        public string TimeBase = "";
+        public string Path;
+
+        public VrFrameWriter(string path, double qpcStartSeconds)
+        {
+            Path = path;
+            _qpcStartSeconds = qpcStartSeconds;
+            _fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            Write(Header + "\r\n");
+        }
+
+        // Every cell is a number, so ASCII is the whole encoding (and there is no BOM).
+        void Write(string text)
+        {
+            byte[] b = Encoding.ASCII.GetBytes(text);
+            _fs.Write(b, 0, b.Length);
+            _fs.Flush();
+        }
+
+        static float F(byte[] b, int o) { return BitConverter.ToSingle(b, o); }
+        static string N(double v) { return (double.IsNaN(v) || double.IsInfinity(v)) ? "" : v.ToString("0.###", CultureInfo.InvariantCulture); }
+        static bool Ok(double v) { return !double.IsNaN(v) && v >= 0 && v <= Plausible; }
+
+        /// <summary>
+        /// Append the frames in buf (count frames of `size` bytes) that are
+        /// newer than the last one written. sessionNow and qpcNowSeconds are
+        /// "now" on the logger's clock; scenePid is the compositor's scene app.
+        /// Returns the number of frames written.
+        /// </summary>
+        public int Add(byte[] buf, int size, int count, double sessionNow, double qpcNowSeconds, int scenePid)
+        {
+            if (buf == null || size < 96 || count <= 0) return 0;
+            count = Math.Min(count, buf.Length / size);
+            List<int> order = new List<int>(count);
+            List<long> idx = new List<long>(count);
+            for (int i = 0; i < count; i++) { order.Add(i); idx.Add(BitConverter.ToUInt32(buf, i * size + 4)); }
+            order.Sort(delegate(int a, int b) { return idx[a].CompareTo(idx[b]); });
+            if (order.Count == 0) return 0;
+            long newest = idx[order[order.Count - 1]];
+            double newestTime = BitConverter.ToDouble(buf, order[order.Count - 1] * size + 24);
+            if (_last >= 0 && newest + 1000 < _last) { _last = -1; _offset = double.NaN; Resets++; }   // SteamVR restarted
+            if (_last >= 0 && newest <= _last) return 0;   // nothing new (and the newest frame may be stale)
+
+            // Clock: the compositor's system time is QPC seconds on Windows. Check
+            // that rather than assume it; otherwise anchor it to "now".
+            if (newestTime > 0)
+            {
+                if (double.IsNaN(_offset))
+                {
+                    if (Math.Abs(newestTime - qpcNowSeconds) < 2.0) { _offset = -_qpcStartSeconds; TimeBase = "qpc"; }
+                    else { _offset = sessionNow - newestTime; TimeBase = "anchored"; }
+                }
+                else if (Math.Abs(newestTime + _offset - sessionNow) > 2.0) { _offset = sessionNow - newestTime; TimeBase = "anchored"; }
+            }
+
+            int wrote = 0;
+            StringBuilder sb = new StringBuilder(160 * order.Count);
+            foreach (int i in order)
+            {
+                long index = idx[i];
+                if (_last >= 0 && index <= _last) continue;
+                if (_last >= 0 && index > _last + 1) Missing += index - _last - 1;
+                _last = index;
+                int o = i * size;
+                double sys = BitConverter.ToDouble(buf, o + 24);
+                double pre = F(buf, o + 32), post = F(buf, o + 36), total = F(buf, o + 40), compG = F(buf, o + 44), compC = F(buf, o + 48);
+                double idle = F(buf, o + 52), interval = F(buf, o + 56), submit = F(buf, o + 68);
+                if (!(sys > 0 && sys < 1e12) || !Ok(pre) || !Ok(total) || !Ok(compG) || !Ok(compC) || !Ok(interval) || !Ok(submit)) { Rejected++; continue; }
+                // 0 = the compositor ran without a scene app calling WaitGetPoses: not a frame of the game.
+                if (interval <= 0) continue;
+                double appCpu = double.NaN;
+                double posesReady = F(buf, o + 76), frameReady = F(buf, o + 80);
+                double d = frameReady - posesReady;
+                if (!double.IsNaN(d) && d > 0 && d < Plausible) appCpu = d;
+                double appGpu = pre + (Ok(post) ? post : 0);
+                uint vsyncs = size >= 184 ? BitConverter.ToUInt32(buf, o + 180) : 0;
+                sb.Append(index.ToString(CultureInfo.InvariantCulture)).Append(',')
+                  .Append(N(double.IsNaN(_offset) ? double.NaN : sys + _offset)).Append(',')
+                  .Append(N(interval)).Append(',').Append(N(appGpu)).Append(',').Append(N(appCpu)).Append(',')
+                  .Append(N(total)).Append(',').Append(N(compG)).Append(',').Append(N(compC)).Append(',')
+                  .Append(N(Ok(idle) ? idle : double.NaN)).Append(',').Append(N(submit)).Append(',')
+                  .Append(BitConverter.ToUInt32(buf, o + 8).ToString(CultureInfo.InvariantCulture)).Append(',')
+                  .Append(BitConverter.ToUInt32(buf, o + 12).ToString(CultureInfo.InvariantCulture)).Append(',')
+                  .Append(BitConverter.ToUInt32(buf, o + 16).ToString(CultureInfo.InvariantCulture)).Append(',')
+                  .Append(BitConverter.ToUInt32(buf, o + 20).ToString(CultureInfo.InvariantCulture)).Append(',')
+                  .Append(vsyncs.ToString(CultureInfo.InvariantCulture)).Append(',')
+                  .Append(scenePid.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+                wrote++;
+            }
+            if (wrote > 0) Write(sb.ToString());
+            Written += wrote;
+            return wrote;
+        }
+
+        public void Dispose() { try { _fs.Dispose(); } catch (Exception) { } }
+    }
+
+    /// <summary>SteamVR's own view of a session: what the compositor did with the frames.</summary>
+    public sealed class VrStats
+    {
+        public int Frames, Reprojected, ReprojCpu, ReprojGpu, Motion, Repeated, Throttled, DroppedFrames;
+        public long CompDropped, Mispresented;
+        public double AppGpuP50 = double.NaN, AppGpuP90 = double.NaN, AppGpuP99 = double.NaN;
+        public double AppCpuP50 = double.NaN, AppCpuP90 = double.NaN;
+        public double TotalGpuP90 = double.NaN, CompGpuAvg = double.NaN, CompGpuP90 = double.NaN, CompIdleAvg = double.NaN;
+    }
+
+    public static class VrFrameLog
+    {
+        // Reprojection flags on the app-facing Compositor_FrameTiming (openvr.h).
+        // 0x04 only says asynchronous reprojection is enabled, not that it happened.
+        public const int FlagCpu = 0x01, FlagGpu = 0x02, FlagMotion = 0x08, FlagThrottle = 0xF00;
+
+        /// <summary>
+        /// Load vr-frames.csv. Only the game's frames are kept: the scene app
+        /// that matches gamePid, else the scene app with the most frames
+        /// (SteamVR Home and the dashboard also render through the compositor).
+        /// </summary>
+        public static FrameData Load(string path, int gamePid)
+        {
+            FrameData d = new FrameData();
+            d.File = path;
+            d.Vsynced = true;
+            d.FtColumn = "interval_ms"; d.GpuBusyColumn = "app_gpu_ms"; d.CpuBusyColumn = "app_cpu_ms";
+            CsvTable t = CsvTable.Load(path);
+            if (!t.Has("interval_ms")) return d;
+            double[] ft = t.Num("interval_ms"), ts = t.Num("t_s"), pid = t.Num("scene_pid");
+            Dictionary<int, int> perPid = new Dictionary<int, int>();
+            for (int i = 0; i < ft.Length; i++)
+            {
+                if (double.IsNaN(ft[i]) || ft[i] <= 0) continue;
+                int p = double.IsNaN(pid[i]) ? 0 : (int)pid[i];
+                int n; perPid.TryGetValue(p, out n); perPid[p] = n + 1;
+            }
+            int keep = -1, best = -1;
+            if (gamePid > 0 && perPid.ContainsKey(gamePid) && perPid[gamePid] >= 20) keep = gamePid;
+            else foreach (KeyValuePair<int, int> kv in perPid) if (kv.Value > best) { best = kv.Value; keep = kv.Key; }
+            d.ProcessId = keep;
+            d.SwapChains = perPid.Count;
+            d.Application = keep > 0 ? "scene app pid " + keep.ToString(CultureInfo.InvariantCulture) : "";
+
+            double[] gpu = t.Num("app_gpu_ms"), cpu = t.Num("app_cpu_ms"), total = t.Num("total_gpu_ms"), compG = t.Num("comp_gpu_ms"), idle = t.Num("comp_idle_ms");
+            double[] pres = t.Num("presents"), mis = t.Num("mispresented"), drop = t.Num("dropped"), flags = t.Num("reproj_flags");
+            List<int> rows = new List<int>(ft.Length);
+            List<double> times = new List<double>(ft.Length);
+            double lastT = double.NaN;
+            for (int i = 0; i < ft.Length; i++)
+            {
+                if (double.IsNaN(ft[i]) || ft[i] <= 0) continue;
+                int p = double.IsNaN(pid[i]) ? 0 : (int)pid[i];
+                if (p != keep) { d.OtherSceneFrames++; continue; }
+                if (double.IsNaN(ts[i])) continue;
+                // Time must never run backwards (the analysis binary-searches it):
+                // a clock re-anchor mid-session is clamped, not reordered.
+                double tv = ts[i];
+                if (!double.IsNaN(lastT) && tv < lastT) tv = lastT;
+                lastT = tv;
+                rows.Add(i); times.Add(tv);
+            }
+            int c = rows.Count;
+            d.Count = c;
+            d.Qpc = new long[c]; d.TimeS = new double[c]; d.Ft = new double[c]; d.GpuBusy = new double[c]; d.CpuBusy = new double[c];
+            d.CpuWait = new double[c]; d.DisplayChange = new double[c]; d.Dropped = new bool[c];
+            d.Presents = new int[c]; d.Mispresented = new int[c]; d.CompDropped = new int[c]; d.Flags = new int[c];
+            d.TotalGpu = new double[c]; d.CompGpu = new double[c]; d.CompIdle = new double[c];
+            bool anyCpu = false;
+            for (int k = 0; k < c; k++)
+            {
+                int i = rows[k];
+                d.TimeS[k] = times[k]; d.Ft[k] = ft[i]; d.GpuBusy[k] = gpu[i]; d.CpuBusy[k] = cpu[i];
+                if (!double.IsNaN(cpu[i])) anyCpu = true;
+                d.CpuWait[k] = double.NaN; d.DisplayChange[k] = double.NaN;
+                d.Presents[k] = double.IsNaN(pres[i]) ? 1 : (int)pres[i];
+                d.Mispresented[k] = double.IsNaN(mis[i]) ? 0 : (int)mis[i];
+                d.CompDropped[k] = double.IsNaN(drop[i]) ? 0 : (int)drop[i];
+                d.Flags[k] = double.IsNaN(flags[i]) ? 0 : (int)flags[i];
+                d.Dropped[k] = d.CompDropped[k] > 0;
+                d.TotalGpu[k] = total[i]; d.CompGpu[k] = compG[i]; d.CompIdle[k] = idle[i];
+            }
+            d.HasTime = c > 0; d.HasQpc = false; d.HasGpuBusy = c > 0; d.HasCpuBusy = anyCpu; d.HasCpuWait = false; d.HasDisplay = c > 0;
+            d.PresentMode = "SteamVR compositor";
+            return d;
+        }
+
+        /// <summary>SteamVR's counters over frames [start, Count), loading frames (over 1 s) excluded.</summary>
+        public static VrStats Summarize(FrameData d, int start)
+        {
+            VrStats s = new VrStats();
+            if (d == null || d.Presents == null) return s;
+            List<double> g = new List<double>(), c = new List<double>(), tg = new List<double>(), cg = new List<double>(), idle = new List<double>();
+            for (int i = Math.Max(0, start); i < d.Count; i++)
+            {
+                if (d.Ft[i] > 1000) continue;
+                s.Frames++;
+                int f = d.Flags[i];
+                bool cpuR = (f & FlagCpu) != 0, gpuR = (f & FlagGpu) != 0, mot = (f & FlagMotion) != 0;
+                if (cpuR) s.ReprojCpu++;
+                if (gpuR) s.ReprojGpu++;
+                if (mot) s.Motion++;
+                if ((f & FlagThrottle) != 0) s.Throttled++;
+                if (d.Presents[i] > 1) s.Repeated++;
+                // The kit's rule (SteamVR-Timing.ps1): shown more than once, or a reprojection flag set.
+                if (d.Presents[i] > 1 || cpuR || gpuR || mot) s.Reprojected++;
+                s.Mispresented += d.Mispresented[i];
+                s.CompDropped += d.CompDropped[i];
+                if (d.CompDropped[i] > 0) s.DroppedFrames++;
+                if (!double.IsNaN(d.GpuBusy[i])) g.Add(d.GpuBusy[i]);
+                if (!double.IsNaN(d.CpuBusy[i])) c.Add(d.CpuBusy[i]);
+                if (!double.IsNaN(d.TotalGpu[i])) tg.Add(d.TotalGpu[i]);
+                if (!double.IsNaN(d.CompGpu[i])) cg.Add(d.CompGpu[i]);
+                if (!double.IsNaN(d.CompIdle[i])) idle.Add(d.CompIdle[i]);
+            }
+            double[] gs = Stats.SortedFinite(g.ToArray()), cs = Stats.SortedFinite(c.ToArray()), ts = Stats.SortedFinite(tg.ToArray()), cgs = Stats.SortedFinite(cg.ToArray());
+            s.AppGpuP50 = Stats.Percentile(gs, 50); s.AppGpuP90 = Stats.Percentile(gs, 90); s.AppGpuP99 = Stats.Percentile(gs, 99);
+            s.AppCpuP50 = Stats.Percentile(cs, 50); s.AppCpuP90 = Stats.Percentile(cs, 90);
+            s.TotalGpuP90 = Stats.Percentile(ts, 90);
+            s.CompGpuAvg = Stats.Mean(cgs); s.CompGpuP90 = Stats.Percentile(cgs, 90);
+            s.CompIdleAvg = Stats.Mean(idle.ToArray());
+            return s;
         }
     }
 
@@ -1440,7 +1696,7 @@ namespace GamePerf.Native
         {
             FrameAnalysis a = new FrameAnalysis();
             List<double> T = new List<double>(), F = new List<double>(), G = new List<double>(), C = new List<double>();
-            bool anyGpu = false, anyCpu = false;
+            bool anyGpu = false, anyCpu = false, vsynced = false;
             for (int s = 0; s < data.Length; s++)
             {
                 FrameData d = data[s];
@@ -1448,6 +1704,7 @@ namespace GamePerf.Native
                 a.Segments++;
                 anyGpu |= d.HasGpuBusy;
                 anyCpu |= d.HasCpuBusy;
+                vsynced |= d.Vsynced;
                 int st = Math.Max(0, Math.Min(d.Count, starts[s]));
                 a.ExcludedFrames += st;
                 List<double> segFt = new List<double>(), segT = new List<double>(), segG = new List<double>(), segC = new List<double>();
@@ -1469,8 +1726,9 @@ namespace GamePerf.Native
                     if (si.Ft >= Math.Max(50.0, si.Median * 3.0)) a.MajorStutters++;
                     if (!double.IsNaN(si.GpuBusy))
                     {
-                        if (si.GpuBusy >= 0.8 * si.Ft) { si.Kind = "gpu"; a.StutterGpu++; }
-                        else if (!double.IsNaN(si.CpuBusy) && si.CpuBusy >= 0.7 * si.Ft) { si.Kind = "cpu"; a.StutterCpu++; }
+                        double sref = Reference(si.Ft, budgetMs, d.Vsynced);
+                        if (si.GpuBusy >= 0.8 * sref) { si.Kind = "gpu"; a.StutterGpu++; }
+                        else if (!double.IsNaN(si.CpuBusy) && si.CpuBusy >= 0.7 * sref) { si.Kind = "cpu"; a.StutterCpu++; }
                         else { si.Kind = "stall"; a.StutterStall++; }
                     }
                     if (a.Stutters.Count < MaxStoredStutters) a.Stutters.Add(si);
@@ -1513,12 +1771,27 @@ namespace GamePerf.Native
                 a.Classified++;
                 double c = a.Cpu[i];
                 bool missed = budgetMs > 0 && ft > budgetMs * 1.25;
-                if (g >= 0.9 * ft) { a.GpuBound++; if (missed) a.MissedGpuBound++; }
-                else if (!double.IsNaN(c) && c >= 0.85 * ft) { a.CpuBound++; if (missed) a.MissedCpuSide++; }
+                double r = Reference(ft, budgetMs, vsynced);
+                if (g >= 0.9 * r) { a.GpuBound++; if (missed) a.MissedGpuBound++; }
+                else if (!double.IsNaN(c) && c >= 0.85 * r) { a.CpuBound++; if (missed) a.MissedCpuSide++; }
                 else if (budgetMs > 0 && ft <= budgetMs * 1.15) a.Capped++;
                 else { a.CpuBound++; if (missed) a.MissedCpuSide++; }
             }
             return a;
+        }
+
+        /// <summary>
+        /// What "busy for the whole frame" is measured against. Normally the
+        /// frame time. On a vsynced source (the SteamVR compositor) a frame
+        /// that misses its refresh is held to the next one, so a GPU that took
+        /// 12 ms at 90 Hz shows a 22.2 ms frame: against the frame time it
+        /// would look idle half the frame; against the 11.1 ms budget it is
+        /// what made the frame late.
+        /// </summary>
+        public static double Reference(double ft, double budgetMs, bool vsynced)
+        {
+            if (vsynced && budgetMs > 0 && ft > budgetMs) return budgetMs;
+            return ft;
         }
     }
 }
