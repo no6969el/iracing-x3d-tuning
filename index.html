@@ -552,6 +552,7 @@
       <p><b>Fixes (each reversible):</b> Enable-GlobalTimerResolution (<code>GlobalTimerResolutionRequests=1</code> under <code>HKLM\...\Session Manager\kernel</code>), Set-GPU-IRQ-Affinity (DevicePolicy=4 + AssignmentSetOverride on the display adapter — NVIDIA, AMD or Intel), Set-NIC-USB-IRQ-Affinity (same, PCI NICs + USB hosts, spread over cores <b data-cpu="nic">17–19</b>), Add-Defender-Exclusions, Apply-Guide-Extras (USB suspend, Game Bar/DVR), Pre-Race-Quiet / Post-Race-Restore (Update/Search tasks + services, optional Defender realtime — needs Tamper Protection off), Repair-PerfCounters (lodctr /R both arches + WMIADAP), Enable-DiagnosticLogs.</p>
       <p><b>HAGS</b> (Hardware-Accelerated GPU Scheduling) is deliberately not scripted — it's a genuine toss-up on newer cards. Test both ways.</p>
       <p>Full inventory with admin flags: <span class="file">scripts\README.txt</span> · <a href="https://github.com/no6969el/iracing-x3d-tuning/tree/main/scripts">browse the source</a>.</p>
+      <p><b>Free VR resolution preview:</b> <span class="file">Start-Tuning-Menu.bat</span> → VR RESOLUTION PREVIEW. An OpenXR scene for headset render scales from 100% to 300% (SteamVR-style pixel percent), with MSAA and an A/B flip. Leave SteamVR's per-app resolution for <span class="file">vr-res-preview.exe</span> at 100%. The Windows build is the <span class="file">vr-res-preview-win64</span> Actions artifact; unzip it into <span class="file">tools\vr-res-preview\dist</span>. Controls are in that folder's README.</p>
     </div>
   </details>
 

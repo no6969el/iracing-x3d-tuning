@@ -1,0 +1,46 @@
+name: VR resolution preview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/vr-res-preview/**"
+      - ".github/workflows/vr-res-preview.yml"
+  pull_request:
+    paths:
+      - "tools/vr-res-preview/**"
+      - ".github/workflows/vr-res-preview.yml"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S tools/vr-res-preview -B tools/vr-res-preview/build -A x64
+
+      - name: Build
+        run: cmake --build tools/vr-res-preview/build --config Release --parallel
+
+      - name: Smoke
+        run: tools/vr-res-preview/build/bin/Release/vr-res-preview.exe --smoke
+
+      - name: Stage
+        shell: pwsh
+        run: |
+          $bin = "tools/vr-res-preview/build/bin/Release"
+          if (-not (Test-Path "$bin/vr-res-preview.exe")) { throw "vr-res-preview.exe was not produced" }
+          $stage = "dist/vr-res-preview-win64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "$bin/vr-res-preview.exe" $stage
+          Copy-Item "tools/vr-res-preview/README.md" $stage
+          Get-ChildItem $bin -Filter *.dll -ErrorAction SilentlyContinue | Copy-Item -Destination $stage
+          Get-ChildItem $stage | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vr-res-preview-win64
+          path: dist/vr-res-preview-win64/
+          if-no-files-found: error

@@ -88,3 +88,10 @@ $dupes = [regex]::Matches($xamlText, 'x:Name="([^"]+)"') |
          ForEach-Object { $_.Groups[1].Value } | Group-Object | Where-Object Count -gt 1
 if ($dupes) { "FAIL: duplicate x:Name -> " + (($dupes | ForEach-Object { $_.Name }) -join ', '); exit 1 }
 "OK: no duplicate x:Name values"
+
+# The free VR resolution preview is a main-menu launch, not a buried script.
+if (-not $names.ContainsKey('BtnVrPreview')) { "FAIL: BtnVrPreview missing from XAML"; exit 1 }
+if ($names['BtnVrPreview'] -ne 'Button') { "FAIL: BtnVrPreview is not a Button"; exit 1 }
+if ($src -notmatch 'FindName\("BtnVrPreview"\)\.Add_Click') { "FAIL: BtnVrPreview has no click handler"; exit 1 }
+if ($src -notmatch 'Launch-VrResPreview\.ps1') { "FAIL: VR preview launcher is not referenced"; exit 1 }
+"OK: VR resolution preview button is wired"

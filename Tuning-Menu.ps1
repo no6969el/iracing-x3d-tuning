@@ -120,6 +120,8 @@ $XAML = @"
                 <TextBlock Style="{StaticResource Hint}" Text="Applies the proven baseline fixes, guided end to end."/>
                 <Button x:Name="BtnTroubleshoot" Content="2) TROUBLESHOOT A STUTTER" ToolTip="Record a race and pinpoint what caused a hitch."/>
                 <Button x:Name="BtnEachRace" Content="3) EACH-RACE ROUTINE" ToolTip="Quiet the PC before you race; restore after."/>
+                <Button x:Name="BtnVrPreview" Content="VR RESOLUTION PREVIEW   (free headset test)" Background="#1A2744" BorderBrush="#64B5F6" ToolTip="See render resolutions a sim cannot hold. Leave SteamVR's per-app setting for this test at 100%."/>
+                <TextBlock Style="{StaticResource Hint}" Text="OpenXR scene with its own 100-300% scale, MSAA, and an A/B flip. Changes no PC setting. The Windows build goes in tools\vr-res-preview\dist."/>
                 <Button x:Name="BtnAdvanced" Content="ADVANCED TOOLS / UNDO" ToolTip="Run or undo individual fixes. Most people don't need this."/>
                 <Button x:Name="BtnHelp" Content="HELP  /  WHAT DO I NEED FIRST" Background="#15303A" BorderBrush="#3EA6FF" ToolTip="What each step does, and the free app you need."/>
                 <Grid Margin="0,15,0,0">
@@ -280,6 +282,7 @@ $XAML = @"
                 <TextBlock Foreground="#CCCCCC" FontSize="13" TextWrapping="Wrap" Margin="0,6,0,0"><Run FontWeight="Bold" Foreground="White">GPU-IRQ-Affinity</Run> - moves GPU interrupts off the sim's core (needs reboot).</TextBlock>
                 <TextBlock Foreground="#CCCCCC" FontSize="13" TextWrapping="Wrap" Margin="0,6,0,0"><Run FontWeight="Bold" Foreground="White">Pre / Post-Race</Run> - pause background scans before a race, restore after.</TextBlock>
                 <TextBlock Foreground="#CCCCCC" FontSize="13" TextWrapping="Wrap" Margin="0,6,0,0"><Run FontWeight="Bold" Foreground="White">Am I race-ready?</Run> - checks if the pre-race quieting is active right now.</TextBlock>
+                <TextBlock Foreground="#CCCCCC" FontSize="13" TextWrapping="Wrap" Margin="0,6,0,0"><Run FontWeight="Bold" Foreground="White">VR Resolution Preview</Run> - free headset test of 100% to 300% render scale. Leave SteamVR's resolution for that program at 100%.</TextBlock>
                 <TextBlock Foreground="#888888" FontSize="12" TextWrapping="Wrap" Margin="0,10,0,0" Text="Full details, including the iRacing and NVIDIA settings, are in the Web Guide."/>
                 <Button x:Name="BtnBackFromHelp" Content="Back to Main Menu" Background="#1E1E1E" Margin="0,15,0,0"/>
             </StackPanel>
@@ -429,6 +432,15 @@ $Window.FindName("BtnOptimize").Add_Click({ Show-Page 'PageOptimize' })
 $Window.FindName("BtnTroubleshoot").Add_Click({ Show-Page 'PageTroubleshoot' })
 $Window.FindName("BtnEachRace").Add_Click({ Show-Page 'PageEachRace' })
 $Window.FindName("BtnAdvanced").Add_Click({ Show-Page 'PageAdvanced' })
+$Window.FindName("BtnVrPreview").Add_Click({
+    $launcher = Join-Path $Root 'tools\vr-res-preview\Launch-VrResPreview.ps1'
+    if (-not (Test-Path $launcher)) {
+        [System.Windows.MessageBox]::Show("tools\vr-res-preview\Launch-VrResPreview.ps1 is missing. Re-download the kit so the tools folder is next to this menu.","VR Resolution Preview")
+        return
+    }
+    . $launcher
+    Start-VrResPreview
+})
 $Window.FindName("BtnHelp").Add_Click({ Show-Page 'PageHelp' })
 $Window.FindName("BtnChip").Add_Click({ Show-Page 'PageChip' })
 $Window.FindName("BtnBackFromChip").Add_Click({ Show-Page 'PageMain' })
