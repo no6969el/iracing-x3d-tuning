@@ -6,6 +6,36 @@ The project ships as a script kit plus a web guide at
 
 ---
 
+## v3.4.0 — SteamVR frame timing, no RTSS required for FPS
+
+`FullTrace.ps1` reads compositor frame timing from SteamVR as a Background
+OpenVR client (`scripts/SteamVR-Timing.ps1`). MSI Afterburner / RTSS is no
+longer required for framerate or frame time.
+
+- **SteamVR must already be running.** The logger will not start it, will not
+  take scene focus, and will not submit frames. If `vrserver` / `vrcompositor`
+  are not running, the new columns stay blank and the rest of the CSV is
+  unchanged. `-NoSteamVr` skips the client.
+- **OpenVR and OpenXR.** Both of iRacing's VR modes submit through the SteamVR
+  compositor on a rig where SteamVR is the OpenXR runtime (including a Pimax
+  on the sBOYS driver), so the columns mean the same thing in either mode.
+- **Afterburner stays optional.** `gpu_fps` and `gpu_frametime_ms` still prefer
+  Afterburner when it has them. SteamVR fills whichever of the two was blank.
+  `gpu_timing_source` records `afterburner`, `steamvr`, or `afterburner+steamvr`.
+  Voltage, fan, memory temperature and limiter flags are unchanged.
+- **Columns are appended** after `fb_usage_pct`. The original 39 stay in order.
+  Hard-fault columns are still appended after the VR columns.
+- **`Scan-Stutter-Events`** flags `DROPPED`, `LATE`, `REPROJ` and `MISPRESENT`
+  seconds. Steady reprojection is not treated as a spike.
+- **Preflight** reports whether SteamVR is already running. It does not start it.
+- **Frame timing is read without `@()` around the parser.** A unary-comma return wrapped in `@()` is a one-element array of the frame list, so every timing column stayed blank on a live headset. `vr_frametime_ms` stays blank when the compositor is idle (interval 0) instead of logging a 0 ms frame.
+
+The history buffer is 128 frames. At 72 / 90 / 120 Hz that is a full second.
+Above that, `vr_fps` still counts every frame index; the averages cover the
+newest 128.
+
+---
+
 ## v3.3.2 — cleanup, CrowdDetail docs, stutter scan fix
 
 ### Cleanup — shared modules and docs wording

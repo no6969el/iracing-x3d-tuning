@@ -1,5 +1,5 @@
 <#
-    Pre-Race-Quiet.ps1                                    v3.3.2
+    Pre-Race-Quiet.ps1                                    v3.4.0
     ================================================================
     Quiets Windows Update / Store / Search noise for a race session.
     By default it also unlocks WaaSMedicSvc when that service's
@@ -650,8 +650,8 @@ $NoisyApps = @(
     @{ Name='lghub';          Safe=$false; Why='wheelbase software - may hold your FFB profile' },
     @{ Name='lghub_agent';    Safe=$false; Why='wheelbase software - may hold your FFB profile' },
     @{ Name='RaceHub';        Safe=$false; Why='wheelbase software - may hold your FFB profile' },
-    @{ Name='MSIAfterburner'; Safe=$false; Why='monitoring - you may want its overlay' },
-    @{ Name='RTSS';           Safe=$false; Why='frame limiter - closing it can change your frame pacing' },
+    @{ Name='MSIAfterburner'; Safe=$false; Why='optional voltage/fan/limits - FullTrace FPS no longer needs it' },
+    @{ Name='RTSS';           Safe=$false; Why='optional limiter - FullTrace FPS now comes from SteamVR' },
     @{ Name='HWiNFO64';       Safe=$false; Why='monitoring - you may be logging with it' }
 )
 # One process enumeration instead of 21 separate Get-Process calls.

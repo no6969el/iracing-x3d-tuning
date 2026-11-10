@@ -1,4 +1,4 @@
-iRacing X3D Tuning Kit  -  v3.3.2
+iRacing X3D Tuning Kit  -  v3.4.0
 ============================================================
 This is the complete kit. Nothing to merge, nothing to configure.
 
@@ -48,6 +48,7 @@ FOLDER LAYOUT  -  keep this structure intact
       X3D-Profiles.ps1         <- shared CPU detection, don't delete
       Kit-Common.ps1           <- what gets quieted (data), don't delete
       HardFault-Common.ps1     <- hard-fault helpers for FullTrace
+      SteamVR-Timing.ps1       <- compositor FPS / frame time for FullTrace
       RaceQuiet-Common.ps1     <- shared elevate/log helpers for quiet/restore
       README.txt               <- what every script does
   tests\                       <- development only, safe to delete
@@ -97,6 +98,13 @@ IF WINDOWS BLOCKS THE SCRIPTS
   rare. If SmartScreen blocks a .bat after downloading, right-click
   the ZIP -> Properties -> tick Unblock, THEN extract. Doing it on the
   zip handles every file at once.
+
+WHAT CHANGED IN v3.4.0
+  FullTrace reads FPS and frame time from SteamVR, so RTSS / Afterburner
+  is no longer required for those. Start SteamVR yourself before the
+  logger (or while it is running). The script will not start SteamVR
+  for you. If it is not running, the vr_* columns stay blank and the
+  rest of the CSV still logs. Details and units are in README.md.
 
 WHAT CHANGED IN v3.3.0
   Everything the kit disables now lives in ONE file, scripts\Kit-Common.ps1.

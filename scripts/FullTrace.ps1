@@ -133,21 +133,44 @@
     it: raised tot_dpc/tot_int, a real hardfaults_s spike, or a GPU
     util collapse.
 
-    Afterburner-sourced sensors (voltage, mem temp, fps, limit flags,
+    Afterburner-sourced sensors (voltage, mem temp, limit flags,
     fan rpm) need MSI Afterburner running. Anything your card doesn't
-    expose stays blank - the rest still logs.
+    expose stays blank - the rest still logs. Framerate does not:
+    see SteamVR below.
 
-    CSV columns are unchanged from v1, so old and new traces open in
-    the same spreadsheet.
+    ---------------------------------------------------------------
+    STEAMVR FRAME TIMING  (kit 3.4.0)
+    ---------------------------------------------------------------
+    gpu_fps and gpu_frametime_ms used to come only from Afterburner's
+    shared memory, which meant running RTSS. This build reads the
+    SteamVR compositor instead, as a Background OpenVR client.
 
-    Read-only. No admin needed. Run after reboot, launch iRacing,
-    race, then Ctrl+C. CSV lands on your Desktop.
+    That works the same in iRacing's OpenVR mode and its OpenXR mode,
+    because both submit through the SteamVR compositor. The new vr_*
+    columns are the detail (app and compositor CPU/GPU time, dropped
+    and reprojected frames, refresh, render target, scene app).
+    gpu_fps / gpu_frametime_ms are filled from SteamVR when Afterburner
+    did not supply them. gpu_timing_source says which.
+
+    SteamVR must already be running. This script will not start it,
+    and it will not take scene focus. If SteamVR is not running the
+    vr_* columns stay blank and the rest of the log is unchanged.
+    -NoSteamVr skips the OpenVR client entirely.
+
+    CSV columns are appended. The original columns stay in the same
+    order, so an old reader that stops at fb_usage_pct still lines up.
+    Hard-fault columns, when present, are still appended after these.
+
+    Read-only. No admin needed. Run after reboot, start SteamVR,
+    launch iRacing, race, then Ctrl+C. CSV lands on your Desktop.
 #>
 
 [CmdletBinding()]
 param(
     # Skip the kernel hard-fault trace even if xperf and admin are available.
-    [switch]$NoHardFaultTrace
+    [switch]$NoHardFaultTrace,
+    # Do not open an OpenVR background client, even if SteamVR is running.
+    [switch]$NoSteamVr
 )
 
 $stamp = [DateTime]::Now.ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
@@ -552,9 +575,48 @@ foreach ($cand in @('clocks_throttle_reasons.active','clocks_event_reasons.activ
 }
 $GpuQuery = if ($ThrottleField) { "$GpuQueryBase,$ThrottleField" } else { $GpuQueryBase }
 
-# ---- CSV header: unchanged from v1 ------------------------------
-'timestamp,power_plan,ccd0_cpu,ccd1_cpu,busy_core,busy_pct,cpu0_int,cpu0_dpc,freqcore_int,freqcore_dpc,tot_dpc,tot_int,gpu_util,gpu_power_w,gpu_gclk,gpu_mclk,gpu_temp,gpu_throttle,sim_run,sim_cpu,sim_aff,vr_pi_cpu,hardfaults_s,free_ram_mb,gpu_volt_mv,fan_pct,mem_ctrl_util,vram_used_mb,mem_temp_c,gpu_fps,gpu_frametime_ms,pstate,volt_limit,power_limit,temp_limit,noload_limit,fan_rpm,pcie_bus_pct,fb_usage_pct' |
-    Out-File $Csv -Encoding utf8
+# ---- SteamVR compositor timing (optional, read-only) ------------
+# Dot-sourced so the parser and the CSV schema can be tested without
+# starting this logger. Missing file: the header below still names
+# the columns and the cells stay blank.
+$vrTiming = Join-Path $PSScriptRoot 'SteamVR-Timing.ps1'
+if (Test-Path -LiteralPath $vrTiming) { . $vrTiming }
+if ($NoSteamVr) { $script:SteamVrDisabled = $true }
+if (-not (Get-Command Get-SteamVrSample -ErrorAction SilentlyContinue)) {
+    $script:VrStatus = 'not-running'
+    $script:VrDetail = ''
+    $script:VrLastError = ''
+    function Get-SteamVrSample { @{} }
+    function Update-SteamVrConnection { $script:VrStatus = 'not-running'; return $false }
+    function Update-SteamVrStatic { }
+    function Disconnect-SteamVrTiming { }
+    function Resolve-GpuTimingSource {
+        param($AbFps, $AbFt, $VrFps, $VrFt)
+        $src = ''
+        if ("$AbFps" -ne '' -or "$AbFt" -ne '') { $src = 'afterburner' }
+        return @{ Fps = $AbFps; Frametime = $AbFt; Source = $src }
+    }
+    function Get-SteamVrTextColumns { return ,@('gpu_timing_source','vr_scene_app','vr_renderer','vr_hmd') }
+}
+
+# ---- CSV header -------------------------------------------------
+# Original columns, in the original order, then the SteamVR columns.
+# Hard-fault analysis appends its three columns after this on the way
+# out, so it does not care that the row got longer.
+$CsvBaseCount = 39
+$CsvHeader = 'timestamp,power_plan,ccd0_cpu,ccd1_cpu,busy_core,busy_pct,cpu0_int,cpu0_dpc,freqcore_int,freqcore_dpc,tot_dpc,tot_int,gpu_util,gpu_power_w,gpu_gclk,gpu_mclk,gpu_temp,gpu_throttle,sim_run,sim_cpu,sim_aff,vr_pi_cpu,hardfaults_s,free_ram_mb,gpu_volt_mv,fan_pct,mem_ctrl_util,vram_used_mb,mem_temp_c,gpu_fps,gpu_frametime_ms,pstate,volt_limit,power_limit,temp_limit,noload_limit,fan_rpm,pcie_bus_pct,fb_usage_pct,gpu_timing_source,vr_fps,vr_fps_presented,vr_frametime_ms,vr_frametime_max_ms,vr_app_gpu_ms,vr_app_gpu_max_ms,vr_comp_gpu_ms,vr_comp_cpu_ms,vr_gpu_ms,vr_idle_cpu_ms,vr_submit_ms,vr_over_budget,vr_reprojected,vr_reproj_cpu,vr_reproj_gpu,vr_motion,vr_dropped,vr_mispresented,vr_throttled,vr_frames,vr_hz,vr_target_w,vr_target_h,vr_res_scale,vr_predict_ms,vr_predict_extra,vr_vsync_to_photons_ms,vr_transfer_ms,vr_scene_app,vr_scene_pid,vr_renderer,vr_hmd'
+$CsvHeader | Out-File $Csv -Encoding utf8
+$vrNames = @($CsvHeader.Split(',') | Select-Object -Skip $CsvBaseCount)
+$VrText = @{}
+# Unary-comma returns. @() would nest the array and this loop would
+# see one element, the whole list, so text columns would not be quoted.
+foreach ($t in (Get-SteamVrTextColumns)) { $VrText[$t] = $true }
+if ((Get-Command Get-SteamVrColumnNames -ErrorAction SilentlyContinue)) {
+    $declared = (Get-SteamVrColumnNames) -join ','
+    if ($declared -ne ($vrNames -join ',')) {
+        Write-Host "SteamVR column list does not match the CSV header. Cells follow the header." -ForegroundColor Yellow
+    }
+}
 
 # baseline for per-process CPU delta
 $prev = @{}; Get-Process | ForEach-Object { $prev[$_.Id] = $_.CPU }; $lastT = Get-Date
@@ -570,11 +632,12 @@ $abProbe = Get-AbSensors
 #  TABLE LAYOUT
 # =================================================================
 # One format string drives both the header and every data row, so
-# they cannot drift apart. 20 fields, 130 columns.
-$Fmt = '{0,8} {1,5} {2,5} {3,9} {4,6} {5,5} {6,5} {7,5} {8,5} {9,5} {10,5} {11,5} {12,6} {13,4} {14,5} {15,5} {16,6} {17,-5} {18,6} {19,6}'
+# they cannot drift apart. VRFPS / VRms are the SteamVR summary;
+# the rest of the vr_* columns are in the CSV only.
+$Fmt = '{0,8} {1,5} {2,5} {3,9} {4,6} {5,5} {6,5} {7,5} {8,5} {9,5} {10,5} {11,5} {12,6} {13,4} {14,5} {15,5} {16,6} {17,-5} {18,6} {19,6} {20,6} {21,6}'
 
 $HeadB = $Fmt -f 'TIME','G0%','G1%','BUSIEST','PF/s','C0int','C0dpc','CNint','CNdpc','tDPC','tINT',
-                 'GPU%','GPU-W','GPUC','mV','FAN%','PCIE%','LIM','SIM%','vrCPU%'
+                 'GPU%','GPU-W','GPUC','mV','FAN%','PCIE%','LIM','SIM%','vrCPU%','VRFPS','VRms'
 $RowWidth = $HeadB.Length
 $Rule = '-' * $RowWidth
 
@@ -604,7 +667,8 @@ $HeadA = New-Band $RowWidth @(
     @{ Start = 9;   Len = 21; Label = ' CPU LOAD % ' },
     @{ Start = 38;  Len = 35; Label = ' INTERRUPT / DPC % ' },
     @{ Start = 74;  Len = 42; Label = ' GPU ' },
-    @{ Start = 117; Len = 13; Label = ' PROC % ' }
+    @{ Start = 117; Len = 13; Label = ' PROC % ' },
+    @{ Start = 131; Len = 13; Label = ' VR ' }
 )
 
 Write-Host ""
@@ -637,13 +701,40 @@ if ($CountersOK) {
 if ($abProbe.fan -ne '' -or $abProbe.voltlim -ne '' -or $abProbe.volt -ne '') {
     Write-Host "  Afterburner shared memory: CONNECTED (voltage, fan, limit flags, PCIe load)" -ForegroundColor Green
 } else {
-    Write-Host "  Afterburner shared memory: not found - start MSI Afterburner for voltage/fan/limits" -ForegroundColor Yellow
+    Write-Host "  Afterburner shared memory: not found - optional, for voltage/fan/limits only" -ForegroundColor DarkGray
+}
+if ($script:SteamVrDisabled) {
+    Write-Host "  SteamVR frame timing: off (-NoSteamVr). vr_* columns stay blank." -ForegroundColor DarkGray
+} else {
+    try { $null = Update-SteamVrConnection } catch { $script:VrStatus = 'init-failed' }
+    if ($script:VrConnected) { try { Update-SteamVrStatic } catch { } }
+    else { $script:VrBackoff = 4 }
+    switch ($script:VrStatus) {
+        'connected' {
+            $detail = $script:VrDetail
+            if ($detail) { $detail = " ($detail)" }
+            Write-Host "  SteamVR frame timing: CONNECTED$detail" -ForegroundColor Green
+            Write-Host "  Background client only - it will not steal the scene or start SteamVR." -ForegroundColor DarkGray
+        }
+        'no-dll' {
+            Write-Host "  SteamVR is running but openvr_api.dll was not found. vr_* stays blank." -ForegroundColor Yellow
+        }
+        'init-failed' {
+            $why = $script:VrLastError
+            if (-not $why) { $why = 'init failed' }
+            Write-Host "  SteamVR frame timing: not connected ($why). vr_* stays blank." -ForegroundColor Yellow
+        }
+        default {
+            Write-Host "  SteamVR is not running - vr_* stays blank. Start SteamVR yourself; this logger will not." -ForegroundColor Yellow
+        }
+    }
 }
 if (-not $ThrottleField) {
     Write-Host "  nvidia-smi throttle reasons: unavailable on this driver - gpu_throttle stays blank" -ForegroundColor DarkGray
 }
 Write-Host ""
-Write-Host "  Colour: grey normal | amber GPU power/temp limited or a single PF spike" -ForegroundColor DarkGray
+Write-Host "  Colour: grey normal | amber single PF spike | yellow GPU power/temp limited," -ForegroundColor DarkGray
+Write-Host "          or VR frames dropped / 5+ over the refresh budget" -ForegroundColor DarkGray
 Write-Host "          red = 3+ consecutive seconds above 500 hard faults/sec" -ForegroundColor DarkGray
 
 # Final width check. The buffer may be wide enough while the visible
@@ -729,13 +820,20 @@ while ($true) {
         if ($g.Count -ge 11) { $gthr=$g[10].Trim() }
     } catch {}
 
-    # ---- Afterburner sensors ----
+    # ---- Afterburner sensors, then SteamVR if those two are blank ----
     $ab = Get-AbSensors
     $fVolt = $ab.volt
     $fFan  = if ($ab.fan -ne '')     { $ab.fan }     else { $gFan }
     $fMemT = if ($ab.memtemp -ne '') { $ab.memtemp } else { $gMemT }
-    $fFps  = $ab.fps
-    $fFt   = $ab.ftime
+    $vrRow = $null
+    try { $vrRow = Get-SteamVrSample } catch { $vrRow = $null }
+    $timing = Resolve-GpuTimingSource $ab.fps $ab.ftime $vrRow.vr_fps $vrRow.vr_frametime_ms
+    $fFps = $timing.Fps
+    $fFt  = $timing.Frametime
+    if ($vrRow) { $vrRow.gpu_timing_source = $timing.Source }
+    elseif ($timing.Source) {
+        $vrRow = @{ gpu_timing_source = $timing.Source }
+    }
 
     # ---- per-process CPU delta (sim + VR) ----
     $dt=($now-$lastT).TotalSeconds; if ($dt -le 0) { $dt=1 }
@@ -765,12 +863,18 @@ while ($true) {
         try { $ram=[int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024) } catch {}
     }
 
-    # ---- write row (CSV schema identical to v1) ----
+    # ---- write row ------------------------------------------------
     # Every field goes out through Inv() or Txt() - see CSV SAFETY above.
     # The timestamp gets the invariant culture too, because ":" in a .NET
     # format string means "this culture's time separator", and that is not
-    # a colon everywhere.
-    (@(
+    # a colon everywhere. VR cells follow $vrNames, which is the tail of
+    # the header, so a new column cannot land in the wrong place.
+    $vrCells = foreach ($name in $vrNames) {
+        $val = $null
+        if ($vrRow -and $vrRow.ContainsKey($name)) { $val = $vrRow[$name] }
+        if ($VrText.ContainsKey($name)) { Txt $val } else { Inv $val }
+    }
+    ((@(
         $now.ToString('HH:mm:ss', $InvCulture)
         (Txt $plan)
         (Inv $ccd0),   (Inv $ccd1),   (Inv $busyIdx),  (Inv $busyPct)
@@ -784,7 +888,7 @@ while ($true) {
         (Inv $fMemT),  (Inv $fFps),   (Inv $fFt),      (Inv $gPstate)
         (Inv $ab.voltlim), (Inv $ab.pwrlim), (Inv $ab.templim)
         (Inv $ab.noload),  (Inv $ab.fanrpm), (Inv $ab.bus), (Inv $ab.fb)
-    ) -join ',') |
+    ) + @($vrCells)) -join ',') |
         Out-File $Csv -Append -Encoding utf8
 
     # ---- which limiter is actually holding the GPU back? ----
@@ -818,17 +922,25 @@ while ($true) {
     }
 
     $busyCell = if ($busyIdx -ne '') { "#$busyIdx $busyPct%" } else { '-' }
+    $vrFpsCell = $null; $vrGpuCell = $null; $vrDroppedN = 0; $vrOverN = 0
+    if ($vrRow) {
+        $vrFpsCell = $vrRow.vr_fps
+        $vrGpuCell = $vrRow.vr_app_gpu_ms
+        if ("$($vrRow.vr_dropped)" -ne '') { $vrDroppedN = [int]$vrRow.vr_dropped }
+        if ("$($vrRow.vr_over_budget)" -ne '') { $vrOverN = [int]$vrRow.vr_over_budget }
+    }
 
     Write-Host ($Fmt -f `
         $now.ToString('HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), (Cell $ccd0), (Cell $ccd1), $busyCell, (Cell $hf),
         (Cell $c0i), (Cell $c0d), (Cell $c16i), (Cell $c16d), (Cell $totDpc), (Cell $totInt),
         (Cell $gu), (Cell $gp), (Cell $gt), (Cell $fVolt), (Cell $fFan), (Cell $ab.bus), $lim,
-        (Cell $simPct), (Cell $piPct)) `
+        (Cell $simPct), (Cell $piPct), (Cell $vrFpsCell), (Cell $vrGpuCell)) `
         -ForegroundColor $(
-            if     ($pfStreak -ge $PF_SUSTAIN)          { 'Red' }
-            elseif ($hfNum -gt $PF_WARN)                { 'DarkYellow' }
-            elseif ($lim -eq 'PWR' -or $lim -eq 'TEMP') { 'Yellow' }
-            else                                        { 'Gray' }
+            if     ($pfStreak -ge $PF_SUSTAIN)                 { 'Red' }
+            elseif ($hfNum -gt $PF_WARN)                       { 'DarkYellow' }
+            elseif ($lim -eq 'PWR' -or $lim -eq 'TEMP')        { 'Yellow' }
+            elseif ($vrDroppedN -ge 1 -or $vrOverN -ge 5)      { 'Yellow' }
+            else                                               { 'Gray' }
         )
 
     $iter++
@@ -863,6 +975,11 @@ while ($true) {
 
 }   # end try  (opened just before the sampling loop)
 finally {
+
+# Drop the background OpenVR client before the hard-fault analysis
+# (which can take a while). Shutdown of a Background client does not
+# stop SteamVR and does not stop the game.
+try { Disconnect-SteamVrTiming } catch { }
 
 # =================================================================
 #  HARD-FAULT TRACE: STOP AND ATTRIBUTE   (v3)
